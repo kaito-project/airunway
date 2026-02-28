@@ -9,8 +9,16 @@ on:
 
 jobs:
   e2e-gateway:
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest-16-cores
+          - arch: arm64
+            runner: github-arm64-2c-8gb
 
     steps:
       - name: Checkout repository
