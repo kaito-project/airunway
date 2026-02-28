@@ -167,7 +167,8 @@ controller-test:
 	@echo "✅ Controller tests completed"
 
 # Generate deploy manifests for controller
-generate-deploy-manifests: controller/bin/kustomize
+generate-deploy-manifests:
+	cd controller && $(MAKE) kustomize
 	cd controller/config/manager && ../../bin/kustomize edit set image controller=$(CONTROLLER_IMG)
 	cd controller && bin/kustomize build config/default > ../deploy/kubernetes/controller.yaml
 	@echo "✅ Generated deploy/kubernetes/controller.yaml"

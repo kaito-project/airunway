@@ -40,7 +40,7 @@ rules:
     resources:
       - secrets
       - configmaps
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Events (needed for deployment event display)
   - apiGroups: [""]
