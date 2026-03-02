@@ -36,13 +36,12 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Secrets and ConfigMaps (needed for HF tokens, config storage)
-  # REVIEW: Uncomment "delete" to enable HuggingFace token removal
+  # Note: secret delete is scoped per-namespace via Roles below
   - apiGroups: [""]
     resources:
       - secrets
       - configmaps
     verbs: ["get", "list", "watch", "create", "update", "patch"]
-    # verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Events (needed for deployment event display)
   - apiGroups: [""]
@@ -140,6 +139,134 @@ subjects:
   - kind: ServiceAccount
     name: kubeairunway
     namespace: kubeairunway-system
+
+---
+# Namespace-scoped Roles for HuggingFace token secret management.
+# Scoped to resourceNames: ["hf-token-secret"] so the dashboard can only
+# delete this specific secret, not any other secret in these namespaces.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kubeairunway
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hf-token-secret"]
+  verbs: ["delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: kaito-workspace
+  labels:
+    app.kubernetes.io/name: kubeairunway
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hf-token-secret"]
+  verbs: ["delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: dynamo-system
+  labels:
+    app.kubernetes.io/name: kubeairunway
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hf-token-secret"]
+  verbs: ["delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: kuberay-system
+  labels:
+    app.kubernetes.io/name: kubeairunway
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hf-token-secret"]
+  verbs: ["delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kubeairunway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeairunway-hf-secret
+subjects:
+- kind: ServiceAccount
+  name: kubeairunway
+  namespace: kubeairunway-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: kaito-workspace
+  labels:
+    app.kubernetes.io/name: kubeairunway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeairunway-hf-secret
+subjects:
+- kind: ServiceAccount
+  name: kubeairunway
+  namespace: kubeairunway-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: dynamo-system
+  labels:
+    app.kubernetes.io/name: kubeairunway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeairunway-hf-secret
+subjects:
+- kind: ServiceAccount
+  name: kubeairunway
+  namespace: kubeairunway-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: kuberay-system
+  labels:
+    app.kubernetes.io/name: kubeairunway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeairunway-hf-secret
+subjects:
+- kind: ServiceAccount
+  name: kubeairunway
+  namespace: kubeairunway-system
 
 ---
 # Deployment
