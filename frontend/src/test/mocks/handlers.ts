@@ -77,6 +77,12 @@ export const mockSettings = {
       description: 'Ray-based distributed inference',
       defaultNamespace: 'kuberay',
     },
+    {
+      id: 'llmd',
+      name: 'llm-d',
+      description: 'vLLM with aggregated or disaggregated serving',
+      defaultNamespace: 'kubeairunway-system',
+    },
   ],
 }
 
@@ -210,7 +216,7 @@ export const handlers = [
   http.get(`${API_BASE}/installation/providers/:id/status`, ({ params }) => {
     return HttpResponse.json({
       providerId: params.id,
-      providerName: params.id === 'dynamo' ? 'NVIDIA Dynamo' : 'KubeRay',
+      providerName: params.id === 'dynamo' ? 'NVIDIA Dynamo' : params.id === 'llmd' ? 'LLM-D' :'KubeRay',
       installed: true,
       version: '1.0.0',
       crdFound: true,
