@@ -51,7 +51,11 @@ Open **http://localhost:3001**
 ### Option B: Deploy to Kubernetes
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/kaito-project/kubeairunway/main/deploy/kubernetes/kubeairunway.yaml
+# Install CRDs and controller (required)
+kubectl apply -f https://raw.githubusercontent.com/kaito-project/kubeairunway/main/deploy/kubernetes/controller.yaml
+
+# Install dashboard UI (optional)
+kubectl apply -f https://raw.githubusercontent.com/kaito-project/kubeairunway/main/deploy/kubernetes/dashboard.yaml
 kubectl port-forward -n kubeairunway-system svc/kubeairunway 3001:80
 ```
 

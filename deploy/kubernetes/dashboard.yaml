@@ -1,20 +1,12 @@
-# KubeAIRunway Kubernetes Deployment
-# Deploy with: kubectl apply -f kubeairunway.yaml
+# KubeAIRunway Dashboard Deployment
+# Deploy with: kubectl apply -f dashboard.yaml
+#
+# NOTE: Deploy controller.yaml first to install CRDs and the controller.
 #
 # This manifest creates:
-# - Namespace: kubeairunway-system
 # - ServiceAccount with RBAC permissions
-# - Deployment running the KubeAIRunway server
+# - Deployment running the KubeAIRunway dashboard server
 # - Service for internal cluster access
-
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kubeairunway-system
-  labels:
-    app.kubernetes.io/name: kubeairunway
-    app.kubernetes.io/part-of: kubeairunway
 
 ---
 # ServiceAccount for KubeAIRunway
@@ -44,13 +36,20 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Secrets and ConfigMaps (needed for HF tokens, config storage)
+  # Note: secret delete is scoped per-namespace via Roles below
   - apiGroups: [""]
     resources:
       - secrets
       - configmaps
     verbs: ["get", "list", "watch", "create", "update", "patch"]
 
-  # Namespaces (read + create only, no delete)
+  # Events (needed for deployment event display)
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs: ["list", "watch"]
+
+  # Namespaces (read + create)
   - apiGroups: [""]
     resources:
       - namespaces
@@ -63,11 +62,31 @@ rules:
       - replicasets
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+  # KubeAIRunway CRDs - ModelDeployments
+  - apiGroups: ["kubeairunway.ai"]
+    resources:
+      - modeldeployments
+      - modeldeployments/status
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # KubeAIRunway CRDs - InferenceProviderConfigs (read + delete for uninstall)
+  - apiGroups: ["kubeairunway.ai"]
+    resources:
+      - inferenceproviderconfigs
+    verbs: ["get", "list", "watch", "delete"]
+
+  # CRD management (needed for provider detection)
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources:
+      - customresourcedefinitions
+    verbs: ["get", "list"]
+
   # NVIDIA Dynamo CRDs
   - apiGroups: ["nvidia.com"]
     resources:
       - dynamographdeployments
       - dynamographdeployments/status
+      - clusterpolicies
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # KubeRay CRDs
@@ -78,6 +97,19 @@ rules:
       - rayclusters
       - rayclusters/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Gateway API - Gateways and HTTPRoutes (read-only for status display)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources:
+      - gateways
+      - httproutes
+    verbs: ["get", "list", "watch"]
+
+  # Gateway API Inference Extension - InferencePools (read-only for status display)
+  - apiGroups: ["inference.networking.k8s.io"]
+    resources:
+      - inferencepools
+    verbs: ["get", "list", "watch"]
 
   # Storage - for PVCs if needed
   - apiGroups: ["storage.k8s.io"]
@@ -109,6 +141,44 @@ subjects:
     namespace: kubeairunway-system
 
 ---
+# Namespace-scoped Role for HuggingFace token secret management.
+# Scoped to resourceNames: ["hf-token-secret"] so the dashboard can only
+# delete this specific secret, not any other secret in this namespace.
+#
+# For provider namespaces (kaito-workspace, dynamo-system, kuberay-system),
+# apply deploy/kubernetes/hf-secret-rbac.yaml after installing those providers.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kubeairunway
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hf-token-secret"]
+  verbs: ["delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeairunway-hf-secret
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kubeairunway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeairunway-hf-secret
+subjects:
+- kind: ServiceAccount
+  name: kubeairunway
+  namespace: kubeairunway-system
+
+---
 # Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -118,7 +188,7 @@ metadata:
   labels:
     app.kubernetes.io/name: kubeairunway
     app.kubernetes.io/instance: kubeairunway
-    app.kubernetes.io/component: server
+    app.kubernetes.io/component: dashboard
 spec:
   replicas: 1
   selector:
@@ -130,7 +200,7 @@ spec:
       labels:
         app.kubernetes.io/name: kubeairunway
         app.kubernetes.io/instance: kubeairunway
-        app.kubernetes.io/component: server
+        app.kubernetes.io/component: dashboard
     spec:
       serviceAccountName: kubeairunway
       securityContext:
@@ -140,7 +210,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: kubeairunway
-          image: ghcr.io/kaito-project/kubeairunway:latest
+          image: ghcr.io/kaito-project/kubeairunway/dashboard:latest
           imagePullPolicy: Always
           ports:
             - name: http

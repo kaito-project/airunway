@@ -1,21 +1,21 @@
 .PHONY: install dev dev-frontend dev-backend build compile lint test clean help
-.PHONY: controller-build controller-docker-build controller-install controller-deploy controller-generate
+.PHONY: controller-build controller-docker-build controller-install controller-deploy controller-generate generate-deploy-manifests
 .PHONY: kaito-provider-build kaito-provider-docker-build kaito-provider-deploy
 .PHONY: dynamo-provider-build dynamo-provider-docker-build dynamo-provider-deploy
 .PHONY: kuberay-provider-build kuberay-provider-docker-build kuberay-provider-deploy
 .PHONY: llmd-provider-build llmd-provider-docker-build llmd-provider-deploy
 
 # Controller image
-CONTROLLER_IMG ?= ghcr.io/kaito-project/kubeairunway-controller:latest
+CONTROLLER_IMG ?= ghcr.io/kaito-project/kubeairunway/controller:latest
 
 # Gateway API Inference Extension version
 GAIE_VERSION ?= v1.3.1
 
 # Provider images
-KAITO_PROVIDER_IMG ?= ghcr.io/kaito-project/kaito-provider:latest
-DYNAMO_PROVIDER_IMG ?= ghcr.io/kaito-project/dynamo-provider:latest
-KUBERAY_PROVIDER_IMG ?= ghcr.io/kaito-project/kuberay-provider:latest
-LLMD_PROVIDER_IMG ?= ghcr.io/kaito-project/llmd-provider:latest
+KAITO_PROVIDER_IMG ?= ghcr.io/kaito-project/kubeairunway/kaito-provider:latest
+DYNAMO_PROVIDER_IMG ?= ghcr.io/kaito-project/kubeairunway/dynamo-provider:latest
+KUBERAY_PROVIDER_IMG ?= ghcr.io/kaito-project/kubeairunway/kuberay-provider:latest
+LLMD_PROVIDER_IMG ?= ghcr.io/kaito-project/kubeairunway/llmd-provider:latest
 
 # Default target
 help:
@@ -44,6 +44,7 @@ help:
 	@echo "  controller-install     Install CRDs into cluster"
 	@echo "  controller-deploy      Deploy controller to cluster"
 	@echo "  controller-generate    Generate CRD manifests and code"
+	@echo "  generate-deploy-manifests  Generate deploy/kubernetes/controller.yaml"
 	@echo ""
 	@echo "Provider Targets:"
 	@echo "  kaito-provider-build          Build the KAITO provider binary"
@@ -169,6 +170,13 @@ controller-run:
 controller-test:
 	cd controller && go test ./... -coverprofile cover.out
 	@echo "✅ Controller tests completed"
+
+# Generate deploy manifests for controller
+generate-deploy-manifests:
+	cd controller && $(MAKE) kustomize
+	cd controller/config/manager && ../../bin/kustomize edit set image controller=$(CONTROLLER_IMG)
+	cd controller && bin/kustomize build config/default > ../deploy/kubernetes/controller.yaml
+	@echo "✅ Generated deploy/kubernetes/controller.yaml"
 
 # ==================== Provider Targets ====================
 
