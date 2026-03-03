@@ -131,7 +131,8 @@ CPK_PID=$!
 sleep 5
 ok "cloud-provider-kind running (PID ${CPK_PID})"
 
-# Ensure cleanup on exit
+# Kill cloud-provider-kind only on early exit (error/interrupt), not on success.
+# The trap is cleared at the end of the script so it stays running after the demo.
 trap 'kill ${CPK_PID} 2>/dev/null || true; echo ""; echo "To tear down the cluster: CLEANUP_ONLY=1 $0"' EXIT
 
 # ---------------------------------------------------------------------------
@@ -481,6 +482,10 @@ send_inference "${MODEL_B_GW_NAME}" "Model B"
 # ---------------------------------------------------------------------------
 # Step 16: Summary
 # ---------------------------------------------------------------------------
+
+# Clear the EXIT trap so cloud-provider-kind stays running after the demo
+trap - EXIT
+
 echo ""
 echo "============================================================"
 echo " 🎉 Demo Complete!"
