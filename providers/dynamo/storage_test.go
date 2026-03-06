@@ -254,6 +254,14 @@ func TestEnsurePVCsIdempotent(t *testing.T) {
 				kubeairunwayv1alpha1.LabelManagedBy:       "kubeairunway",
 				kubeairunwayv1alpha1.LabelModelDeployment: "my-model",
 			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
@@ -311,6 +319,14 @@ func TestEnsurePVCsPending(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-model-model-cache",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Status: corev1.PersistentVolumeClaimStatus{
 			Phase: corev1.ClaimPending,
@@ -473,6 +489,190 @@ func TestBuildPVCNilSize(t *testing.T) {
 	expected := "volume size must be set for controller-created PVCs"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
+	}
+}
+
+func TestEnsurePVCsStaleBound(t *testing.T) {
+	scheme := newScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	size := resource.MustParse("100Gi")
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model",
+			Namespace: "default",
+			UID:       types.UID("test-uid"),
+		},
+		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
+			Model: kubeairunwayv1alpha1.ModelSpec{
+				ID: "test-model",
+				Storage: &kubeairunwayv1alpha1.StorageSpec{
+					Volumes: []kubeairunwayv1alpha1.StorageVolume{
+						{
+							Name:       "model-cache",
+							Size:       &size,
+							AccessMode: corev1.ReadWriteMany,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Pre-create a Bound PVC owned by a previous ModelDeployment (different UID)
+	existingPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-cache",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "old-uid",
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingPVC).WithStatusSubresource(existingPVC).Build()
+
+	allReady, err := EnsurePVCs(context.Background(), c, md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allReady {
+		t.Error("expected allReady=false when stale PVC is deleted")
+	}
+
+	// Verify stale PVC was deleted
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-cache", Namespace: "default"}, pvc)
+	if err == nil {
+		t.Error("expected stale Bound PVC to be deleted")
+	}
+}
+
+func TestEnsurePVCsStalePending(t *testing.T) {
+	scheme := newScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	size := resource.MustParse("100Gi")
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model",
+			Namespace: "default",
+			UID:       types.UID("test-uid"),
+		},
+		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
+			Model: kubeairunwayv1alpha1.ModelSpec{
+				ID: "test-model",
+				Storage: &kubeairunwayv1alpha1.StorageSpec{
+					Volumes: []kubeairunwayv1alpha1.StorageVolume{
+						{
+							Name:       "model-cache",
+							Size:       &size,
+							AccessMode: corev1.ReadWriteMany,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Pre-create a Pending PVC owned by a previous ModelDeployment (different UID)
+	existingPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-cache",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "old-uid",
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimPending,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingPVC).WithStatusSubresource(existingPVC).Build()
+
+	allReady, err := EnsurePVCs(context.Background(), c, md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allReady {
+		t.Error("expected allReady=false when stale PVC is deleted")
+	}
+
+	// Verify stale PVC was deleted
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-cache", Namespace: "default"}, pvc)
+	if err == nil {
+		t.Error("expected stale Pending PVC to be deleted")
+	}
+}
+
+func TestEnsurePVCsStaleNoOwnerRef(t *testing.T) {
+	scheme := newScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	size := resource.MustParse("100Gi")
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model",
+			Namespace: "default",
+			UID:       types.UID("test-uid"),
+		},
+		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
+			Model: kubeairunwayv1alpha1.ModelSpec{
+				ID: "test-model",
+				Storage: &kubeairunwayv1alpha1.StorageSpec{
+					Volumes: []kubeairunwayv1alpha1.StorageVolume{
+						{
+							Name:       "model-cache",
+							Size:       &size,
+							AccessMode: corev1.ReadWriteMany,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Pre-create a PVC with no OwnerReferences
+	existingPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-cache",
+			Namespace: "default",
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingPVC).WithStatusSubresource(existingPVC).Build()
+
+	allReady, err := EnsurePVCs(context.Background(), c, md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allReady {
+		t.Error("expected allReady=false when stale PVC (no owner ref) is deleted")
+	}
+
+	// Verify stale PVC was deleted
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-cache", Namespace: "default"}, pvc)
+	if err == nil {
+		t.Error("expected stale PVC with no OwnerReferences to be deleted")
 	}
 }
 

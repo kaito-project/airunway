@@ -82,9 +82,9 @@ func findModelCacheVolume(md *kubeairunwayv1alpha1.ModelDeployment) *kubeairunwa
 	return nil
 }
 
-// isOwnedByMD returns true if the Job has an OwnerReference whose UID matches mdUID.
-func isOwnedByMD(job *batchv1.Job, mdUID types.UID) bool {
-	for _, ref := range job.OwnerReferences {
+// isOwnedByMD returns true if the object has an OwnerReference whose UID matches mdUID.
+func isOwnedByMD(obj client.Object, mdUID types.UID) bool {
+	for _, ref := range obj.GetOwnerReferences() {
 		if ref.UID == mdUID {
 			return true
 		}

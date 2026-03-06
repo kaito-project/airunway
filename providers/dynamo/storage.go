@@ -88,6 +88,18 @@ func EnsurePVCs(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.M
 			return false, fmt.Errorf("failed to get PVC %s: %w", claimName, err)
 		}
 
+		// Verify the existing PVC is owned by this ModelDeployment (same UID).
+		// If a ModelDeployment is deleted and recreated with the same name, there's a
+		// race window where the old PVC still exists. Delete it and requeue so the
+		// next reconcile creates a fresh PVC.
+		if !isOwnedByMD(existing, md.UID) {
+			if err := deleteStalePVC(ctx, c, existing); err != nil {
+				return false, err
+			}
+			allReady = false
+			continue // requeue → next reconcile creates fresh PVC
+		}
+
 		// PVC exists, check phase
 		switch existing.Status.Phase {
 		case corev1.ClaimBound:
@@ -151,6 +163,17 @@ func buildPVC(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwayv1alpha
 	pvc.Spec.StorageClassName = vol.StorageClassName
 
 	return pvc, nil
+}
+
+// deleteStalePVC deletes a PVC that belongs to a previous (now-deleted) ModelDeployment.
+// Tolerates NotFound in case GC already removed it.
+func deleteStalePVC(ctx context.Context, c client.Client, pvc *corev1.PersistentVolumeClaim) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Deleting stale PVC (owner UID mismatch)", "name", pvc.Name)
+	if err := c.Delete(ctx, pvc); err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete stale PVC %s: %w", pvc.Name, err)
+	}
+	return nil
 }
 
 // DeleteManagedPVCs deletes all PVCs managed by the given ModelDeployment.

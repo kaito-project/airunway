@@ -697,6 +697,14 @@ func TestReconcileDownloadNotComplete(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-model-cache",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "test",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
@@ -747,6 +755,14 @@ func TestReconcileFullPipeline(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-model-cache",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "test",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Status: corev1.PersistentVolumeClaimStatus{
 			Phase: corev1.ClaimBound,
