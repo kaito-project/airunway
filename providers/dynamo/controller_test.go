@@ -340,7 +340,7 @@ func TestReconcileSuccessfulCreate(t *testing.T) {
 
 	dgd := &unstructured.Unstructured{}
 	setDGDGVK(dgd)
-	err = c.Get(context.Background(), types.NamespacedName{Name: dynamoGraphDeploymentName("test"), Namespace: "default"}, dgd)
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, dgd)
 	if err != nil {
 		t.Fatalf("expected DynamoGraphDeployment to be created: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestReconcileDeletionWithUpstreamResource(t *testing.T) {
 
 	dgd := &unstructured.Unstructured{}
 	setDGDGVK(dgd)
-	dgd.SetName(dynamoGraphDeploymentName("test"))
+	dgd.SetName("test")
 	dgd.SetNamespace("default")
 	dgd.SetLabels(map[string]string{
 		"kubeairunway.ai/managed-by":           "kubeairunway",

@@ -54,7 +54,7 @@ func TestTransformAggregated(t *testing.T) {
 	if dgd.GetKind() != DynamoGraphDeploymentKind {
 		t.Errorf("expected kind %s, got %s", DynamoGraphDeploymentKind, dgd.GetKind())
 	}
-	expectedName := dynamoGraphDeploymentName("test-model")
+	expectedName := "test-model"
 	if dgd.GetName() != expectedName {
 		t.Errorf("expected name %q, got %s", expectedName, dgd.GetName())
 	}

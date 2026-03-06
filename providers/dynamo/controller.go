@@ -214,7 +214,7 @@ func (r *DynamoProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	r.setCondition(&md, kubeairunwayv1alpha1.ConditionTypeResourceCreated, metav1.ConditionTrue, "ResourceCreated", "DynamoGraphDeployment created successfully")
 
 	// Update provider status
-	md.Status.Provider.ResourceName = dynamoGraphDeploymentName(md.Name)
+	md.Status.Provider.ResourceName = md.Name
 	md.Status.Provider.ResourceKind = DynamoGraphDeploymentKind
 
 	// Sync status from upstream resource
@@ -411,7 +411,7 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 		Kind:    DynamoGraphDeploymentKind,
 	})
 
-	dgdName := dynamoGraphDeploymentName(md.Name)
+	dgdName := md.Name
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      dgdName,
 		Namespace: md.Namespace,

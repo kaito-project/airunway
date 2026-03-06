@@ -91,7 +91,7 @@ func (t *Transformer) Transform(ctx context.Context, md *kubeairunwayv1alpha1.Mo
 	dgd := &unstructured.Unstructured{}
 	dgd.SetAPIVersion(fmt.Sprintf("%s/%s", DynamoAPIGroup, DynamoAPIVersion))
 	dgd.SetKind(DynamoGraphDeploymentKind)
-	dgd.SetName(dynamoGraphDeploymentName(md.Name))
+	dgd.SetName(md.Name)
 	dgd.SetNamespace(md.Namespace)
 
 	// Add labels
@@ -707,13 +707,6 @@ func (t *Transformer) addSchedulingConfig(service map[string]interface{}, md *ku
 		}
 		extraPodSpec["tolerations"] = tolerations
 	}
-}
-
-// dynamoGraphDeploymentName returns the DGD name for a given ModelDeployment name.
-// Since DGDs are now created in the same namespace as the ModelDeployment, the name
-// no longer needs a namespace prefix to prevent collisions.
-func dynamoGraphDeploymentName(name string) string {
-	return name
 }
 
 // sanitizeLabelValue ensures a value is valid for a Kubernetes label
