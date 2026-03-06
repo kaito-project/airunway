@@ -134,6 +134,9 @@ type StorageVolume struct {
 
 // ResolvedClaimName returns the PVC claim name, either explicitly set or auto-generated
 // from the ModelDeployment name and volume name.
+// Note: The mutating webhook defaults ClaimName for managed PVCs (when Size is set),
+// so the auto-generated fallback here serves as a safety net for contexts where the
+// webhook is bypassed (e.g., unit tests, direct API access without admission webhooks).
 func (v *StorageVolume) ResolvedClaimName(mdName string) string {
 	if v.ClaimName != "" {
 		return v.ClaimName
