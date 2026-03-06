@@ -132,14 +132,7 @@ func buildDownloadJob(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwa
 	completions := int32(1)
 	parallelism := int32(1)
 
-	downloadScript := `set -eux
-hf download $MODEL_NAME`
-
 	envVars := []corev1.EnvVar{
-		{
-			Name:  "MODEL_NAME",
-			Value: md.Spec.Model.ID,
-		},
 		{
 			Name:  "HF_HOME",
 			Value: vol.MountPath,
@@ -180,8 +173,7 @@ hf download $MODEL_NAME`
 						{
 							Name:    "model-download",
 							Image:   downloadJobImage,
-							Command: []string{"sh", "-c"},
-							Args:    []string{downloadScript},
+							Command: []string{"hf", "download", md.Spec.Model.ID},
 							Env:     envVars,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{

@@ -154,18 +154,28 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 		t.Errorf("expected image %s, got %s", DefaultDownloadJobImage, job.Spec.Template.Spec.Containers[0].Image)
 	}
 
-	// Verify env vars
+	// Verify command uses exec form (not shell) to prevent injection
 	container := job.Spec.Template.Spec.Containers[0]
-	foundModelName := false
+	expectedCmd := []string{"hf", "download", "meta-llama/Llama-2-7b-chat-hf"}
+	if len(container.Command) != len(expectedCmd) {
+		t.Fatalf("expected command %v, got %v", expectedCmd, container.Command)
+	}
+	for i, arg := range expectedCmd {
+		if container.Command[i] != arg {
+			t.Errorf("expected command[%d]=%s, got %s", i, arg, container.Command[i])
+		}
+	}
+	if len(container.Args) != 0 {
+		t.Errorf("expected no args (exec form), got %v", container.Args)
+	}
+
+	// Verify env vars (MODEL_NAME should NOT be present — model ID is passed directly in Command)
 	foundHFHome := false
 	foundHFTransfer := false
 	for _, env := range container.Env {
 		switch env.Name {
 		case "MODEL_NAME":
-			foundModelName = true
-			if env.Value != "meta-llama/Llama-2-7b-chat-hf" {
-				t.Errorf("expected MODEL_NAME=%s, got %s", "meta-llama/Llama-2-7b-chat-hf", env.Value)
-			}
+			t.Error("MODEL_NAME env var should not be set — model ID is passed directly in Command")
 		case "HF_HOME":
 			foundHFHome = true
 			if env.Value != "/model-cache" {
@@ -177,9 +187,6 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 				t.Errorf("expected HF_HUB_ENABLE_HF_TRANSFER=1, got %s", env.Value)
 			}
 		}
-	}
-	if !foundModelName {
-		t.Error("expected MODEL_NAME env var")
 	}
 	if !foundHFHome {
 		t.Error("expected HF_HOME env var")
@@ -243,17 +250,6 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 	// Verify no envFrom (no HF token secret configured)
 	if len(container.EnvFrom) != 0 {
 		t.Errorf("expected no envFrom when no HF token secret, got %d", len(container.EnvFrom))
-	}
-
-	// Verify the download script does not contain pip install (dependencies are pre-installed in the image)
-	downloadScript := container.Args[0]
-	if strings.Contains(downloadScript, "pip install") {
-		t.Error("download script should not contain 'pip install' — dependencies are pre-installed in the image")
-	}
-
-	// Verify the download script contains the hf download command
-	if !strings.Contains(downloadScript, "hf download") {
-		t.Error("download script should contain 'hf download'")
 	}
 }
 
