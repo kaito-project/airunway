@@ -396,21 +396,7 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 		logger.Error(err, "Failed to update status to Terminating")
 	}
 
-	// Clean up managed Jobs and PVCs before deleting DGD
-	var cleanupErrs []error
-	if err := DeleteManagedJobs(ctx, r.Client, md); err != nil {
-		logger.Error(err, "Failed to delete managed Jobs")
-		cleanupErrs = append(cleanupErrs, err)
-	}
-	if err := DeleteManagedPVCs(ctx, r.Client, md); err != nil {
-		logger.Error(err, "Failed to delete managed PVCs")
-		cleanupErrs = append(cleanupErrs, err)
-	}
-	if err := stderrors.Join(cleanupErrs...); err != nil {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-
-	// Delete the upstream resource
+	// Delete the DGD first so its Pods terminate before we remove PVCs/Jobs
 	dgd := &unstructured.Unstructured{}
 	dgd.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   DynamoAPIGroup,
@@ -449,16 +435,44 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
-		// Requeue to wait for deletion
+		// Requeue to wait for DGD and its Pods to be fully terminated
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	if !errors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to get upstream resource: %w", err)
+		// Unexpected error fetching DGD — check timeout before requeueing
+		deletionTime := md.DeletionTimestamp.Time
+		if time.Since(deletionTime) > FinalizerTimeout {
+			logger.Info("Finalizer timeout reached, removing finalizer without cleanup")
+			controllerutil.RemoveFinalizer(md, FinalizerName)
+			return ctrl.Result{}, r.Update(ctx, md)
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// Resource is gone, remove finalizer
-	logger.Info("Upstream resource deleted, removing finalizer", "name", md.Name)
+	// DGD is confirmed gone — clean up managed Jobs and PVCs
+	var cleanupErrs []error
+	if err := DeleteManagedJobs(ctx, r.Client, md); err != nil {
+		logger.Error(err, "Failed to delete managed Jobs")
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := DeleteManagedPVCs(ctx, r.Client, md); err != nil {
+		logger.Error(err, "Failed to delete managed PVCs")
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := stderrors.Join(cleanupErrs...); err != nil {
+		// Check if we should force-remove the finalizer
+		deletionTime := md.DeletionTimestamp.Time
+		if time.Since(deletionTime) > FinalizerTimeout {
+			logger.Info("Finalizer timeout reached, removing finalizer without cleanup")
+			controllerutil.RemoveFinalizer(md, FinalizerName)
+			return ctrl.Result{}, r.Update(ctx, md)
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// All resources cleaned up, remove finalizer
+	logger.Info("All resources deleted, removing finalizer", "name", md.Name)
 	controllerutil.RemoveFinalizer(md, FinalizerName)
 	return ctrl.Result{}, r.Update(ctx, md)
 }

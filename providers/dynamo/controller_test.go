@@ -930,6 +930,120 @@ func TestReconcileDeletionRetriesOnCleanupFailure(t *testing.T) {
 	}
 }
 
+func TestReconcileDeletionWithDGDDelaysCleanup(t *testing.T) {
+	scheme := newScheme()
+	md := newMDWithStorage("test", "default")
+	controllerutil.AddFinalizer(md, FinalizerName)
+	now := metav1.Now()
+	md.DeletionTimestamp = &now
+
+	// Create a DGD owned by this ModelDeployment
+	dgd := &unstructured.Unstructured{}
+	setDGDGVK(dgd)
+	dgd.SetName("test")
+	dgd.SetNamespace("default")
+	dgd.SetLabels(map[string]string{
+		"kubeairunway.ai/managed-by": "kubeairunway",
+	})
+	dgd.SetOwnerReferences([]metav1.OwnerReference{
+		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
+	})
+
+	// Create managed PVC
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-model-cache",
+			Namespace: "default",
+			Labels: map[string]string{
+				kubeairunwayv1alpha1.LabelManagedBy:       "kubeairunway",
+				kubeairunwayv1alpha1.LabelModelDeployment: "test",
+			},
+		},
+	}
+
+	// Create managed Job
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-model-download",
+			Namespace: "default",
+			Labels: map[string]string{
+				kubeairunwayv1alpha1.LabelManagedBy:       "kubeairunway",
+				kubeairunwayv1alpha1.LabelModelDeployment: "test",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(md, dgd, pvc, job).WithStatusSubresource(md).Build()
+	r := NewDynamoProviderReconciler(c, scheme, "")
+
+	// --- First reconciliation: DGD exists, should delete DGD but NOT PVC/Job ---
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on first reconcile: %v", err)
+	}
+	if result.RequeueAfter != 5*time.Second {
+		t.Errorf("expected requeue after 5s on first reconcile, got %v", result.RequeueAfter)
+	}
+
+	// Verify DGD was deleted
+	dgdCheck := &unstructured.Unstructured{}
+	setDGDGVK(dgdCheck)
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, dgdCheck)
+	if err == nil {
+		t.Error("expected DGD to be deleted after first reconcile")
+	}
+
+	// Verify PVC still exists (cleanup deferred until DGD is gone)
+	pvcCheck := &corev1.PersistentVolumeClaim{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test-model-cache", Namespace: "default"}, pvcCheck)
+	if err != nil {
+		t.Errorf("expected PVC to still exist after first reconcile: %v", err)
+	}
+
+	// Verify Job still exists (cleanup deferred until DGD is gone)
+	jobCheck := &batchv1.Job{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test-model-download", Namespace: "default"}, jobCheck)
+	if err != nil {
+		t.Errorf("expected Job to still exist after first reconcile: %v", err)
+	}
+
+	// Verify finalizer still present
+	var mdAfterFirst kubeairunwayv1alpha1.ModelDeployment
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &mdAfterFirst)
+	if !controllerutil.ContainsFinalizer(&mdAfterFirst, FinalizerName) {
+		t.Error("expected finalizer to still be present after first reconcile")
+	}
+
+	// --- Second reconciliation: DGD is gone, should clean up PVC/Job and remove finalizer ---
+	result, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on second reconcile: %v", err)
+	}
+
+	// Verify PVC was deleted
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test-model-cache", Namespace: "default"}, pvcCheck)
+	if err == nil {
+		t.Error("expected PVC to be deleted after second reconcile")
+	}
+
+	// Verify Job was deleted
+	err = c.Get(context.Background(), types.NamespacedName{Name: "test-model-download", Namespace: "default"}, jobCheck)
+	if err == nil {
+		t.Error("expected Job to be deleted after second reconcile")
+	}
+
+	// Verify finalizer was removed
+	var mdAfterSecond kubeairunwayv1alpha1.ModelDeployment
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &mdAfterSecond)
+	if controllerutil.ContainsFinalizer(&mdAfterSecond, FinalizerName) {
+		t.Error("expected finalizer to be removed after second reconcile")
+	}
+}
+
 func TestVerifyDynamoOwnershipRejectsWrongUID(t *testing.T) {
 	existing := &unstructured.Unstructured{}
 	setDGDGVK(existing)
