@@ -307,6 +307,14 @@ func TestEnsureDownloadJobCompleted(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-model-model-download",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Status: batchv1.JobStatus{
 			Succeeded: 1,
@@ -336,6 +344,14 @@ func TestEnsureDownloadJobStillRunning(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-model-model-download",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
@@ -369,6 +385,14 @@ func TestEnsureDownloadJobFailed(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-model-model-download",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
@@ -447,5 +471,202 @@ func TestDeleteManagedJobs(t *testing.T) {
 func TestDownloadJobName(t *testing.T) {
 	if downloadJobName("my-model") != "my-model-model-download" {
 		t.Errorf("unexpected job name: %s", downloadJobName("my-model"))
+	}
+}
+
+func TestEnsureDownloadJobStaleCompleted(t *testing.T) {
+	scheme := newScheme()
+	_ = batchv1.AddToScheme(scheme)
+
+	md := newDownloadMD("my-model", "default")
+
+	// Pre-create a completed Job owned by a previous ModelDeployment (different UID)
+	existingJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-download",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "old-uid",
+				},
+			},
+		},
+		Status: batchv1.JobStatus{
+			Succeeded: 1,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
+
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if completed {
+		t.Error("expected completed=false when stale Job is deleted")
+	}
+
+	// Verify stale Job was deleted
+	job := &batchv1.Job{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-download", Namespace: "default"}, job)
+	if err == nil {
+		t.Error("expected stale completed Job to be deleted")
+	}
+}
+
+func TestEnsureDownloadJobStaleFailed(t *testing.T) {
+	scheme := newScheme()
+	_ = batchv1.AddToScheme(scheme)
+
+	md := newDownloadMD("my-model", "default")
+
+	// Pre-create a failed Job owned by a previous ModelDeployment
+	backoffLimit := int32(3)
+	existingJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-download",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "old-uid",
+				},
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: &backoffLimit,
+		},
+		Status: batchv1.JobStatus{
+			Failed: 4,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
+
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if completed {
+		t.Error("expected completed=false when stale Job is deleted")
+	}
+
+	// Verify stale Job was deleted
+	job := &batchv1.Job{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-download", Namespace: "default"}, job)
+	if err == nil {
+		t.Error("expected stale failed Job to be deleted")
+	}
+}
+
+func TestEnsureDownloadJobStaleRunning(t *testing.T) {
+	scheme := newScheme()
+	_ = batchv1.AddToScheme(scheme)
+
+	md := newDownloadMD("my-model", "default")
+
+	// Pre-create a running Job owned by a previous ModelDeployment
+	existingJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model-model-download",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "my-model",
+					UID:        "old-uid",
+				},
+			},
+		},
+		Status: batchv1.JobStatus{
+			Active: 1,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
+
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if completed {
+		t.Error("expected completed=false when stale Job is deleted")
+	}
+
+	// Verify stale Job was deleted
+	job := &batchv1.Job{}
+	err = c.Get(context.Background(), types.NamespacedName{Name: "my-model-model-download", Namespace: "default"}, job)
+	if err == nil {
+		t.Error("expected stale running Job to be deleted")
+	}
+}
+
+func TestIsOwnedByMD(t *testing.T) {
+	tests := []struct {
+		name   string
+		job    *batchv1.Job
+		mdUID  types.UID
+		expect bool
+	}{
+		{
+			name: "matching UID",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{UID: "abc-123"},
+					},
+				},
+			},
+			mdUID:  "abc-123",
+			expect: true,
+		},
+		{
+			name: "wrong UID",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{UID: "old-uid"},
+					},
+				},
+			},
+			mdUID:  "new-uid",
+			expect: false,
+		},
+		{
+			name: "no owner references",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{},
+			},
+			mdUID:  "abc-123",
+			expect: false,
+		},
+		{
+			name: "multiple refs with match",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{UID: "other-uid"},
+						{UID: "abc-123"},
+					},
+				},
+			},
+			mdUID:  "abc-123",
+			expect: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isOwnedByMD(tt.job, tt.mdUID)
+			if got != tt.expect {
+				t.Errorf("isOwnedByMD() = %v, want %v", got, tt.expect)
+			}
+		})
 	}
 }

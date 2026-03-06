@@ -758,6 +758,14 @@ func TestReconcileFullPipeline(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-model-download",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kubeairunway.ai/v1alpha1",
+					Kind:       "ModelDeployment",
+					Name:       "test",
+					UID:        "test-uid",
+				},
+			},
 		},
 		Status: batchv1.JobStatus{
 			Succeeded: 1,

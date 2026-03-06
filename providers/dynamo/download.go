@@ -82,6 +82,31 @@ func findModelCacheVolume(md *kubeairunwayv1alpha1.ModelDeployment) *kubeairunwa
 	return nil
 }
 
+// isOwnedByMD returns true if the Job has an OwnerReference whose UID matches mdUID.
+func isOwnedByMD(job *batchv1.Job, mdUID types.UID) bool {
+	for _, ref := range job.OwnerReferences {
+		if ref.UID == mdUID {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteStaleJob deletes a Job that belongs to a previous (now-deleted) ModelDeployment.
+// Uses background propagation (matching DeleteManagedJobs) and tolerates NotFound
+// in case GC already removed it.
+func deleteStaleJob(ctx context.Context, c client.Client, job *batchv1.Job) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Deleting stale download Job (owner UID mismatch)", "name", job.Name)
+	propagation := metav1.DeletePropagationBackground
+	if err := c.Delete(ctx, job, &client.DeleteOptions{
+		PropagationPolicy: &propagation,
+	}); err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete stale download Job %s: %w", job.Name, err)
+	}
+	return nil
+}
+
 // EnsureDownloadJob ensures a model download Job exists and tracks its completion.
 // Returns completed=true when the Job has succeeded.
 func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.ModelDeployment, downloadJobImage string) (bool, error) {
@@ -115,6 +140,17 @@ func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1a
 	}
 	if err != nil {
 		return false, fmt.Errorf("failed to get download Job %s: %w", jobName, err)
+	}
+
+	// Verify the existing Job is owned by this ModelDeployment (same UID).
+	// If a ModelDeployment is deleted and recreated with the same name, there's a
+	// race window where the old Job still exists. Delete it and requeue so the
+	// next reconcile creates a fresh Job.
+	if !isOwnedByMD(existing, md.UID) {
+		if err := deleteStaleJob(ctx, c, existing); err != nil {
+			return false, err
+		}
+		return false, nil // requeue → next reconcile creates fresh Job
 	}
 
 	// Job exists, check status
