@@ -201,6 +201,16 @@ var _ = Describe("ModelDeployment Webhook", func() {
 			Expect(warnings).To(BeEmpty())
 		})
 
+		It("Should allow updates on existing resources with dots in name", func() {
+			obj.Name = "qwen3-0.6b"
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			oldObj.Name = "qwen3-0.6b"
+			oldObj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			warnings, err := validator.ValidateUpdate(ctx, oldObj, obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).To(BeEmpty())
+		})
+
 		It("Should admit a single modelCache volume", func() {
 			obj.Spec.Model.ID = "meta-llama/Llama-2-7b-chat-hf"
 			obj.Spec.Model.Storage = &kubeairunwayv1alpha1.StorageSpec{

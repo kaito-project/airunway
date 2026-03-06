@@ -151,6 +151,15 @@ func (v *ModelDeploymentCustomValidator) ValidateCreate(_ context.Context, obj *
 	var warnings admission.Warnings
 	var allErrs field.ErrorList
 
+	// Validate name does not contain dots (derived volume/service names prohibit dots)
+	if strings.Contains(obj.Name, ".") {
+		allErrs = append(allErrs, field.Invalid(
+			field.NewPath("metadata", "name"),
+			obj.Name,
+			"name must not contain dots (dots are invalid in derived Kubernetes volume and service names)",
+		))
+	}
+
 	// Validate the spec
 	allErrs = append(allErrs, v.validateSpec(obj)...)
 
@@ -198,15 +207,6 @@ func (v *ModelDeploymentCustomValidator) validateSpec(obj *kubeairunwayv1alpha1.
 	var allErrs field.ErrorList
 	spec := &obj.Spec
 	specPath := field.NewPath("spec")
-
-	// Validate name does not contain dots (derived volume/service names prohibit dots)
-	if strings.Contains(obj.Name, ".") {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("metadata", "name"),
-			obj.Name,
-			"name must not contain dots (dots are invalid in derived Kubernetes volume and service names)",
-		))
-	}
 
 	// Validate model.id is required for huggingface source
 	if spec.Model.Source == kubeairunwayv1alpha1.ModelSourceHuggingFace || spec.Model.Source == "" {
