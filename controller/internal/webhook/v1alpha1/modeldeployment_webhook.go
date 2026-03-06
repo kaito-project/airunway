@@ -374,26 +374,54 @@ func (v *ModelDeploymentCustomValidator) validateImmutableFields(oldObj, newObj 
 
 	// Storage volumes are immutable once a managed PVC is created.
 	// Only applies to managed volumes (size != nil) that existed in the old spec.
-	if oldSpec.Model.Storage != nil && newSpec.Model.Storage != nil {
-		oldVolumes := make(map[string]kubeairunwayv1alpha1.StorageVolume)
+	// Two bypass scenarios are prevented:
+	// 1. Dropping a managed volume from the list (would orphan its PVC)
+	// 2. Setting model.storage to nil (would orphan all managed PVCs)
+	oldManagedVolumes := make(map[string]kubeairunwayv1alpha1.StorageVolume)
+	if oldSpec.Model.Storage != nil {
 		for _, vol := range oldSpec.Model.Storage.Volumes {
 			if vol.Size != nil {
-				oldVolumes[vol.Name] = vol
+				oldManagedVolumes[vol.Name] = vol
+			}
+		}
+	}
+
+	if len(oldManagedVolumes) > 0 {
+		storagePath := specPath.Child("model", "storage", "volumes")
+
+		// Build a set of new volume names for quick lookup
+		newVolumeNames := make(map[string]bool)
+		if newSpec.Model.Storage != nil {
+			for _, vol := range newSpec.Model.Storage.Volumes {
+				newVolumeNames[vol.Name] = true
 			}
 		}
 
-		for i, newVol := range newSpec.Model.Storage.Volumes {
-			oldVol, exists := oldVolumes[newVol.Name]
-			if !exists {
-				continue
-			}
-			if !reflect.DeepEqual(oldVol, newVol) {
-				volPath := specPath.Child("model", "storage", "volumes").Index(i)
-				allErrs = append(allErrs, field.Invalid(
-					volPath,
-					newVol.Name,
-					"managed storage volumes are immutable once created (delete the volume and re-add it to change configuration)",
+		// Pass 1 — detect removals: reject any old managed volume not present in the new spec
+		for _, oldVol := range oldManagedVolumes {
+			if !newVolumeNames[oldVol.Name] {
+				allErrs = append(allErrs, field.Forbidden(
+					storagePath,
+					fmt.Sprintf("managed storage volume %q cannot be removed (it has an associated PVC; delete the ModelDeployment to clean up managed storage)", oldVol.Name),
 				))
+			}
+		}
+
+		// Pass 2 — detect modifications: reject any change to an existing managed volume
+		if newSpec.Model.Storage != nil {
+			for i, newVol := range newSpec.Model.Storage.Volumes {
+				oldVol, exists := oldManagedVolumes[newVol.Name]
+				if !exists {
+					continue
+				}
+				if !reflect.DeepEqual(oldVol, newVol) {
+					volPath := storagePath.Index(i)
+					allErrs = append(allErrs, field.Invalid(
+						volPath,
+						newVol.Name,
+						"managed storage volume is immutable once created (delete the ModelDeployment to change managed storage configuration)",
+					))
+				}
 			}
 		}
 	}
