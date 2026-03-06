@@ -371,7 +371,64 @@ func (v *ModelDeploymentCustomValidator) validateImmutableFields(oldObj, newObj 
 		))
 	}
 
+	// Storage volume PVC fields are immutable once a managed PVC is created.
+	// Only applies to managed volumes (size != nil) that existed in the old spec.
+	if oldSpec.Model.Storage != nil && newSpec.Model.Storage != nil {
+		oldVolumes := make(map[string]kubeairunwayv1alpha1.StorageVolume)
+		for _, vol := range oldSpec.Model.Storage.Volumes {
+			if vol.Size != nil {
+				oldVolumes[vol.Name] = vol
+			}
+		}
+
+		for i, newVol := range newSpec.Model.Storage.Volumes {
+			oldVol, exists := oldVolumes[newVol.Name]
+			if !exists {
+				continue
+			}
+			volPath := specPath.Child("model", "storage", "volumes").Index(i)
+
+			// size is immutable on managed volumes
+			if newVol.Size == nil || !oldVol.Size.Equal(*newVol.Size) {
+				allErrs = append(allErrs, field.Invalid(
+					volPath.Child("size"),
+					newVol.Size,
+					"size is immutable on managed storage volumes (requires delete and recreate)",
+				))
+			}
+
+			// storageClassName is immutable on managed volumes
+			if !equalStringPtrs(oldVol.StorageClassName, newVol.StorageClassName) {
+				allErrs = append(allErrs, field.Invalid(
+					volPath.Child("storageClassName"),
+					newVol.StorageClassName,
+					"storageClassName is immutable on managed storage volumes (requires delete and recreate)",
+				))
+			}
+
+			// accessMode is immutable on managed volumes
+			if oldVol.AccessMode != newVol.AccessMode {
+				allErrs = append(allErrs, field.Invalid(
+					volPath.Child("accessMode"),
+					newVol.AccessMode,
+					"accessMode is immutable on managed storage volumes (requires delete and recreate)",
+				))
+			}
+		}
+	}
+
 	return allErrs
+}
+
+// equalStringPtrs compares two *string values for equality.
+func equalStringPtrs(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // checkWarnings returns non-fatal warnings for the spec
