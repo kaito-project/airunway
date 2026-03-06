@@ -2,6 +2,7 @@ package dynamo
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -855,5 +858,62 @@ func TestReconcileDeletionCleansUpResources(t *testing.T) {
 	err = c.Get(context.Background(), types.NamespacedName{Name: "test-model-download", Namespace: "default"}, jobCheck)
 	if err == nil {
 		t.Error("expected managed Job to be deleted during cleanup")
+	}
+}
+
+func TestReconcileDeletionRetriesOnCleanupFailure(t *testing.T) {
+	scheme := newScheme()
+	md := newMDForController("test", "default")
+	controllerutil.AddFinalizer(md, FinalizerName)
+	now := metav1.Now()
+	md.DeletionTimestamp = &now
+
+	// Create a managed Job that will fail to delete
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-model-download",
+			Namespace: "default",
+			Labels: map[string]string{
+				kubeairunwayv1alpha1.LabelManagedBy:       "kubeairunway",
+				kubeairunwayv1alpha1.LabelModelDeployment: "test",
+			},
+		},
+	}
+
+	// Intercept Delete calls for Job resources to simulate API server failure
+	interceptorFuncs := interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if _, ok := obj.(*batchv1.Job); ok {
+				return fmt.Errorf("simulated API server error")
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(md, job).
+		WithStatusSubresource(md).
+		WithInterceptorFuncs(interceptorFuncs).
+		Build()
+	r := NewDynamoProviderReconciler(c, scheme, "")
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test", Namespace: "default"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should requeue after 10s due to cleanup failure (not immediate requeue)
+	if result.RequeueAfter != 10*time.Second {
+		t.Errorf("expected requeue after 10s, got %v", result.RequeueAfter)
+	}
+
+	// Verify the finalizer is still present (cleanup failure should prevent removal)
+	var updated kubeairunwayv1alpha1.ModelDeployment
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &updated)
+	if !controllerutil.ContainsFinalizer(&updated, FinalizerName) {
+		t.Error("expected finalizer to still be present after cleanup failure")
 	}
 }

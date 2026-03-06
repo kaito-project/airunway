@@ -396,11 +396,17 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 	}
 
 	// Clean up managed Jobs and PVCs before deleting DGD
+	var cleanupErrs []error
 	if err := DeleteManagedJobs(ctx, r.Client, md); err != nil {
 		logger.Error(err, "Failed to delete managed Jobs")
+		cleanupErrs = append(cleanupErrs, err)
 	}
 	if err := DeleteManagedPVCs(ctx, r.Client, md); err != nil {
 		logger.Error(err, "Failed to delete managed PVCs")
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := stderrors.Join(cleanupErrs...); err != nil {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// Delete the upstream resource
