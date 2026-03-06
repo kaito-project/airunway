@@ -23,7 +23,6 @@ import (
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -200,10 +199,4 @@ func DeleteManagedPVCs(ctx context.Context, c client.Client, md *kubeairunwayv1a
 	}
 
 	return nil
-}
-
-// pvcSize is a helper to create a resource.Quantity pointer for testing
-func pvcSize(s string) *resource.Quantity {
-	q := resource.MustParse(s)
-	return &q
 }

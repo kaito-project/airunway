@@ -28,6 +28,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+// pvcSize is a helper to create a resource.Quantity pointer for testing.
+func pvcSize(s string) *resource.Quantity {
+	q := resource.MustParse(s)
+	return &q
+}
+
 func TestHasManagedPVCs(t *testing.T) {
 	tests := []struct {
 		name string
