@@ -97,7 +97,10 @@ func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1a
 		job := buildDownloadJob(md, vol, downloadJobImage)
 		logger.Info("Creating model download Job", "name", jobName, "model", md.Spec.Model.ID)
 		if createErr := c.Create(ctx, job); createErr != nil {
-			return false, fmt.Errorf("failed to create download Job %s: %w", jobName, createErr)
+			if !errors.IsAlreadyExists(createErr) {
+				return false, fmt.Errorf("failed to create download Job %s: %w", jobName, createErr)
+			}
+			logger.Info("Download Job already exists (concurrent creation)", "name", jobName)
 		}
 		return false, nil
 	}

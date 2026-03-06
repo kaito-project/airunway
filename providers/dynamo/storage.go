@@ -76,7 +76,10 @@ func EnsurePVCs(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.M
 			}
 			logger.Info("Creating PVC", "name", claimName, "namespace", md.Namespace, "size", vol.Size.String())
 			if createErr := c.Create(ctx, pvc); createErr != nil {
-				return false, fmt.Errorf("failed to create PVC %s: %w", claimName, createErr)
+				if !errors.IsAlreadyExists(createErr) {
+					return false, fmt.Errorf("failed to create PVC %s: %w", claimName, createErr)
+				}
+				logger.Info("PVC already exists (concurrent creation)", "name", claimName)
 			}
 			allReady = false
 			continue
