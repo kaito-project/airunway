@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -93,6 +94,18 @@ func (t *Transformer) Transform(ctx context.Context, md *kubeairunwayv1alpha1.Mo
 	dgd.SetKind(DynamoGraphDeploymentKind)
 	dgd.SetName(md.Name)
 	dgd.SetNamespace(md.Namespace)
+
+	// Set OwnerReference to the parent ModelDeployment for proper ownership tracking
+	dgd.SetOwnerReferences([]metav1.OwnerReference{
+		{
+			APIVersion:         kubeairunwayv1alpha1.GroupVersion.String(),
+			Kind:               "ModelDeployment",
+			Name:               md.Name,
+			UID:                md.UID,
+			Controller:         boolPtr(true),
+			BlockOwnerDeletion: boolPtr(true),
+		},
+	})
 
 	// Add labels
 	labels := map[string]string{

@@ -76,6 +76,30 @@ func TestTransformAggregated(t *testing.T) {
 		t.Errorf("expected engine-type label 'vllm'")
 	}
 
+	// Check OwnerReference
+	ownerRefs := dgd.GetOwnerReferences()
+	if len(ownerRefs) != 1 {
+		t.Fatalf("expected 1 OwnerReference, got %d", len(ownerRefs))
+	}
+	if ownerRefs[0].UID != md.UID {
+		t.Errorf("expected OwnerReference UID %q, got %q", md.UID, ownerRefs[0].UID)
+	}
+	if ownerRefs[0].Kind != "ModelDeployment" {
+		t.Errorf("expected OwnerReference Kind 'ModelDeployment', got %q", ownerRefs[0].Kind)
+	}
+	if ownerRefs[0].Name != md.Name {
+		t.Errorf("expected OwnerReference Name %q, got %q", md.Name, ownerRefs[0].Name)
+	}
+	if ownerRefs[0].APIVersion != kubeairunwayv1alpha1.GroupVersion.String() {
+		t.Errorf("expected OwnerReference APIVersion %q, got %q", kubeairunwayv1alpha1.GroupVersion.String(), ownerRefs[0].APIVersion)
+	}
+	if ownerRefs[0].Controller == nil || !*ownerRefs[0].Controller {
+		t.Errorf("expected OwnerReference Controller to be true")
+	}
+	if ownerRefs[0].BlockOwnerDeletion == nil || !*ownerRefs[0].BlockOwnerDeletion {
+		t.Errorf("expected OwnerReference BlockOwnerDeletion to be true")
+	}
+
 	// Check spec
 	spec, _, _ := unstructured.NestedMap(dgd.Object, "spec")
 	if spec["backendFramework"] != "vllm" {

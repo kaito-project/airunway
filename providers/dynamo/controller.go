@@ -286,13 +286,14 @@ func isResourceConflict(err error) bool {
 	return stderrors.As(err, &conflict)
 }
 
-// verifyDynamoOwnership checks that the existing resource is managed by kubeairunway.
-func verifyDynamoOwnership(existing *unstructured.Unstructured) error {
-	labels := existing.GetLabels()
-	if labels["kubeairunway.ai/managed-by"] != "kubeairunway" {
-		return &resourceConflictError{namespace: existing.GetNamespace(), name: existing.GetName()}
+// verifyDynamoOwnership checks that the existing resource is managed by this specific ModelDeployment.
+func verifyDynamoOwnership(existing *unstructured.Unstructured, mdUID types.UID) error {
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == mdUID {
+			return nil
+		}
 	}
-	return nil
+	return &resourceConflictError{namespace: existing.GetNamespace(), name: existing.GetName()}
 }
 
 // createOrUpdateResource creates or updates an unstructured resource
@@ -318,7 +319,7 @@ func (r *DynamoProviderReconciler) createOrUpdateResource(ctx context.Context, r
 	}
 
 	// Verify ownership before updating
-	if err := verifyDynamoOwnership(existing); err != nil {
+	if err := verifyDynamoOwnership(existing, md.UID); err != nil {
 		return err
 	}
 
@@ -425,7 +426,7 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 
 	if err == nil {
 		// Verify ownership before deleting
-		if err := verifyDynamoOwnership(dgd); err != nil {
+		if err := verifyDynamoOwnership(dgd, md.UID); err != nil {
 			logger.Info("Resource exists but is not managed by this ModelDeployment, skipping deletion", "name", dgdName)
 			controllerutil.RemoveFinalizer(md, FinalizerName)
 			return ctrl.Result{}, r.Update(ctx, md)

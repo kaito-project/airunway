@@ -34,6 +34,7 @@ func newMDForController(name, ns string) *kubeairunwayv1alpha1.ModelDeployment {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
+			UID:       types.UID("test-uid"),
 		},
 		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
 			Model:     kubeairunwayv1alpha1.ModelSpec{ID: "test-model", Source: kubeairunwayv1alpha1.ModelSourceHuggingFace},
@@ -408,6 +409,9 @@ func TestReconcileDeletionWithUpstreamResource(t *testing.T) {
 	dgd.SetLabels(map[string]string{
 		"kubeairunway.ai/managed-by":           "kubeairunway",
 	})
+	dgd.SetOwnerReferences([]metav1.OwnerReference{
+		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
+	})
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(md, dgd).WithStatusSubresource(md).Build()
 	r := NewDynamoProviderReconciler(c, scheme, "")
@@ -454,6 +458,9 @@ func TestCreateOrUpdateResourceUpdate(t *testing.T) {
 	existing.SetLabels(map[string]string{
 		"kubeairunway.ai/managed-by":            "kubeairunway",
 	})
+	existing.SetOwnerReferences([]metav1.OwnerReference{
+		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
+	})
 	existing.Object["spec"] = map[string]interface{}{"backendFramework": "vllm"}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
@@ -462,6 +469,7 @@ func TestCreateOrUpdateResourceUpdate(t *testing.T) {
 	md := &kubeairunwayv1alpha1.ModelDeployment{}
 	md.Name = "test"
 	md.Namespace = "default"
+	md.UID = "test-uid"
 
 	updated := &unstructured.Unstructured{}
 	setDGDGVK(updated)
@@ -485,6 +493,9 @@ func TestCreateOrUpdateResourceNoChange(t *testing.T) {
 	existing.SetLabels(map[string]string{
 		"kubeairunway.ai/managed-by":            "kubeairunway",
 	})
+	existing.SetOwnerReferences([]metav1.OwnerReference{
+		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
+	})
 	existing.Object["spec"] = map[string]interface{}{"backendFramework": "vllm"}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
@@ -493,6 +504,7 @@ func TestCreateOrUpdateResourceNoChange(t *testing.T) {
 	md := &kubeairunwayv1alpha1.ModelDeployment{}
 	md.Name = "test"
 	md.Namespace = "default"
+	md.UID = "test-uid"
 
 	same := &unstructured.Unstructured{}
 	setDGDGVK(same)
@@ -915,5 +927,45 @@ func TestReconcileDeletionRetriesOnCleanupFailure(t *testing.T) {
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &updated)
 	if !controllerutil.ContainsFinalizer(&updated, FinalizerName) {
 		t.Error("expected finalizer to still be present after cleanup failure")
+	}
+}
+
+func TestVerifyDynamoOwnershipRejectsWrongUID(t *testing.T) {
+	existing := &unstructured.Unstructured{}
+	setDGDGVK(existing)
+	existing.SetName("test")
+	existing.SetNamespace("default")
+	existing.SetLabels(map[string]string{
+		"kubeairunway.ai/managed-by": "kubeairunway",
+	})
+	existing.SetOwnerReferences([]metav1.OwnerReference{
+		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "other-md", UID: "other-uid"},
+	})
+
+	err := verifyDynamoOwnership(existing, "test-uid")
+	if err == nil {
+		t.Fatal("expected error for wrong UID, got nil")
+	}
+	if !isResourceConflict(err) {
+		t.Errorf("expected resourceConflictError, got %T: %v", err, err)
+	}
+}
+
+func TestVerifyDynamoOwnershipRejectsNoOwnerRef(t *testing.T) {
+	existing := &unstructured.Unstructured{}
+	setDGDGVK(existing)
+	existing.SetName("test")
+	existing.SetNamespace("default")
+	existing.SetLabels(map[string]string{
+		"kubeairunway.ai/managed-by": "kubeairunway",
+	})
+	// No OwnerReferences set — simulates a manually created resource with the label
+
+	err := verifyDynamoOwnership(existing, "test-uid")
+	if err == nil {
+		t.Fatal("expected error for missing OwnerReference, got nil")
+	}
+	if !isResourceConflict(err) {
+		t.Errorf("expected resourceConflictError, got %T: %v", err, err)
 	}
 }
