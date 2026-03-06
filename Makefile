@@ -1,11 +1,15 @@
 .PHONY: install dev dev-frontend dev-backend build compile lint test clean help
 .PHONY: controller-build controller-docker-build controller-install controller-deploy controller-generate generate-deploy-manifests
+.PHONY: model-downloader-docker-build
 
 # Controller image
 CONTROLLER_IMG ?= ghcr.io/kaito-project/kubeairunway/controller:latest
 
 # Dashboard image
 DASHBOARD_IMG ?= ghcr.io/kaito-project/kubeairunway/dashboard:latest
+
+# Model downloader image
+MODEL_DOWNLOADER_IMG ?= ghcr.io/kaito-project/kubeairunway/model-downloader:latest
 
 # Gateway API Inference Extension version
 GAIE_VERSION ?= v1.3.1
@@ -34,6 +38,7 @@ help:
 	@echo "Controller Targets:"
 	@echo "  controller-build       Build the Go controller binary"
 	@echo "  controller-docker-build Build controller Docker image"
+	@echo "  model-downloader-docker-build Build model downloader Docker image"
 	@echo "  controller-install     Install CRDs into cluster"
 	@echo "  controller-deploy      Deploy controller to cluster"
 	@echo "  controller-generate    Generate CRD manifests and code"
@@ -160,3 +165,10 @@ generate-deploy-manifests:
 	controller/bin/kustomize build backend/config/default > deploy/dashboard.yaml
 	@git checkout backend/config/manager/kustomization.yaml 2>/dev/null || true
 	@echo "✅ Generated deploy/dashboard.yaml"
+
+# ==================== Model Downloader Targets ====================
+
+# Build model downloader Docker image
+model-downloader-docker-build:
+	docker build -f images/model-downloader/Dockerfile -t $(MODEL_DOWNLOADER_IMG) images/model-downloader
+	@echo "✅ Model downloader image built: $(MODEL_DOWNLOADER_IMG)"
