@@ -452,3 +452,27 @@ func TestEnsurePVCsWithEmptyStorageClass(t *testing.T) {
 	}
 }
 
+func TestBuildPVCNilSize(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-model",
+			Namespace: "default",
+			UID:       types.UID("test-uid"),
+		},
+	}
+	vol := &kubeairunwayv1alpha1.StorageVolume{
+		Name: "model-cache",
+		Size: nil,
+	}
+
+	_, err := buildPVC(md, vol)
+	if err == nil {
+		t.Fatal("expected error when vol.Size is nil, got nil")
+	}
+
+	expected := "volume size must be set for controller-created PVCs"
+	if err.Error() != expected {
+		t.Errorf("expected error %q, got %q", expected, err.Error())
+	}
+}
+

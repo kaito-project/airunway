@@ -104,6 +104,10 @@ func EnsurePVCs(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.M
 
 // buildPVC creates a PVC spec from a StorageVolume with Size set.
 func buildPVC(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwayv1alpha1.StorageVolume) (*corev1.PersistentVolumeClaim, error) {
+	if vol.Size == nil {
+		return nil, fmt.Errorf("volume size must be set for controller-created PVCs")
+	}
+
 	claimName := vol.ResolvedClaimName(md.Name)
 
 	// Use the typed access mode directly; default to ReadWriteMany if empty
