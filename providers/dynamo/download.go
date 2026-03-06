@@ -31,6 +31,9 @@ import (
 )
 
 const (
+	// DefaultDownloadJobImage is the default container image for model download jobs
+	DefaultDownloadJobImage = "python:3.10-slim"
+
 	// downloadJobSuffix is the suffix appended to the ModelDeployment name to form the Job name
 	downloadJobSuffix = "-model-download"
 
@@ -63,7 +66,7 @@ func findModelCacheVolume(md *kubeairunwayv1alpha1.ModelDeployment) *kubeairunwa
 
 // EnsureDownloadJob ensures a model download Job exists and tracks its completion.
 // Returns completed=true when the Job has succeeded.
-func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.ModelDeployment) (bool, error) {
+func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.ModelDeployment, downloadJobImage string) (bool, error) {
 	logger := log.FromContext(ctx)
 
 	vol := findModelCacheVolume(md)
@@ -82,7 +85,7 @@ func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1a
 
 	if errors.IsNotFound(err) {
 		// Create the download Job
-		job := buildDownloadJob(md, vol)
+		job := buildDownloadJob(md, vol, downloadJobImage)
 		logger.Info("Creating model download Job", "name", jobName, "model", md.Spec.Model.ID)
 		if createErr := c.Create(ctx, job); createErr != nil {
 			return false, fmt.Errorf("failed to create download Job %s: %w", jobName, createErr)
@@ -114,7 +117,7 @@ func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1a
 }
 
 // buildDownloadJob creates a batch Job that downloads a HuggingFace model.
-func buildDownloadJob(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwayv1alpha1.StorageVolume) *batchv1.Job {
+func buildDownloadJob(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwayv1alpha1.StorageVolume, downloadJobImage string) *batchv1.Job {
 	claimName := vol.ResolvedClaimName(md.Name)
 	backoffLimit := defaultBackoffLimit
 	completions := int32(1)
@@ -168,7 +171,7 @@ hf download $MODEL_NAME`
 					Containers: []corev1.Container{
 						{
 							Name:    "model-download",
-							Image:   kubeairunwayv1alpha1.DefaultDownloadJobImage,
+							Image:   downloadJobImage,
 							Command: []string{"sh", "-c"},
 							Args:    []string{downloadScript},
 							Env:     envVars,

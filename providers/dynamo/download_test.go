@@ -130,7 +130,7 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 	md := newDownloadMD("my-model", "default")
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	completed, err := EnsureDownloadJob(context.Background(), c, md)
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,8 +149,8 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 	}
 
 	// Verify Job spec
-	if job.Spec.Template.Spec.Containers[0].Image != kubeairunwayv1alpha1.DefaultDownloadJobImage {
-		t.Errorf("expected image %s, got %s", kubeairunwayv1alpha1.DefaultDownloadJobImage, job.Spec.Template.Spec.Containers[0].Image)
+	if job.Spec.Template.Spec.Containers[0].Image != DefaultDownloadJobImage {
+		t.Errorf("expected image %s, got %s", DefaultDownloadJobImage, job.Spec.Template.Spec.Containers[0].Image)
 	}
 
 	// Verify env vars
@@ -234,7 +234,7 @@ func TestEnsureDownloadJobWithHFToken(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	_, err := EnsureDownloadJob(context.Background(), c, md)
+	_, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestEnsureDownloadJobCompleted(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
 
-	completed, err := EnsureDownloadJob(context.Background(), c, md)
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestEnsureDownloadJobStillRunning(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
 
-	completed, err := EnsureDownloadJob(context.Background(), c, md)
+	completed, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestEnsureDownloadJobFailed(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingJob).WithStatusSubresource(existingJob).Build()
 
-	_, err := EnsureDownloadJob(context.Background(), c, md)
+	_, err := EnsureDownloadJob(context.Background(), c, md, DefaultDownloadJobImage)
 	if err == nil {
 		t.Fatal("expected error for permanently failed Job")
 	}

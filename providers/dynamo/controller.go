@@ -66,15 +66,20 @@ type DynamoProviderReconciler struct {
 	Scheme           *runtime.Scheme
 	Transformer      *Transformer
 	StatusTranslator *StatusTranslator
+	DownloadJobImage string
 }
 
 // NewDynamoProviderReconciler creates a new Dynamo provider reconciler
-func NewDynamoProviderReconciler(client client.Client, scheme *runtime.Scheme) *DynamoProviderReconciler {
+func NewDynamoProviderReconciler(client client.Client, scheme *runtime.Scheme, downloadJobImage string) *DynamoProviderReconciler {
+	if downloadJobImage == "" {
+		downloadJobImage = DefaultDownloadJobImage
+	}
 	return &DynamoProviderReconciler{
 		Client:           client,
 		Scheme:           scheme,
 		Transformer:      NewTransformer(),
 		StatusTranslator: NewStatusTranslator(),
+		DownloadJobImage: downloadJobImage,
 	}
 }
 
@@ -158,7 +163,7 @@ func (r *DynamoProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// --- Phase 2: Ensure model download ---
 	if NeedsDownloadJob(&md) {
-		completed, err := EnsureDownloadJob(ctx, r.Client, &md)
+		completed, err := EnsureDownloadJob(ctx, r.Client, &md, r.DownloadJobImage)
 		if err != nil {
 			logger.Error(err, "Failed to ensure download Job", "name", md.Name)
 			r.setCondition(&md, kubeairunwayv1alpha1.ConditionTypeModelDownloaded, metav1.ConditionFalse, "DownloadFailed", err.Error())

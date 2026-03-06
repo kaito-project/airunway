@@ -564,7 +564,4 @@ const (
 	LabelModelDeployment = "kubeairunway.ai/model-deployment"
 	LabelManagedBy       = "kubeairunway.ai/managed-by"
 	LabelJobType         = "kubeairunway.ai/job-type"
-
-	// DefaultDownloadJobImage is the default container image for model download jobs
-	DefaultDownloadJobImage = "python:3.10-slim"
 )
