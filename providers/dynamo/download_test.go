@@ -254,6 +254,9 @@ func TestEnsureDownloadJobCreation(t *testing.T) {
 	if len(job.OwnerReferences) != 1 {
 		t.Fatalf("expected 1 owner reference, got %d", len(job.OwnerReferences))
 	}
+	if job.OwnerReferences[0].BlockOwnerDeletion == nil || !*job.OwnerReferences[0].BlockOwnerDeletion {
+		t.Errorf("expected OwnerReference BlockOwnerDeletion to be true")
+	}
 
 	// Verify no envFrom (no HF token secret configured)
 	if len(container.EnvFrom) != 0 {

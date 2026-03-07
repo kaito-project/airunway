@@ -167,6 +167,9 @@ func TestEnsurePVCsCreation(t *testing.T) {
 	if pvc.OwnerReferences[0].Name != "my-model" {
 		t.Errorf("expected owner name my-model, got %s", pvc.OwnerReferences[0].Name)
 	}
+	if pvc.OwnerReferences[0].BlockOwnerDeletion == nil || !*pvc.OwnerReferences[0].BlockOwnerDeletion {
+		t.Errorf("expected OwnerReference BlockOwnerDeletion to be true")
+	}
 
 	// Verify storageClassName is nil (cluster default)
 	if pvc.Spec.StorageClassName != nil {
