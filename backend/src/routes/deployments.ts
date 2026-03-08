@@ -326,10 +326,9 @@ const deployments = new Hono()
   .get('/', zValidator('query', listDeploymentsQuerySchema), async (c) => {
     try {
       const { namespace, limit, offset } = c.req.valid('query');
+      const userToken = c.get('token') as string | undefined;
 
-      // When no namespace filter is given, list across all namespaces
-      // TODO: Add namespace-level RBAC filtering (see issue #99)
-      let deploymentsList: DeploymentStatus[] = await kubernetesService.listDeployments(namespace);
+      let deploymentsList: DeploymentStatus[] = await kubernetesService.listDeployments(namespace, userToken);
 
       const total = deploymentsList.length;
 
@@ -393,8 +392,9 @@ const deployments = new Hono()
     }
 
     // Create deployment with detailed error handling
+    const userToken = c.get('token') as string | undefined;
     try {
-      await kubernetesService.createDeployment(config);
+      await kubernetesService.createDeployment(config, userToken);
     } catch (error) {
       const { message, statusCode } = handleK8sError(error, {
         operation: 'createDeployment',
@@ -475,8 +475,9 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
-      const deployment = await kubernetesService.getDeployment(name, resolvedNamespace);
+      const deployment = await kubernetesService.getDeployment(name, resolvedNamespace, userToken);
 
       if (!deployment) {
         throw new HTTPException(404, { message: 'Deployment not found' });
@@ -493,9 +494,10 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
       // Get the main CR manifest
-      const manifest = await kubernetesService.getDeploymentManifest(name, resolvedNamespace);
+      const manifest = await kubernetesService.getDeploymentManifest(name, resolvedNamespace, userToken);
 
       if (!manifest) {
         throw new HTTPException(404, { message: 'Deployment manifest not found' });
@@ -537,9 +539,10 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
       try {
-        await kubernetesService.deleteDeployment(name, resolvedNamespace);
+        await kubernetesService.deleteDeployment(name, resolvedNamespace, userToken);
       } catch (error) {
         // Check if it's a "not found" error from our own code
         if (error instanceof Error && error.message.includes('not found')) {
@@ -568,8 +571,9 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
-      const pods = await kubernetesService.getDeploymentPods(name, resolvedNamespace);
+      const pods = await kubernetesService.getDeploymentPods(name, resolvedNamespace, userToken);
       return c.json({ pods });
     }
   )
@@ -594,10 +598,11 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
       try {
         // Get deployment to find pending pods
-        const deployment = await kubernetesService.getDeployment(name, resolvedNamespace);
+        const deployment = await kubernetesService.getDeployment(name, resolvedNamespace, userToken);
 
         if (!deployment) {
           throw new HTTPException(404, { message: 'Deployment not found' });
@@ -612,7 +617,7 @@ const deployments = new Hono()
 
         // Get failure reasons for the first pending pod (they're typically the same)
         const podName = pendingPods[0].name;
-        const reasons = await kubernetesService.getPodFailureReasons(podName, resolvedNamespace);
+        const reasons = await kubernetesService.getPodFailureReasons(podName, resolvedNamespace, userToken);
 
         return c.json({ reasons });
       } catch (error) {
@@ -649,10 +654,11 @@ const deployments = new Hono()
       const { name } = c.req.valid('param');
       const { namespace, podName, container, tailLines, timestamps } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
+      const userToken = c.get('token') as string | undefined;
 
       try {
         // Get pods for this deployment using label selectors
-        const pods = await kubernetesService.getDeploymentPods(name, resolvedNamespace);
+        const pods = await kubernetesService.getDeploymentPods(name, resolvedNamespace, userToken);
 
         if (pods.length === 0) {
           logger.debug({ name, namespace: resolvedNamespace }, 'No pods found for deployment');
@@ -676,7 +682,7 @@ const deployments = new Hono()
           container,
           tailLines: tailLines || 100,
           timestamps: timestamps || false,
-        });
+        }, userToken);
 
         return c.json({
           logs,
