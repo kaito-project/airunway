@@ -9,6 +9,7 @@ import (
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -50,6 +51,21 @@ func newMDForController(name, ns string) *kubeairunwayv1alpha1.ModelDeployment {
 func setDGDGVK(u *unstructured.Unstructured) {
 	u.SetAPIVersion("nvidia.com/v1alpha1")
 	u.SetKind("DynamoGraphDeployment")
+}
+
+func assertCondition(t *testing.T, conditions []metav1.Condition, condType string, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	cond := meta.FindStatusCondition(conditions, condType)
+	if cond == nil {
+		t.Errorf("expected condition %s to be set", condType)
+		return
+	}
+	if cond.Status != status {
+		t.Errorf("condition %s: expected status %s, got %s", condType, status, cond.Status)
+	}
+	if cond.Reason != reason {
+		t.Errorf("condition %s: expected reason %q, got %q", condType, reason, cond.Reason)
+	}
 }
 
 func TestValidateCompatibility(t *testing.T) {
@@ -407,7 +423,7 @@ func TestReconcileDeletionWithUpstreamResource(t *testing.T) {
 	dgd.SetName("test")
 	dgd.SetNamespace("default")
 	dgd.SetLabels(map[string]string{
-		kubeairunwayv1alpha1.LabelManagedBy:           "kubeairunway",
+		kubeairunwayv1alpha1.LabelManagedBy: "kubeairunway",
 	})
 	dgd.SetOwnerReferences([]metav1.OwnerReference{
 		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
@@ -456,7 +472,7 @@ func TestCreateOrUpdateResourceUpdate(t *testing.T) {
 	existing.SetName("test")
 	existing.SetNamespace("default")
 	existing.SetLabels(map[string]string{
-		kubeairunwayv1alpha1.LabelManagedBy:            "kubeairunway",
+		kubeairunwayv1alpha1.LabelManagedBy: "kubeairunway",
 	})
 	existing.SetOwnerReferences([]metav1.OwnerReference{
 		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
@@ -491,7 +507,7 @@ func TestCreateOrUpdateResourceNoChange(t *testing.T) {
 	existing.SetName("test")
 	existing.SetNamespace("default")
 	existing.SetLabels(map[string]string{
-		kubeairunwayv1alpha1.LabelManagedBy:            "kubeairunway",
+		kubeairunwayv1alpha1.LabelManagedBy: "kubeairunway",
 	})
 	existing.SetOwnerReferences([]metav1.OwnerReference{
 		{APIVersion: "kubeairunway.ai/v1alpha1", Kind: "ModelDeployment", Name: "test", UID: "test-uid"},
@@ -685,6 +701,17 @@ func TestReconcilePVCNotBound(t *testing.T) {
 	if err == nil {
 		t.Error("DGD should NOT be created before PVCs are bound")
 	}
+
+	// Verify conditions were set correctly
+	var updated kubeairunwayv1alpha1.ModelDeployment
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get updated MD: %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeStorageReady, metav1.ConditionFalse, "PVCsPending")
+	// ModelDownloaded should NOT be set (download phase was never reached)
+	if meta.FindStatusCondition(updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeModelDownloaded) != nil {
+		t.Error("expected ModelDownloaded condition to NOT be set (download phase not reached)")
+	}
 }
 
 func TestReconcileDownloadNotComplete(t *testing.T) {
@@ -743,6 +770,14 @@ func TestReconcileDownloadNotComplete(t *testing.T) {
 	if err == nil {
 		t.Error("DGD should NOT be created before download completes")
 	}
+
+	// Verify conditions were set correctly
+	var updated kubeairunwayv1alpha1.ModelDeployment
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get updated MD: %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeStorageReady, metav1.ConditionTrue, "PVCsBound")
+	assertCondition(t, updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeModelDownloaded, metav1.ConditionFalse, "DownloadInProgress")
 }
 
 func TestReconcileFullPipeline(t *testing.T) {
@@ -810,6 +845,14 @@ func TestReconcileFullPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected DGD to be created: %v", err)
 	}
+
+	// Verify conditions were set correctly
+	var updated kubeairunwayv1alpha1.ModelDeployment
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "test", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("failed to get updated MD: %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeStorageReady, metav1.ConditionTrue, "PVCsBound")
+	assertCondition(t, updated.Status.Conditions, kubeairunwayv1alpha1.ConditionTypeModelDownloaded, metav1.ConditionTrue, "DownloadComplete")
 }
 
 func TestReconcileNoStorageSkipsPhases(t *testing.T) {
