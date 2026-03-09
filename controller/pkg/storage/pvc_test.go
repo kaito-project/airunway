@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dynamo
+package storage
 
 import (
 	"context"
@@ -28,12 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
-
-// pvcSize is a helper to create a resource.Quantity pointer for testing.
-func pvcSize(s string) *resource.Quantity {
-	q := resource.MustParse(s)
-	return &q
-}
 
 func TestHasManagedPVCs(t *testing.T) {
 	tests := []struct {
@@ -177,8 +171,6 @@ func TestEnsurePVCsCreation(t *testing.T) {
 		t.Errorf("expected nil storageClassName, got %v", *pvc.Spec.StorageClassName)
 	}
 }
-
-func stringPtr(s string) *string { return &s }
 
 func TestEnsurePVCsWithStorageClass(t *testing.T) {
 	scheme := newScheme()
@@ -1007,4 +999,3 @@ func TestEnsurePVCsPreExistingLost(t *testing.T) {
 		t.Errorf("expected error to contain 'Lost phase', got: %s", err.Error())
 	}
 }
-

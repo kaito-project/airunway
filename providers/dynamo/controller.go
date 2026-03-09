@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
+	"github.com/kaito-project/kubeairunway/controller/pkg/storage"
 )
 
 const (
@@ -72,7 +73,7 @@ type DynamoProviderReconciler struct {
 // NewDynamoProviderReconciler creates a new Dynamo provider reconciler
 func NewDynamoProviderReconciler(client client.Client, scheme *runtime.Scheme, downloadJobImage string) *DynamoProviderReconciler {
 	if downloadJobImage == "" {
-		downloadJobImage = DefaultDownloadJobImage
+		downloadJobImage = storage.DefaultDownloadJobImage
 	}
 	return &DynamoProviderReconciler{
 		Client:           client,
@@ -140,8 +141,8 @@ func (r *DynamoProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	r.setCondition(&md, kubeairunwayv1alpha1.ConditionTypeProviderCompatible, metav1.ConditionTrue, "CompatibilityVerified", "Configuration compatible with Dynamo")
 
 	// --- Phase 1: Ensure PVCs ---
-	if HasStorageVolumes(&md) {
-		allReady, err := EnsurePVCs(ctx, r.Client, &md)
+	if storage.HasStorageVolumes(&md) {
+		allReady, err := storage.EnsurePVCs(ctx, r.Client, &md)
 		if err != nil {
 			logger.Error(err, "Failed to ensure PVCs", "name", md.Name)
 			r.setCondition(&md, kubeairunwayv1alpha1.ConditionTypeStorageReady, metav1.ConditionFalse, "PVCFailed", err.Error())
@@ -162,8 +163,8 @@ func (r *DynamoProviderReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// --- Phase 2: Ensure model download ---
-	if NeedsDownloadJob(&md) {
-		completed, err := EnsureDownloadJob(ctx, r.Client, &md, r.DownloadJobImage)
+	if storage.NeedsDownloadJob(&md) {
+		completed, err := storage.EnsureDownloadJob(ctx, r.Client, &md, r.DownloadJobImage)
 		if err != nil {
 			logger.Error(err, "Failed to ensure download Job", "name", md.Name)
 			r.setCondition(&md, kubeairunwayv1alpha1.ConditionTypeModelDownloaded, metav1.ConditionFalse, "DownloadFailed", err.Error())
@@ -452,11 +453,11 @@ func (r *DynamoProviderReconciler) handleDeletion(ctx context.Context, md *kubea
 
 	// DGD is confirmed gone — clean up managed Jobs and PVCs
 	var cleanupErrs []error
-	if err := DeleteManagedJobs(ctx, r.Client, md); err != nil {
+	if err := storage.DeleteManagedJobs(ctx, r.Client, md); err != nil {
 		logger.Error(err, "Failed to delete managed Jobs")
 		cleanupErrs = append(cleanupErrs, err)
 	}
-	if err := DeleteManagedPVCs(ctx, r.Client, md); err != nil {
+	if err := storage.DeleteManagedPVCs(ctx, r.Client, md); err != nil {
 		logger.Error(err, "Failed to delete managed PVCs")
 		cleanupErrs = append(cleanupErrs, err)
 	}

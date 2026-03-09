@@ -35,6 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
+	"github.com/kaito-project/kubeairunway/controller/pkg/storage"
 	dynamo "github.com/kaito-project/kubeairunway/providers/dynamo"
 )
 
@@ -69,7 +70,7 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics server.")
-	flag.StringVar(&downloadJobImage, "download-job-image", dynamo.DefaultDownloadJobImage,
+	flag.StringVar(&downloadJobImage, "download-job-image", storage.DefaultDownloadJobImage,
 		"Container image for model download jobs.")
 
 	opts := zap.Options{Development: true}

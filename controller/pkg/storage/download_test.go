@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dynamo
+package storage
 
 import (
 	"context"
@@ -29,34 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
-
-func newDownloadMD(name, ns string) *kubeairunwayv1alpha1.ModelDeployment {
-	size := pvcSize("100Gi")
-	return &kubeairunwayv1alpha1.ModelDeployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-			UID:       types.UID("test-uid"),
-		},
-		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
-			Model: kubeairunwayv1alpha1.ModelSpec{
-				ID:     "meta-llama/Llama-2-7b-chat-hf",
-				Source: kubeairunwayv1alpha1.ModelSourceHuggingFace,
-				Storage: &kubeairunwayv1alpha1.StorageSpec{
-					Volumes: []kubeairunwayv1alpha1.StorageVolume{
-						{
-							Name:       "model-cache",
-							MountPath:  "/model-cache",
-							Purpose:    kubeairunwayv1alpha1.VolumePurposeModelCache,
-							Size:       size,
-							AccessMode: corev1.ReadWriteMany,
-						},
-					},
-				},
-			},
-		},
-	}
-}
 
 func TestNeedsDownloadJob(t *testing.T) {
 	tests := []struct {
@@ -828,9 +800,9 @@ func TestIsOwnedByMD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isOwnedByMD(tt.job, tt.mdUID)
+			got := IsOwnedByMD(tt.job, tt.mdUID)
 			if got != tt.expect {
-				t.Errorf("isOwnedByMD() = %v, want %v", got, tt.expect)
+				t.Errorf("IsOwnedByMD() = %v, want %v", got, tt.expect)
 			}
 		})
 	}

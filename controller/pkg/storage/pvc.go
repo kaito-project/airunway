@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dynamo
+package storage
 
 import (
 	"context"
@@ -121,7 +121,7 @@ func EnsurePVCs(ctx context.Context, c client.Client, md *kubeairunwayv1alpha1.M
 		// If a ModelDeployment is deleted and recreated with the same name, there's a
 		// race window where the old PVC still exists. Delete it and requeue so the
 		// next reconcile creates a fresh PVC.
-		if !isOwnedByMD(existing, md.UID) {
+		if !IsOwnedByMD(existing, md.UID) {
 			// Safety guard: only delete PVCs that were created by kubeairunway.
 			// A PVC without the managed-by label was created by another controller
 			// or manually — deleting it would be destructive and unintended.
@@ -180,10 +180,10 @@ func buildPVC(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwayv1alpha
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: kubeairunwayv1alpha1.GroupVersion.String(),
-					Kind:       "ModelDeployment",
-					Name:       md.Name,
-					UID:        md.UID,
+					APIVersion:         kubeairunwayv1alpha1.GroupVersion.String(),
+					Kind:               "ModelDeployment",
+					Name:               md.Name,
+					UID:                md.UID,
 					Controller:         boolPtr(true),
 					BlockOwnerDeletion: boolPtr(true),
 				},
@@ -235,7 +235,7 @@ func DeleteManagedPVCs(ctx context.Context, c client.Client, md *kubeairunwayv1a
 
 	for i := range pvcList.Items {
 		pvc := &pvcList.Items[i]
-		if !isOwnedByMD(pvc, md.UID) {
+		if !IsOwnedByMD(pvc, md.UID) {
 			logger.Info("Skipping PVC not owned by this ModelDeployment", "name", pvc.Name, "mdUID", md.UID)
 			continue
 		}
@@ -246,4 +246,19 @@ func DeleteManagedPVCs(ctx context.Context, c client.Client, md *kubeairunwayv1a
 	}
 
 	return nil
+}
+
+// IsOwnedByMD returns true if the object has an OwnerReference whose UID matches mdUID.
+func IsOwnedByMD(obj client.Object, mdUID types.UID) bool {
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.UID == mdUID {
+			return true
+		}
+	}
+	return false
+}
+
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }

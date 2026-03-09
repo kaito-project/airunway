@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dynamo
+package storage
 
 import (
 	"context"
@@ -82,16 +82,6 @@ func findModelCacheVolume(md *kubeairunwayv1alpha1.ModelDeployment) *kubeairunwa
 	return nil
 }
 
-// isOwnedByMD returns true if the object has an OwnerReference whose UID matches mdUID.
-func isOwnedByMD(obj client.Object, mdUID types.UID) bool {
-	for _, ref := range obj.GetOwnerReferences() {
-		if ref.UID == mdUID {
-			return true
-		}
-	}
-	return false
-}
-
 // deleteStaleJob deletes a Job that belongs to a previous (now-deleted) ModelDeployment.
 // Uses background propagation (matching DeleteManagedJobs) and tolerates NotFound
 // in case GC already removed it.
@@ -146,7 +136,7 @@ func EnsureDownloadJob(ctx context.Context, c client.Client, md *kubeairunwayv1a
 	// If a ModelDeployment is deleted and recreated with the same name, there's a
 	// race window where the old Job still exists. Delete it and requeue so the
 	// next reconcile creates a fresh Job.
-	if !isOwnedByMD(existing, md.UID) {
+	if !IsOwnedByMD(existing, md.UID) {
 		if err := deleteStaleJob(ctx, c, existing); err != nil {
 			return false, err
 		}
@@ -214,10 +204,10 @@ func buildDownloadJob(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwa
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: kubeairunwayv1alpha1.GroupVersion.String(),
-					Kind:       "ModelDeployment",
-					Name:       md.Name,
-					UID:        md.UID,
+					APIVersion:         kubeairunwayv1alpha1.GroupVersion.String(),
+					Kind:               "ModelDeployment",
+					Name:               md.Name,
+					UID:                md.UID,
 					Controller:         boolPtr(true),
 					BlockOwnerDeletion: boolPtr(true),
 				},
@@ -232,10 +222,10 @@ func buildDownloadJob(md *kubeairunwayv1alpha1.ModelDeployment, vol *kubeairunwa
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:    "model-download",
-							Image:   downloadJobImage,
-							Args: []string{"download", md.Spec.Model.ID},
-							Env:     envVars,
+							Name:  "model-download",
+							Image: downloadJobImage,
+							Args:  []string{"download", md.Spec.Model.ID},
+							Env:   envVars,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse(defaultDownloadJobCPURequest),
@@ -309,7 +299,7 @@ func DeleteManagedJobs(ctx context.Context, c client.Client, md *kubeairunwayv1a
 	propagation := metav1.DeletePropagationBackground
 	for i := range jobList.Items {
 		job := &jobList.Items[i]
-		if !isOwnedByMD(job, md.UID) {
+		if !IsOwnedByMD(job, md.UID) {
 			logger.Info("Skipping Job not owned by this ModelDeployment", "name", job.Name, "mdUID", md.UID)
 			continue
 		}
