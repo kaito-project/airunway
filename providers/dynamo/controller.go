@@ -490,6 +490,28 @@ func (r *DynamoProviderReconciler) setCondition(md *kubeairunwayv1alpha1.ModelDe
 	meta.SetStatusCondition(&md.Status.Conditions, condition)
 }
 
+// dynamoProviderPredicate returns true if the event should be processed by the dynamo controller.
+// For ModelDeployment objects, it checks if the provider is "dynamo" or if the finalizer is present.
+// For non-ModelDeployment objects (PVCs, Jobs, DGDs), it always returns true to allow
+// Owns()/Watches() events through — the owner-reference handler will resolve them to the
+// correct ModelDeployment.
+func dynamoProviderPredicate(obj client.Object) bool {
+	md, ok := obj.(*kubeairunwayv1alpha1.ModelDeployment)
+	if !ok {
+		return true // Allow Owns()/Watches() events (PVCs, Jobs, DGDs) through
+	}
+	// Process if provider is dynamo OR if being deleted (to handle finalizer)
+	if md.Status.Provider != nil && md.Status.Provider.Name == ProviderName {
+		return true
+	}
+	// Also process if spec explicitly requests dynamo
+	if md.Spec.Provider != nil && md.Spec.Provider.Name == ProviderName {
+		return true
+	}
+	// Process if we have our finalizer (for deletion handling)
+	return controllerutil.ContainsFinalizer(md, FinalizerName)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *DynamoProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -498,22 +520,7 @@ func (r *DynamoProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&batchv1.Job{}).
 		// Only watch ModelDeployments where provider.name == "dynamo"
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			md, ok := obj.(*kubeairunwayv1alpha1.ModelDeployment)
-			if !ok {
-				return false
-			}
-			// Process if provider is dynamo OR if being deleted (to handle finalizer)
-			if md.Status.Provider != nil && md.Status.Provider.Name == ProviderName {
-				return true
-			}
-			// Also process if spec explicitly requests dynamo
-			if md.Spec.Provider != nil && md.Spec.Provider.Name == ProviderName {
-				return true
-			}
-			// Process if we have our finalizer (for deletion handling)
-			return controllerutil.ContainsFinalizer(md, FinalizerName)
-		})).
+		WithEventFilter(predicate.NewPredicateFuncs(dynamoProviderPredicate)).
 		// Watch DynamoGraphDeployments owned by ModelDeployments
 		Watches(
 			&unstructured.Unstructured{Object: map[string]interface{}{

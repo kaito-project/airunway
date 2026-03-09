@@ -1147,3 +1147,112 @@ func TestVerifyDynamoOwnershipRejectsNoOwnerRef(t *testing.T) {
 		t.Errorf("expected resourceConflictError, got %T: %v", err, err)
 	}
 }
+
+// --- dynamoProviderPredicate tests ---
+
+func TestDynamoProviderPredicatePassesPVC(t *testing.T) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-model-cache",
+			Namespace: "default",
+		},
+	}
+	if !dynamoProviderPredicate(pvc) {
+		t.Error("expected PVC to pass predicate (non-ModelDeployment objects should always pass)")
+	}
+}
+
+func TestDynamoProviderPredicatePassesJob(t *testing.T) {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-model-download",
+			Namespace: "default",
+		},
+	}
+	if !dynamoProviderPredicate(job) {
+		t.Error("expected Job to pass predicate (non-ModelDeployment objects should always pass)")
+	}
+}
+
+func TestDynamoProviderPredicatePassesUnstructuredDGD(t *testing.T) {
+	dgd := &unstructured.Unstructured{}
+	setDGDGVK(dgd)
+	dgd.SetName("test")
+	dgd.SetNamespace("default")
+	if !dynamoProviderPredicate(dgd) {
+		t.Error("expected DynamoGraphDeployment (unstructured) to pass predicate")
+	}
+}
+
+func TestDynamoProviderPredicatePassesDynamoProviderInStatus(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Status: kubeairunwayv1alpha1.ModelDeploymentStatus{
+			Provider: &kubeairunwayv1alpha1.ProviderStatus{Name: ProviderName},
+		},
+	}
+	if !dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with status.provider.name=dynamo to pass predicate")
+	}
+}
+
+func TestDynamoProviderPredicatePassesDynamoProviderInSpec(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
+			Provider: &kubeairunwayv1alpha1.ProviderSpec{Name: ProviderName},
+		},
+	}
+	if !dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with spec.provider.name=dynamo to pass predicate")
+	}
+}
+
+func TestDynamoProviderPredicatePassesWithFinalizer(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test",
+			Namespace:  "default",
+			Finalizers: []string{FinalizerName},
+		},
+	}
+	if !dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with dynamo finalizer to pass predicate")
+	}
+}
+
+func TestDynamoProviderPredicateRejectsOtherProvider(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Status: kubeairunwayv1alpha1.ModelDeploymentStatus{
+			Provider: &kubeairunwayv1alpha1.ProviderStatus{Name: "kaito"},
+		},
+	}
+	if dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with status.provider.name=kaito to be rejected")
+	}
+}
+
+func TestDynamoProviderPredicateRejectsNoProviderNoFinalizer(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+	}
+	if dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with no provider and no finalizer to be rejected")
+	}
+}
+
+func TestDynamoProviderPredicateRejectsOtherProviderInSpecAndStatus(t *testing.T) {
+	md := &kubeairunwayv1alpha1.ModelDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: kubeairunwayv1alpha1.ModelDeploymentSpec{
+			Provider: &kubeairunwayv1alpha1.ProviderSpec{Name: "kuberay"},
+		},
+		Status: kubeairunwayv1alpha1.ModelDeploymentStatus{
+			Provider: &kubeairunwayv1alpha1.ProviderStatus{Name: "kuberay"},
+		},
+	}
+	if dynamoProviderPredicate(md) {
+		t.Error("expected ModelDeployment with provider=kuberay in both spec and status to be rejected")
+	}
+}
