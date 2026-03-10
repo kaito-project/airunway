@@ -53,7 +53,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb }: HfModelSearchProp
           placeholder="Search HuggingFace models (e.g., llama, mistral, qwen)..."
           value={query}
           onChange={handleSearch}
-          className="pl-12 h-12 rounded-2xl bg-white/[0.03] border-white/5 backdrop-blur-sm text-base placeholder:text-slate-500"
+          className="pl-12 h-12 rounded-2xl bg-white/[0.03] border-white/5 text-base placeholder:text-slate-500"
         />
         {isFetching && (
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />

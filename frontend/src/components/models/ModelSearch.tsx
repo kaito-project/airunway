@@ -31,7 +31,7 @@ export function ModelSearch({
           placeholder="Search models..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-12 h-12 rounded-2xl bg-white/[0.03] border-white/5 backdrop-blur-sm text-base placeholder:text-slate-500"
+          className="pl-12 h-12 rounded-2xl bg-white/[0.03] border-white/5 text-base placeholder:text-slate-500"
         />
       </div>
 
