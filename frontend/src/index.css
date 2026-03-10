@@ -217,19 +217,9 @@
     font-weight: 500;
   }
 
-  /* Background decor radial gradients */
+  /* Background decor — kept minimal, no radial gradients */
   .bg-decor {
-    position: relative;
-  }
-  .bg-decor::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(circle at 30% 20%, rgba(0, 217, 255, 0.06) 0%, transparent 60%),
-      radial-gradient(circle at 80% 80%, rgba(118, 185, 0, 0.04) 0%, transparent 50%);
-    z-index: 0;
+    /* intentionally empty — clean dark background */
   }
 }
 

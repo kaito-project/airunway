@@ -47,13 +47,12 @@ export function ModelsPage() {
   if (isLoading && activeTab === 'curated') {
     return (
       <div className="space-y-6">
-        <div className="relative text-center py-8">
-          <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(circle at 50% 40%, rgba(0,217,255,0.08) 0%, transparent 60%)' }} />
-          <h1 className="font-heading text-4xl flex items-center justify-center gap-3 relative z-10">
+        <div className="text-center py-8">
+          <h1 className="font-heading text-4xl flex items-center justify-center gap-3">
             Model Catalog
             <Sparkles className="h-7 w-7 text-cyan-400" />
           </h1>
-          <p className="text-slate-400 mt-2 relative z-10">
+          <p className="text-slate-400 mt-2">
             Browse curated models or search HuggingFace Hub
           </p>
         </div>
@@ -78,17 +77,16 @@ export function ModelsPage() {
   return (
     <div className="space-y-6">
       {/* Hero section */}
-      <div className="relative text-center py-8">
-        <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(circle at 50% 40%, rgba(0,217,255,0.08) 0%, transparent 60%)' }} />
-        <h1 className="font-heading text-4xl flex items-center justify-center gap-3 relative z-10">
+      <div className="text-center py-8">
+        <h1 className="font-heading text-4xl flex items-center justify-center gap-3">
           Model Catalog
           <Sparkles className="h-7 w-7 text-cyan-400" />
         </h1>
-        <p className="text-slate-400 mt-2 relative z-10">
+        <p className="text-slate-400 mt-2">
           Browse curated models or search HuggingFace Hub
         </p>
         {models && (
-          <p className="text-xs text-slate-500 mt-1 tabular-nums relative z-10">
+          <p className="text-xs text-slate-500 mt-1 tabular-nums">
             {filteredModels.length} of {models.length} models
           </p>
         )}
