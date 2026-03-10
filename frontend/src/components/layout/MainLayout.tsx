@@ -7,7 +7,6 @@ interface SidebarContextValue {
   isOpen: boolean
   setIsOpen: (open: boolean) => void
   toggle: () => void
-  isExpanded: boolean
 }
 
 const SidebarContext = createContext<SidebarContextValue | null>(null)
@@ -29,7 +28,6 @@ export function MainLayout({ children }: MainLayoutProps) {
   useProviderTheme()
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
 
   const toggle = useCallback(() => {
     setIsSidebarOpen(prev => !prev)
@@ -62,7 +60,6 @@ export function MainLayout({ children }: MainLayoutProps) {
     isOpen: isSidebarOpen,
     setIsOpen: setIsSidebarOpen,
     toggle,
-    isExpanded,
   }
 
   return (
@@ -70,7 +67,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       <div className="flex h-screen bg-background">
         {/* Desktop navigation rail — always visible */}
         <div className="hidden md:flex h-full shrink-0">
-          <Sidebar isExpanded={isExpanded} onExpandedChange={setIsExpanded} />
+          <Sidebar />
         </div>
 
         {/* Mobile overlay */}
