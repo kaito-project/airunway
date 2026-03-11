@@ -52,7 +52,7 @@ export function DeployPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-4xl mx-auto animate-slide-up">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
           <ArrowLeft className="h-5 w-5" />
@@ -66,28 +66,20 @@ export function DeployPage() {
       </div>
 
       {/* Model Summary Card */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <CardTitle>{model.name}</CardTitle>
-                {model.fromHfSearch && (
-                  <a
-                    href={`https://huggingface.co/${model.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
-                )}
-              </div>
-              <CardDescription>{model.id}</CardDescription>
-              {model.gated && (
-                <Badge variant="outline" className="mt-2 text-yellow-600 border-yellow-500">
-                  Gated Model
-                </Badge>
+      <div className="glass-panel animate-slide-up" style={{ animationDelay: '50ms', animationFillMode: 'both' }}>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">{model.name}</h2>
+              {model.fromHfSearch && (
+                <a
+                  href={`https://huggingface.co/${model.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
               )}
             </div>
             <Badge variant="outline" className="text-lg px-3 py-1">
@@ -140,12 +132,14 @@ export function DeployPage() {
       </Card>
 
       {/* Deployment Form */}
-      <DeploymentForm
-        model={model}
-        detailedCapacity={detailedCapacity}
-        autoscaler={autoscaler}
-        runtimes={runtimesData?.runtimes}
-      />
+      <div className="animate-slide-up" style={{ animationDelay: '100ms', animationFillMode: 'both' }}>
+        <DeploymentForm
+          model={model}
+          detailedCapacity={detailedCapacity}
+          autoscaler={autoscaler}
+          runtimes={runtimesData?.runtimes}
+        />
+      </div>
     </div>
   )
 }

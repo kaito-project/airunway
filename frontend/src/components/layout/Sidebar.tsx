@@ -22,12 +22,23 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   }
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card overflow-hidden shadow-soft-sm md:shadow-none">
-      {/* Header with logo */}
-      <div className="flex h-16 items-center justify-between border-b px-4 md:px-6">
-        <Link to="/" className="flex items-center gap-2" onClick={handleNavClick}>
-          <img src="/logo.png" alt="KubeAIRunway" className="h-8 w-8" />
-          <span className="text-xl font-bold text-foreground">KubeAIRunway</span>
+    <div
+      className={cn(
+        'flex h-full w-60 flex-col bg-background border-r border-white/5 overflow-hidden',
+        onNavigate && 'shadow-soft-sm'
+      )}
+    >
+      {/* Logo */}
+      <div className="flex h-14 items-center border-b border-white/5 px-4 shrink-0">
+        <Link
+          to="/"
+          className="flex items-center gap-2 min-w-0"
+          onClick={handleNavClick}
+        >
+          <img src="/logo.png" alt="KubeAIRunway" className="h-8 w-8 shrink-0" />
+          <span className="text-xl font-bold text-foreground whitespace-nowrap">
+            KubeAIRunway
+          </span>
         </Link>
         
         {/* Close button - mobile only */}
@@ -63,11 +74,23 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground active:scale-[0.98]'
               )}
             >
-              <item.icon className={cn(
-                'h-5 w-5 transition-transform duration-150',
-                isActive && 'scale-110'
-              )} />
-              {item.name}
+              <span
+                className={cn(
+                  'absolute left-0 w-1 h-8 rounded-full bg-primary transition-all duration-200 ease-out origin-center',
+                  isActive
+                    ? 'opacity-100 scale-y-100'
+                    : 'opacity-0 scale-y-0'
+                )}
+              />
+              <item.icon
+                className={cn(
+                  'h-5 w-5 shrink-0 transition-transform duration-150',
+                  isActive && 'scale-110'
+                )}
+              />
+              <span className="whitespace-nowrap text-slate-300">
+                {item.name}
+              </span>
             </Link>
           )
         })}

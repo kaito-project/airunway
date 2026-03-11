@@ -23,23 +23,24 @@ interface DeploymentListProps {
   isLoading?: boolean
 }
 
-function getProviderBadgeClass(provider: string): string {
-  switch (provider) {
-    case 'kuberay': return 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-    case 'kaito':   return 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
-    case 'llmd':    return 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300'
-    default:        return 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'
+function getStatusDotColor(phase: DeploymentStatus['phase']): string {
+  switch (phase) {
+    case 'Running':     return 'bg-green-500'
+    case 'Pending':     return 'bg-amber-400 animate-pulse'
+    case 'Deploying':   return 'bg-blue-500 animate-pulse'
+    case 'Failed':      return 'bg-red-400'
+    case 'Terminating': return 'bg-slate-400 animate-pulse'
+    default:            return 'bg-slate-500'
   }
 }
 
-function getProviderDisplayName(provider: string): string {
-  switch (provider) {
-    case 'kuberay': return 'KubeRay'
-    case 'kaito':   return 'KAITO'
-    case 'llmd':    return 'llm-d'
-    case 'dynamo':  return 'Dynamo'
-    default:        return provider
+function getReplicaColorClass(deployment: DeploymentStatus): string {
+  if (deployment.mode === 'disaggregated' && deployment.prefillReplicas && deployment.decodeReplicas) {
+    const allReady = deployment.prefillReplicas.ready === deployment.prefillReplicas.desired &&
+                     deployment.decodeReplicas.ready === deployment.decodeReplicas.desired
+    return allReady ? 'text-green-400' : 'text-amber-400'
   }
+  return deployment.replicas.ready === deployment.replicas.desired ? 'text-green-400' : 'text-amber-400'
 }
 
 /**
@@ -112,8 +113,8 @@ export function DeploymentList({ deployments, isLoading }: DeploymentListProps) 
         {deployments.map((deployment, index) => (
           <div
             key={deployment.name}
-            className="rounded-lg border shadow-soft-sm p-4 space-y-3 bg-card"
-            style={{ animationDelay: `${index * 50}ms` }}
+            className="glass-panel !p-4 flex items-center gap-4 group hover:bg-white/5 hover:border-white/10 transition-all duration-200 animate-slide-up"
+            style={{ animationDelay: `${Math.min(index, 12) * 50}ms`, animationFillMode: 'both' }}
           >
             {/* Header: Name and Status */}
             <div className="flex items-start justify-between gap-2">
@@ -138,9 +139,8 @@ export function DeploymentList({ deployments, isLoading }: DeploymentListProps) 
               </Badge>
               <Badge
                 variant="secondary"
-                className={getProviderBadgeClass(deployment.provider)}
               >
-                {getProviderDisplayName(deployment.provider)}
+                {deployment.provider}
               </Badge>
               {deployment.mode === 'disaggregated' && (
                 <Badge variant="secondary" className="text-xs">P/D</Badge>

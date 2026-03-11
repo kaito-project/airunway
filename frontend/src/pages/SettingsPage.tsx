@@ -188,7 +188,7 @@ export function SettingsPage() {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-slide-up">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <Cog className="h-7 w-7 text-muted-foreground" />
@@ -223,7 +223,7 @@ export function SettingsPage() {
 
       {/* General Tab */}
       {activeTab === 'general' && (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-slide-up">
           {/* Cluster Status */}
           <Card variant="elevated">
             <CardHeader>
@@ -273,7 +273,7 @@ export function SettingsPage() {
 
       {/* Runtimes Tab */}
       {activeTab === 'runtimes' && (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-slide-up">
           {/* Prerequisites */}
           <Card>
             <CardHeader>
@@ -639,7 +639,7 @@ export function SettingsPage() {
 
       {/* Integrations Tab */}
       {activeTab === 'integrations' && (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-slide-up">
           {/* GPU Operator */}
           <Card variant="elevated">
             <CardHeader>

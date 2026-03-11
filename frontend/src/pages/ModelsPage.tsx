@@ -72,17 +72,16 @@ export function ModelsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            Model Catalog
-            <Sparkles className="h-6 w-6 text-nvidia" />
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Select a model to deploy
-          </p>
-        </div>
+    <div className="space-y-6 animate-slide-up">
+      {/* Hero section */}
+      <div className="text-center py-8">
+        <h1 className="font-heading text-4xl flex items-center justify-center gap-3">
+          Model Catalog
+          <Sparkles className="h-7 w-7 text-cyan-400" />
+        </h1>
+        <p className="text-slate-400 mt-2">
+          Browse curated models or search HuggingFace Hub
+        </p>
         {models && (
           <p className="text-sm text-muted-foreground tabular-nums">
             {filteredModels.length} of {models.length} models
