@@ -47,10 +47,13 @@ export function ModelsPage() {
   if (isLoading && activeTab === 'curated') {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Model Catalog</h1>
-          <p className="text-muted-foreground mt-1">
-            Select a model to deploy
+        <div className="text-center py-8">
+          <h1 className="font-heading text-4xl flex items-center justify-center gap-3">
+            Model Catalog
+            <Sparkles className="h-7 w-7 text-cyan-400" />
+          </h1>
+          <p className="text-slate-400 mt-2">
+            Browse curated models or search HuggingFace Hub
           </p>
         </div>
         <SkeletonGrid count={8} className="lg:grid-cols-4" />
@@ -83,21 +86,21 @@ export function ModelsPage() {
           Browse curated models or search HuggingFace Hub
         </p>
         {models && (
-          <p className="text-sm text-muted-foreground tabular-nums">
+          <p className="text-xs text-slate-500 mt-1 tabular-nums">
             {filteredModels.length} of {models.length} models
           </p>
         )}
       </div>
 
-      {/* Tab navigation */}
-      <div className="flex gap-1 border-b">
+      {/* Tab navigation — underline variant */}
+      <div className="flex gap-6 border-b border-white/5">
         <button
           onClick={() => setActiveTab('curated')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all duration-200 border-b-2 -mb-px rounded-t-md',
+            'flex items-center gap-2 px-1 py-2.5 text-sm font-medium transition-all duration-200 border-b-2 -mb-px',
             activeTab === 'curated'
-              ? 'border-primary text-primary bg-primary/5'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              ? 'border-cyan-400 text-white'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
           )}
         >
           <BookMarked className={cn(
@@ -109,17 +112,17 @@ export function ModelsPage() {
         <button
           onClick={() => setActiveTab('huggingface')}
           className={cn(
-            'flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all duration-200 border-b-2 -mb-px rounded-t-md',
+            'flex items-center gap-2 px-1 py-2.5 text-sm font-medium transition-all duration-200 border-b-2 -mb-px',
             activeTab === 'huggingface'
-              ? 'border-primary text-primary bg-primary/5'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              ? 'border-cyan-400 text-white'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
           )}
         >
           <Search className={cn(
             "h-4 w-4 transition-transform duration-200",
             activeTab === 'huggingface' && "scale-110"
           )} />
-          Search HuggingFace
+          HuggingFace Hub
         </button>
       </div>
 

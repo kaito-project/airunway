@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { Box, Layers, Settings, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { useClusterStatus } from '@/hooks/useClusterStatus'
 
 const navigation = [
   { name: 'Models', href: '/', icon: Box },
@@ -12,6 +13,33 @@ const navigation = [
 interface SidebarProps {
   /** Callback when a navigation item is clicked (used for mobile to close drawer) */
   onNavigate?: () => void
+}
+
+function ClusterStatusDot() {
+  const { data, isLoading } = useClusterStatus()
+
+  const connected = data?.connected ?? false
+  const connecting = isLoading
+
+  let dotClass: string
+  let label: string
+  if (connecting) {
+    dotClass = 'h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse'
+    label = 'Connecting…'
+  } else if (connected) {
+    dotClass = 'h-2.5 w-2.5 rounded-full bg-emerald-500'
+    label = 'Connected'
+  } else {
+    dotClass = 'h-2.5 w-2.5 rounded-full bg-red-500'
+    label = 'Disconnected'
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      <span className={dotClass} />
+      <span className="text-xs text-slate-400">{label}</span>
+    </div>
+  )
 }
 
 export function Sidebar({ onNavigate }: SidebarProps) {
@@ -40,13 +68,12 @@ export function Sidebar({ onNavigate }: SidebarProps) {
             KubeAIRunway
           </span>
         </Link>
-        
-        {/* Close button - mobile only */}
+
         {onNavigate && (
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden -mr-2"
+            className="ml-auto -mr-2"
             onClick={onNavigate}
             aria-label="Close sidebar"
           >
@@ -56,9 +83,10 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-3 md:p-4">
+      <nav className="flex-1 flex flex-col items-stretch gap-1 px-2 py-4">
         {navigation.map((item) => {
-          const isActive = location.pathname === item.href ||
+          const isActive =
+            location.pathname === item.href ||
             (item.href !== '/' && location.pathname.startsWith(item.href))
 
           return (
@@ -67,10 +95,10 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               to={item.href}
               onClick={handleNavClick}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium',
+                'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium',
                 'transition-all duration-150 ease-out',
                 isActive
-                  ? 'bg-primary text-primary-foreground shadow-soft-sm'
+                  ? 'text-primary'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground active:scale-[0.98]'
               )}
             >
@@ -95,6 +123,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           )
         })}
       </nav>
+
+      {/* Cluster status */}
+      <div className="shrink-0 border-t border-white/5 py-3 px-2">
+        <ClusterStatusDot />
+      </div>
     </div>
   )
 }

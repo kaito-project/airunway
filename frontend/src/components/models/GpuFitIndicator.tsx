@@ -122,6 +122,13 @@ export function getUpgradeDelta(
   return { additionalGb, targetGb };
 }
 
+const gradientMap: Record<GpuFitStatus, string> = {
+  fits: 'from-cyan-400 to-green-400',
+  warning: 'from-cyan-400 to-amber-400',
+  exceeds: 'from-cyan-400 to-red-400',
+  unknown: 'from-slate-600 to-slate-500',
+};
+
 /**
  * GPU Fit Indicator — shows whether a model fits cluster GPU capacity.
  * Inspired by llmfit's fit-level approach: Perfect / Good / Marginal / Won't Fit.

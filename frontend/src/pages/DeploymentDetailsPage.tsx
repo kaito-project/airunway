@@ -1,7 +1,7 @@
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { useDeployment, useDeleteDeployment } from '@/hooks/useDeployments'
 import { useToast } from '@/hooks/useToast'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DeploymentStatusBadge } from '@/components/deployments/DeploymentStatusBadge'
@@ -21,6 +21,7 @@ import { useAutoscalerDetection, usePendingReasons } from '@/hooks/useAutoscaler
 import { PendingExplanation } from '@/components/deployments/PendingExplanation'
 import { DeploymentLogs } from '@/components/deployments/DeploymentLogs'
 import { ManifestViewer } from '@/components/deployments/ManifestViewer'
+
 
 
 export function DeploymentDetailsPage() {
@@ -134,7 +135,7 @@ export function DeploymentDetailsPage() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">{deployment.name}</h1>
+            <h1 className="text-3xl font-heading">{deployment.name}</h1>
             <p className="text-muted-foreground">
               Created {formatRelativeTime(deployment.createdAt)}
             </p>
@@ -214,7 +215,7 @@ export function DeploymentDetailsPage() {
                   Gateway Endpoint
                 </div>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded-lg bg-muted p-3 text-sm font-mono overflow-x-auto">
+                  <code className="flex-1 rounded-xl bg-[#0A0A0A] p-3 text-sm font-mono-code overflow-x-auto">
                     {gatewayBaseUrl}
                   </code>
                   <Button variant="outline" size="icon" onClick={() => {
@@ -230,7 +231,7 @@ export function DeploymentDetailsPage() {
               <div className="space-y-2">
                 <span className="text-sm font-medium">Example Request</span>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded-lg bg-muted p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                  <code className="flex-1 rounded-xl bg-[#0A0A0A] p-3 text-xs font-mono-code overflow-x-auto whitespace-pre-wrap">
                     {`curl ${gatewayBaseUrl}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${gatewayModelName}", "messages": [{"role": "user", "content": "Hello"}]}'`}
                   </code>
                   <Button variant="outline" size="icon" onClick={() => {
@@ -264,7 +265,7 @@ export function DeploymentDetailsPage() {
                 </summary>
                 <div className="mt-2 space-y-2">
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded-lg bg-muted p-3 text-sm font-mono overflow-x-auto">
+                    <code className="flex-1 rounded-xl bg-[#0A0A0A] p-3 text-sm font-mono-code overflow-x-auto">
                       {portForwardCommand}
                     </code>
                     <Button variant="outline" size="icon" onClick={copyPortForwardCommand}>
@@ -280,7 +281,7 @@ export function DeploymentDetailsPage() {
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <code className="flex-1 rounded-lg bg-muted p-3 text-sm font-mono overflow-x-auto">
+                <code className="flex-1 rounded-xl bg-[#0A0A0A] p-3 text-sm font-mono-code overflow-x-auto">
                   {portForwardCommand}
                 </code>
                 <Button variant="outline" size="icon" onClick={copyPortForwardCommand}>
@@ -307,8 +308,8 @@ export function DeploymentDetailsPage() {
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Metrics */}
       <div className="animate-slide-up" style={{ animationDelay: '200ms', animationFillMode: 'both' }}>
