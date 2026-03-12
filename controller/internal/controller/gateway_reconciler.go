@@ -27,13 +27,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
@@ -429,9 +430,6 @@ kind: EndpointPickerConfig
 		return fmt.Errorf("failed to create/update EPP Service: %w", err)
 	}
 
-	// DestinationRule: tell Istio to use SIMPLE TLS (insecureSkipVerify) for the EPP
-	// service. Without this, Istio's ext-proc cluster connects with TLS but the EPP
-	// serves plain gRPC, causing an immediate connection termination.
 	if err := r.reconcileEPPDestinationRule(ctx, md, eppName); err != nil {
 		return fmt.Errorf("failed to create/update EPP DestinationRule: %w", err)
 	}
@@ -442,6 +440,8 @@ kind: EndpointPickerConfig
 
 // reconcileEPPDestinationRule creates or updates the Istio DestinationRule for the EPP service,
 // but only if Istio is detected (i.e. the DestinationRule CRD is registered in the cluster).
+// DestinationRule: tell Istio to use SIMPLE TLS (insecureSkipVerify)
+// to skip cert validation.
 func (r *ModelDeploymentReconciler) reconcileEPPDestinationRule(ctx context.Context, md *kubeairunwayv1alpha1.ModelDeployment, eppName string) error {
 	gk := schema.GroupKind{Group: "networking.istio.io", Kind: "DestinationRule"}
 	if _, err := r.Client.RESTMapper().RESTMapping(gk); err != nil {
@@ -478,24 +478,25 @@ func (r *ModelDeploymentReconciler) reconcileEPPDestinationRule(ctx context.Cont
 func int64Ptr(i int64) *int64 { return &i }
 func strPtr(s string) *string { return &s }
 
-// reconcileHTTPRoute creates or updates the HTTPRoute for a ModelDeployment.
+// reconcileHTTPRoute creates the HTTPRoute for a ModelDeployment on first reconcile.
+// If the HTTPRoute is subsequently deleted by the user the controller will not recreate.
+// The deletion is treated as intentional (BYO / opt-out). The ModelDeployment is
+// annotated with HTTPRouteCreated after the initial creation so that future
+// reconciles will skip recreating a missing route.
 func (r *ModelDeploymentReconciler) reconcileHTTPRoute(ctx context.Context, md *kubeairunwayv1alpha1.ModelDeployment, gwConfig *gateway.GatewayConfig, modelName string) error {
-	route := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      md.Name,
-			Namespace: md.Namespace,
-		},
-	}
+	logger := log.FromContext(ctx)
 
-	group := gatewayv1.Group("inference.networking.k8s.io")
-	kind := gatewayv1.Kind("InferencePool")
-	ns := gatewayv1.Namespace(gwConfig.GatewayNamespace)
-
-	result, err := ctrl.CreateOrUpdate(ctx, r.Client, route, func() error {
+	existing := &gatewayv1.HTTPRoute{}
+	err := r.Get(ctx, client.ObjectKey{Name: md.Name, Namespace: md.Namespace}, existing)
+	if err == nil {
+		// HTTPRoute exists — update it in case model name or gateway changed.
+		group := gatewayv1.Group("inference.networking.k8s.io")
+		kind := gatewayv1.Kind("InferencePool")
+		ns := gatewayv1.Namespace(gwConfig.GatewayNamespace)
 		pathPrefix := gatewayv1.PathMatchPathPrefix
 		headerExact := gatewayv1.HeaderMatchExact
 		timeout := gatewayv1.Duration("300s")
-		route.Spec = gatewayv1.HTTPRouteSpec{
+		existing.Spec = gatewayv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{
 				ParentRefs: []gatewayv1.ParentReference{
 					{
@@ -538,14 +539,97 @@ func (r *ModelDeploymentReconciler) reconcileHTTPRoute(ctx context.Context, md *
 				},
 			},
 		}
-		return ctrl.SetControllerReference(md, route, r.Scheme)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create/update HTTPRoute: %w", err)
+		if updateErr := r.Update(ctx, existing); updateErr != nil {
+			return fmt.Errorf("failed to update HTTPRoute: %w", updateErr)
+		}
+		logger.V(1).Info("HTTPRoute updated", "name", existing.Name)
+		return nil
 	}
+	if apierrors.IsNotFound(err) {
+		// HTTPRoute is missing. If we created one previously the user deleted it
+		// intentionally — respect that and do not recreate.
+		if md.Annotations[kubeairunwayv1alpha1.HTTPRouteCreated] == "true" {
+			logger.V(1).Info("HTTPRoute was deleted by user, skipping recreation", "name", md.Name)
+			return nil
+		}
 
-	log.FromContext(ctx).V(1).Info("HTTPRoute reconciled", "name", route.Name, "result", result)
-	return nil
+		// First-time creation.
+		group := gatewayv1.Group("inference.networking.k8s.io")
+		kind := gatewayv1.Kind("InferencePool")
+		ns := gatewayv1.Namespace(gwConfig.GatewayNamespace)
+		pathPrefix := gatewayv1.PathMatchPathPrefix
+		headerExact := gatewayv1.HeaderMatchExact
+		timeout := gatewayv1.Duration("300s")
+		route := &gatewayv1.HTTPRoute{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      md.Name,
+				Namespace: md.Namespace,
+			},
+			Spec: gatewayv1.HTTPRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{
+					ParentRefs: []gatewayv1.ParentReference{
+						{
+							Name:      gatewayv1.ObjectName(gwConfig.GatewayName),
+							Namespace: &ns,
+						},
+					},
+				},
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						Matches: []gatewayv1.HTTPRouteMatch{
+							{
+								Path: &gatewayv1.HTTPPathMatch{
+									Type:  &pathPrefix,
+									Value: strPtr("/"),
+								},
+								Headers: []gatewayv1.HTTPHeaderMatch{
+									{
+										Type:  &headerExact,
+										Name:  "X-Gateway-Model-Name", // https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/pkg/bbr/README.md
+										Value: modelName,
+									},
+								},
+							},
+						},
+						BackendRefs: []gatewayv1.HTTPBackendRef{
+							{
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Group: &group,
+										Kind:  &kind,
+										Name:  gatewayv1.ObjectName(md.Name),
+									},
+								},
+							},
+						},
+						Timeouts: &gatewayv1.HTTPRouteTimeouts{
+							Request: &timeout,
+						},
+					},
+				},
+			},
+		}
+		if setErr := ctrl.SetControllerReference(md, route, r.Scheme); setErr != nil {
+			return fmt.Errorf("setting controller reference: %w", setErr)
+		}
+		if createErr := r.Create(ctx, route); createErr != nil {
+			return fmt.Errorf("failed to create HTTPRoute: %w", createErr)
+		}
+		logger.Info("HTTPRoute created", "name", route.Name)
+
+		// Annotate the ModelDeployment so future reconciles know we created a route.
+		patch := client.MergeFrom(md.DeepCopy())
+		if md.Annotations == nil {
+			md.Annotations = make(map[string]string)
+		}
+		md.Annotations[kubeairunwayv1alpha1.HTTPRouteCreated] = "true"
+		if patchErr := r.Patch(ctx, md, patch); patchErr != nil {
+			// Non-fatal: worst case we recreate the route once on the next reconcile.
+			logger.V(1).Info("Could not annotate ModelDeployment after HTTPRoute creation", "error", patchErr)
+		}
+		return nil
+	}
+	return fmt.Errorf("getting HTTPRoute: %w", err)
 }
 
 // resolveGatewayEndpoint reads the Gateway resource's status to find the actual endpoint address.

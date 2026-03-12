@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	inferencev1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	kubeairunwayv1alpha1 "github.com/kaito-project/kubeairunway/controller/api/v1alpha1"
 	"github.com/kaito-project/kubeairunway/controller/internal/gateway"
@@ -581,12 +580,13 @@ func (r *ModelDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kubeairunwayv1alpha1.ModelDeployment{}).
 		Named("modeldeployment")
 
-	// Watch gateway-owned resources so the controller reconciles when they are deleted.
-	// Only add these watches if the gateway CRDs are actually installed.
+	// Watch InferencePool so the controller reconciles when one is created/deleted.
+	// HTTPRoutes are not watched — they may be user-managed (BYO) and we don't
+	// want deletion of an HTTPRoute to trigger a reconcile that recreates it.
+	// Only add this watch if the gateway CRDs are actually installed.
 	if r.GatewayDetector != nil && r.GatewayDetector.IsAvailable(context.Background()) {
 		builder = builder.
-			Owns(&inferencev1.InferencePool{}).
-			Owns(&gatewayv1.HTTPRoute{})
+			Owns(&inferencev1.InferencePool{})
 	}
 
 	return builder.Complete(r)
