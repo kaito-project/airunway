@@ -6,7 +6,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Plus, X, HardDrive, Info } from 'lucide-react'
 import type { StorageVolume, VolumePurpose, PersistentVolumeAccessMode } from '@kubeairunway/shared'
 
@@ -29,6 +28,30 @@ interface StorageVolumesSectionProps {
   volumes: StorageVolume[]
   onChange: (volumes: StorageVolume[]) => void
   deploymentName?: string
+}
+
+// Cross-browser info tooltip using native title + visible popover on hover/focus.
+// Radix Tooltip is unreliable on Safari for small icon triggers.
+function InfoHint({ text }: { text: string }) {
+  return (
+    <span className="relative group/hint inline-flex">
+      <button
+        type="button"
+        tabIndex={0}
+        aria-label={text}
+        title={text}
+        className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Info className="h-3.5 w-3.5" />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs rounded-lg border border-white/10 bg-[#0F1419]/95 backdrop-blur-md px-3 py-1.5 text-sm text-popover-foreground shadow-md opacity-0 transition-opacity group-hover/hint:opacity-100 group-focus-within/hint:opacity-100 z-50"
+      >
+        {text}
+      </span>
+    </span>
+  )
 }
 
 function generateVolumeName(existingVolumes: StorageVolume[]): string {
@@ -68,7 +91,9 @@ function validateMountPath(mountPath: string | undefined, purpose: VolumePurpose
 export function StorageVolumesSection({ volumes, onChange, deploymentName }: StorageVolumesSectionProps) {
   // Track which volume cards have been interacted with for showing validation
   const [touched, setTouched] = useState<Record<number, Set<string>>>({})
-
+  // Explicitly track PVC source mode per volume index.
+  // Derived-from-data approach breaks because empty-string claimName is falsy.
+  const [sourceModes, setSourceModes] = useState<Record<number, 'new' | 'existing'>>({})
   const markTouched = (index: number, field: string) => {
     setTouched(prev => {
       const fields = new Set(prev[index] || [])
@@ -81,6 +106,7 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
 
   const addVolume = () => {
     if (volumes.length >= MAX_VOLUMES) return
+    const newIndex = volumes.length
     const newVolume: StorageVolume = {
       name: generateVolumeName(volumes),
       purpose: 'custom',
@@ -88,18 +114,28 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
       size: '100Gi',
       accessMode: 'ReadWriteMany',
     }
+    setSourceModes(prev => ({ ...prev, [newIndex]: 'new' }))
     onChange([...volumes, newVolume])
   }
 
   const removeVolume = (index: number) => {
     const updated = volumes.filter((_, i) => i !== index)
     onChange(updated)
-    // Clean up touched state
+    // Clean up touched + sourceMode state and re-index
     setTouched(prev => {
       const next = { ...prev }
       delete next[index]
-      // Re-index entries above the removed index
       const reindexed: Record<number, Set<string>> = {}
+      for (const [key, value] of Object.entries(next)) {
+        const k = parseInt(key)
+        reindexed[k > index ? k - 1 : k] = value
+      }
+      return reindexed
+    })
+    setSourceModes(prev => {
+      const next = { ...prev }
+      delete next[index]
+      const reindexed: Record<number, 'new' | 'existing'> = {}
       for (const [key, value] of Object.entries(next)) {
         const k = parseInt(key)
         reindexed[k > index ? k - 1 : k] = value
@@ -132,23 +168,22 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
       .filter((p): p is VolumePurpose => p === 'modelCache' || p === 'compilationCache')
   )
 
-  // Determine source mode per volume for UI toggle
-  const getSourceMode = (vol: StorageVolume): 'new' | 'existing' => {
-    // If size is set, it's "Create New PVC"
+  // Determine source mode: use explicit state if set, otherwise derive from data
+  // (for volumes loaded from existing config that didn't go through addVolume)
+  const getSourceMode = (vol: StorageVolume, index: number): 'new' | 'existing' => {
+    if (sourceModes[index] !== undefined) return sourceModes[index]
+    // Derive from data for pre-existing volumes
     if (vol.size) return 'new'
-    // If claimName is set without size, it's "Use Existing PVC"
-    if (vol.claimName) return 'existing'
-    // Default to 'new' for new volumes
+    if (vol.claimName !== undefined) return 'existing'
     return 'new'
   }
 
   return (
-    <TooltipProvider>
       <div className="space-y-4">
         {volumes.map((vol, index) => {
           const nameError = isTouched(index, 'name') ? validateVolumeName(vol.name, index, volumes) : null
           const mountPathError = isTouched(index, 'mountPath') ? validateMountPath(vol.mountPath, vol.purpose, index, volumes) : null
-          const sourceMode = getSourceMode(vol)
+          const sourceMode = getSourceMode(vol, index)
           const isNewPvc = sourceMode === 'new'
 
           return (
@@ -258,7 +293,9 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
                 <RadioGroup
                   value={sourceMode}
                   onValueChange={(value) => {
-                    if (value === 'new') {
+                    const mode = value as 'new' | 'existing'
+                    setSourceModes(prev => ({ ...prev, [index]: mode }))
+                    if (mode === 'new') {
                       // Switching to "Create New PVC" - clear claimName, set a default size
                       updateVolume(index, {
                         size: vol.size || '100Gi',
@@ -364,16 +401,7 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
                 <div className="flex items-center gap-2">
                   <Label className="font-normal">Read Only</Label>
                   {isNewPvc && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button type="button" className="inline-flex text-muted-foreground hover:text-foreground transition-colors">
-                          <Info className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Controller-created PVCs require write access</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <InfoHint text="Controller-created PVCs require write access" />
                   )}
                 </div>
                 <Switch
@@ -410,7 +438,6 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
           )}
         </Button>
       </div>
-    </TooltipProvider>
   )
 }
 
@@ -434,19 +461,7 @@ function StorageClassField({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Label htmlFor={`vol-sc-${index}`}>Storage Class</Label>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className="inline-flex text-muted-foreground hover:text-foreground transition-colors">
-              <Info className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <p>
-              <strong>Cluster default</strong>: omits storageClassName (uses cluster&apos;s default StorageClass).{' '}
-              <strong>Custom</strong>: specify a class name, or leave empty to disable dynamic provisioning.
-            </p>
-          </TooltipContent>
-        </Tooltip>
+        <InfoHint text="Cluster default: omits storageClassName (uses cluster's default StorageClass). Custom: specify a class name, or leave empty to disable dynamic provisioning." />
       </div>
 
       <div className="flex items-center gap-3">
