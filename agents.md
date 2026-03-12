@@ -28,15 +28,11 @@
 
 **Headlamp plugin**: When working on `plugins/headlamp/`, read [plugins/headlamp/README.md](plugins/headlamp/README.md) for patterns and best practices. Key rules: use Headlamp's built-in components (`SectionBox`, `SimpleTable`, etc.), never bundle React, use `@kubeairunway/shared` for types/API.
 
-**UI language**: Assume the user is **not familiar with Kubernetes**. All user-facing text in the Web UI and Headlamp plugin must use plain, approachable language instead of Kubernetes jargon:
-- "disk" not "PVC" or "persistent volume claim"
-- "container path" not "mount path"
-- "sharing" not "access mode"
-- "storage type" not "storage class"
-- "single node" / "multi-node" not "ReadWriteOnce" / "ReadWriteMany"
-- "disk source" not "storage source"
+**UI language**: Assume the user is **not familiar with Kubernetes**. All user-facing text in the Web UI and Headlamp plugin must use plain, approachable language:
+- Avoid Kubernetes-specific terms (PVC, StorageClass, access modes, mount paths, etc.) in labels, descriptions, and hints
+- Use everyday equivalents users already understand (e.g. "disk" instead of "PVC", "path" instead of "mount path")
 - Add `InfoHint` tooltips to explain technical fields in plain language
-- Kubernetes-specific terms (PVC names, storage class names, etc.) are fine in code comments, YAML previews, and backend validation messages — just not in labels, descriptions, or user-facing hints
+- Kubernetes-specific terms are fine in code comments, YAML previews, and backend validation messages — just not in user-facing UI text
 
 ## HOW: Development Commands
 
