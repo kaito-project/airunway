@@ -42,9 +42,10 @@ const DNS_LABEL_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const SYSTEM_PATHS = ['/dev', '/proc', '/sys', '/etc', '/var/run'];
 
-// Matches Kubernetes resource.Quantity: integer, decimal, or exponential with optional
+// Matches Kubernetes resource.Quantity: a valid decimal number with optional
 // binary (Ki, Mi, Gi, Ti, Pi, Ei) or decimal (n, u, m, k, M, G, T, P, E) suffix.
-const K8S_QUANTITY_REGEX = /^([+-]?[0-9.]+)(([eE][-+]?[0-9]+)|([KMGTPE]i?)|[numkMGTPE])?$/;
+// Requires at least one digit; rejects bare dots, multiple dots, etc.
+const K8S_QUANTITY_REGEX = /^[+-]?(\d+\.?\d*|\d*\.?\d+)([eE][+-]?\d+|[KMGTPE]i?|[numkMGTPE])?$/;
 
 const storageVolumeSchema = z.object({
   name: z.string()
@@ -102,6 +103,21 @@ const createDeploymentSchema = z.object({
   const volumes = data.storage?.volumes;
   if (!volumes || volumes.length === 0) return;
 
+  // Default mount path map (mirrors webhook defaults)
+  const DEFAULT_MOUNT_PATHS: Record<string, string> = {
+    modelCache: '/model-cache',
+    compilationCache: '/compilation-cache',
+  };
+
+  // Resolve effective values that the webhook would default,
+  // so uniqueness checks match what the cluster will actually see.
+  const resolvedMountPaths = volumes.map(
+    (vol) => vol.mountPath || DEFAULT_MOUNT_PATHS[vol.purpose || ''] || ''
+  );
+  const resolvedClaimNames = volumes.map(
+    (vol) => vol.claimName || (vol.size ? `${data.name}-${vol.name}` : '')
+  );
+
   // Rule 1: Unique volume names
   const names = new Set<string>();
   for (let i = 0; i < volumes.length; i++) {
@@ -115,10 +131,10 @@ const createDeploymentSchema = z.object({
     names.add(volumes[i].name);
   }
 
-  // Rule 2: Unique mount paths
+  // Rule 2: Unique mount paths (using resolved defaults)
   const mountPaths = new Set<string>();
   for (let i = 0; i < volumes.length; i++) {
-    const mp = volumes[i].mountPath;
+    const mp = resolvedMountPaths[i];
     if (mp) {
       if (mountPaths.has(mp)) {
         ctx.addIssue({
@@ -131,10 +147,10 @@ const createDeploymentSchema = z.object({
     }
   }
 
-  // Rule 3: Unique claim names
+  // Rule 3: Unique claim names (using resolved defaults)
   const claimNames = new Set<string>();
   for (let i = 0; i < volumes.length; i++) {
-    const cn = volumes[i].claimName;
+    const cn = resolvedClaimNames[i];
     if (cn) {
       if (claimNames.has(cn)) {
         ctx.addIssue({

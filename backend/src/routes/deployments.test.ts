@@ -304,6 +304,67 @@ describe('Deployment Routes', () => {
         expect(res.status).toBe(200);
       }
     });
+
+    test('rejects malformed quantity strings like bare dot or double dots', async () => {
+      for (const size of ['.', '1..2', '..5Gi', '.Gi']) {
+        const body = {
+          ...validDeploymentBody,
+          storage: {
+            volumes: [
+              { name: 'my-vol', purpose: 'custom', mountPath: '/data', size },
+            ],
+          },
+        };
+
+        const res = await app.request('/api/deployments/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(res.status).toBe(400);
+      }
+    });
+
+    test('rejects defaulted mount path collision with explicit mount path', async () => {
+      // modelCache defaults to /model-cache; another volume explicitly uses /model-cache
+      const body = {
+        ...validDeploymentBody,
+        storage: {
+          volumes: [
+            { name: 'cache', purpose: 'modelCache', size: '50Gi' },
+            { name: 'other', purpose: 'custom', mountPath: '/model-cache', claimName: 'other-pvc' },
+          ],
+        },
+      };
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    test('rejects defaulted claim name collision with explicit claim name', async () => {
+      // Managed vol {name:'cache', size:'10Gi'} defaults claimName to test-deploy-cache;
+      // another volume explicitly uses claimName: test-deploy-cache
+      const body = {
+        ...validDeploymentBody,
+        storage: {
+          volumes: [
+            { name: 'cache', purpose: 'modelCache', mountPath: '/model-cache', size: '10Gi' },
+            { name: 'other', purpose: 'custom', mountPath: '/other', claimName: 'test-deploy-cache' },
+          ],
+        },
+      };
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(400);
+    });
   });
 
   describe('POST /api/deployments/preview - admission defaults', () => {

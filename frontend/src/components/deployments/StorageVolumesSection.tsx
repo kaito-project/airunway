@@ -338,7 +338,15 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName }: Sto
                         <Input
                           id={`vol-size-${index}`}
                           value={vol.size || ''}
-                          onChange={(e) => updateVolume(index, { size: e.target.value || undefined })}
+                          onChange={(e) => {
+                            const newSize = e.target.value || undefined
+                            updateVolume(index, { size: newSize })
+                            // If the user clears size entirely, switch to "existing" mode
+                            // so the claimName field becomes visible and the form stays valid.
+                            if (!newSize) {
+                              setSourceModes(prev => ({ ...prev, [index]: 'existing' }))
+                            }
+                          }}
                           placeholder="e.g. 100Gi"
                         />
                       </div>
