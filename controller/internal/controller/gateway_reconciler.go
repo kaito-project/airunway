@@ -28,6 +28,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -363,12 +365,14 @@ kind: EndpointPickerConfig
 							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler:        corev1.ProbeHandler{GRPC: &corev1.GRPCAction{Port: 9003, Service: strPtr("inference-extension")}},
-								InitialDelaySeconds: 5,
+								InitialDelaySeconds: 30,
 								PeriodSeconds:       10,
+								FailureThreshold:    5,
 							},
 							ReadinessProbe: &corev1.Probe{
-								ProbeHandler:  corev1.ProbeHandler{GRPC: &corev1.GRPCAction{Port: 9003, Service: strPtr("inference-extension")}},
-								PeriodSeconds: 2,
+								ProbeHandler:        corev1.ProbeHandler{GRPC: &corev1.GRPCAction{Port: 9003, Service: strPtr("inference-extension")}},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       5,
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "plugins-config", MountPath: "/config"},
@@ -414,8 +418,50 @@ kind: EndpointPickerConfig
 		return fmt.Errorf("failed to create/update EPP Service: %w", err)
 	}
 
+	// DestinationRule: tell Istio to use SIMPLE TLS (insecureSkipVerify) for the EPP
+	// service. Without this, Istio's ext-proc cluster connects with TLS but the EPP
+	// serves plain gRPC, causing an immediate connection termination.
+	if err := r.reconcileEPPDestinationRule(ctx, md, eppName); err != nil {
+		return fmt.Errorf("failed to create/update EPP DestinationRule: %w", err)
+	}
+
 	log.FromContext(ctx).V(1).Info("EPP reconciled", "name", eppName, "image", eppImage)
 	return nil
+}
+
+// reconcileEPPDestinationRule creates or updates the Istio DestinationRule for the EPP service,
+// but only if Istio is detected (i.e. the DestinationRule CRD is registered in the cluster).
+func (r *ModelDeploymentReconciler) reconcileEPPDestinationRule(ctx context.Context, md *kubeairunwayv1alpha1.ModelDeployment, eppName string) error {
+	gk := schema.GroupKind{Group: "networking.istio.io", Kind: "DestinationRule"}
+	if _, err := r.Client.RESTMapper().RESTMapping(gk); err != nil {
+		log.FromContext(ctx).V(1).Info("Istio not detected, skipping DestinationRule", "eppName", eppName)
+		return nil
+	}
+
+	dr := &unstructured.Unstructured{}
+	dr.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "networking.istio.io",
+		Version: "v1beta1",
+		Kind:    "DestinationRule",
+	})
+	dr.SetName(eppName)
+	dr.SetNamespace(md.Namespace)
+
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, dr, func() error {
+		if err := unstructured.SetNestedField(dr.Object, map[string]interface{}{
+			"host": fmt.Sprintf("%s.%s.svc.cluster.local", eppName, md.Namespace),
+			"trafficPolicy": map[string]interface{}{
+				"tls": map[string]interface{}{
+					"mode":               "SIMPLE",
+					"insecureSkipVerify": true,
+				},
+			},
+		}, "spec"); err != nil {
+			return err
+		}
+		return ctrl.SetControllerReference(md, dr, r.Scheme)
+	})
+	return err
 }
 
 func int64Ptr(i int64) *int64 { return &i }
@@ -458,15 +504,9 @@ func (r *ModelDeploymentReconciler) reconcileHTTPRoute(ctx context.Context, md *
 							Headers: []gatewayv1.HTTPHeaderMatch{
 								{
 									Type:  &headerExact,
-									Name:  "X-Gateway-Base-Model-Name",
+									Name:  "X-Gateway-Model-Name", // https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/pkg/bbr/README.md
 									Value: modelName,
 								},
-							},
-						},
-						{
-							Path: &gatewayv1.HTTPPathMatch{
-								Type:  &pathPrefix,
-								Value: strPtr("/"),
 							},
 						},
 					},
@@ -708,6 +748,15 @@ func (r *ModelDeploymentReconciler) cleanupGatewayResources(ctx context.Context,
 		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: eppName, Namespace: md.Namespace}},
 		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: eppName, Namespace: md.Namespace}},
 		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: eppName, Namespace: md.Namespace}},
+	}
+
+	// Conditionally delete the DestinationRule if Istio is present
+	if _, err := r.Client.RESTMapper().RESTMapping(schema.GroupKind{Group: "networking.istio.io", Kind: "DestinationRule"}); err == nil {
+		dr := &unstructured.Unstructured{}
+		dr.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1beta1", Kind: "DestinationRule"})
+		dr.SetName(eppName)
+		dr.SetNamespace(md.Namespace)
+		eppResources = append(eppResources, dr)
 	}
 	for _, obj := range eppResources {
 		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
