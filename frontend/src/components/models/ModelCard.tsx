@@ -85,7 +85,7 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount }: ModelCardProps) {
           <div className="flex items-center gap-2 text-slate-400">
             <Cpu className="h-4 w-4 shrink-0" />
             {isCpuModel && estimatedCpuRamGb ? (
-              <span className="truncate">CPU · ~{estimatedCpuRamGb} GB RAM</span>
+              <span className="truncate">CPU/GPU · ~{estimatedCpuRamGb} GB</span>
             ) : estimatedGpuMemoryGb && gpuCapacityGb ? (
               <GpuFitIndicator
                 estimatedGpuMemoryGb={estimatedGpuMemoryGb}
