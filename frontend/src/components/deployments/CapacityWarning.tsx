@@ -47,24 +47,6 @@ export function CapacityWarning({
   if (multiNode) {
     const totalMultiNodeGpus = multiNode.totalGpus * (replicas || 1);
 
-    if (totalMultiNodeGpus > capacity.totalGpus) {
-      // Total cluster GPUs are insufficient even with multi-node — show as yellow warning and return early
-      return (
-        <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950/20">
-          <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertTitle className="text-yellow-800 dark:text-yellow-200">
-            Insufficient cluster GPUs for multi-node deployment
-          </AlertTitle>
-          <AlertDescription className="text-yellow-700 dark:text-yellow-300">
-            <p>
-              Model will be distributed across {multiNode.nodeCount} node{multiNode.nodeCount > 1 ? 's' : ''} with {multiNode.gpusPerNode} GPU{multiNode.gpusPerNode > 1 ? 's' : ''} each ({multiNode.totalGpus} GPUs per replica),
-              but the cluster only has {capacity.totalGpus} total GPU{capacity.totalGpus > 1 ? 's' : ''}.
-            </p>
-          </AlertDescription>
-        </Alert>
-      );
-    }
-
     // Purple info banner — will be combined with any availability warning below
     multiNodeBanner = (
       <Alert className="border-purple-500 bg-purple-50 dark:bg-purple-950/20">

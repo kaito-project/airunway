@@ -297,17 +297,24 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   }, [gpuRecommendation.recommendedGpus])
 
   // Separate effect: apply/clear multi-node config when recommendation changes (e.g. after capacity loads)
+  // Only applies to aggregated-mode Dynamo deployments (disaggregated has its own prefill/decode topology).
   useEffect(() => {
     if (selectedRuntime !== 'dynamo') return;
+    if (config.mode !== 'aggregated') return;
 
     const currentNodeCount = getNodeCountFromOverrides(config.providerOverrides);
     const recNodeCount = gpuRecommendation.multiNode?.nodeCount;
 
     if (gpuRecommendation.multiNode) {
-      // Apply multi-node settings if they differ from current state
+      // Apply multi-node settings if they differ from current state.
+      // Also sync resources.gpu to recommendedGpus so GPU count, TP, and nodeCount stay consistent.
       if (currentNodeCount !== recNodeCount) {
         setConfig(prev => ({
           ...prev,
+          resources: {
+            ...prev.resources,
+            gpu: gpuRecommendation.recommendedGpus,
+          },
           providerOverrides: {
             spec: {
               services: {
@@ -340,7 +347,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gpuRecommendation.multiNode?.nodeCount, selectedRuntime])
+  }, [gpuRecommendation.multiNode?.nodeCount, gpuRecommendation.recommendedGpus, selectedRuntime, config.mode])
 
   // Auto-select matching premade model when navigating with a KAITO model from Models page
   useEffect(() => {
@@ -1257,7 +1264,22 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
             onValueChange={(value) => {
               // Only allow changing mode for non-KAITO runtimes
               if (selectedRuntime !== 'kaito') {
-                updateConfig('mode', value as DeploymentMode)
+                const newMode = value as DeploymentMode;
+                // Clear aggregated-only multi-node overrides when switching to disaggregated
+                if (newMode === 'disaggregated') {
+                  setConfig(prev => {
+                    const newEngineArgs = { ...prev.engineArgs };
+                    delete newEngineArgs['tensor-parallel-size'];
+                    return {
+                      ...prev,
+                      mode: newMode,
+                      providerOverrides: undefined,
+                      engineArgs: Object.keys(newEngineArgs).length > 0 ? newEngineArgs : undefined,
+                    };
+                  })
+                } else {
+                  updateConfig('mode', newMode)
+                }
               }
             }}
             className="grid gap-4 sm:grid-cols-2"

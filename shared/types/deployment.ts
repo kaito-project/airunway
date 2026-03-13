@@ -262,9 +262,9 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
     },
   };
 
-  if (config.provider) {
+  if (config.provider || config.providerOverrides) {
     spec.provider = {
-      name: config.provider,
+      ...(config.provider && { name: config.provider }),
       ...(config.providerOverrides && { overrides: config.providerOverrides }),
     };
   }
