@@ -102,7 +102,7 @@ export function DeployPage() {
                 <GpuFitIndicator
                   estimatedGpuMemoryGb={model.estimatedGpuMemoryGb}
                   clusterCapacityGb={detailedCapacity.totalMemoryGb}
-                  gpuCount={detailedCapacity.maxNodeGpuCapacity}
+                  gpuCount={detailedCapacity.maxContiguousAvailable}
                 />
             ) : (
               <span>GPU: {model.estimatedGpuMemory || model.minGpuMemory || 'N/A'}</span>

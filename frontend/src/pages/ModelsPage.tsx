@@ -18,10 +18,8 @@ export function ModelsPage() {
   const [selectedEngines, setSelectedEngines] = useState<Engine[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('curated')
 
-  // Derive max GPUs on a single node (a deployment can only span one node)
-  const maxNodeGpuCapacity = gpuCapacity?.nodes?.length
-    ? Math.max(...gpuCapacity.nodes.map(n => n.totalGpus))
-    : undefined
+  // Max available GPUs on a single node (accounts for allocated workloads)
+  const maxContiguousAvailable = gpuCapacity?.maxContiguousAvailable
 
   const filteredModels = useMemo(() => {
     if (!models) return []
@@ -146,7 +144,7 @@ export function ModelsPage() {
 
       {/* HuggingFace search tab */}
       {activeTab === 'huggingface' && (
-        <HfModelSearch gpuCapacityGb={gpuCapacity?.totalMemoryGb} gpuCount={maxNodeGpuCapacity} />
+        <HfModelSearch gpuCapacityGb={gpuCapacity?.totalMemoryGb} gpuCount={maxContiguousAvailable} />
       )}
     </div>
   )

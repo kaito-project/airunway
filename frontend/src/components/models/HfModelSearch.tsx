@@ -31,10 +31,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount }: HfModel
 
   // Use provided GPU capacity or estimate from cluster
   const maxGpuMemoryGb = gpuCapacityGb ?? gpuCapacity?.totalMemoryGb;
-  const fallbackMaxNodeGpus = gpuCapacity?.nodes?.length
-    ? Math.max(...gpuCapacity.nodes.map(n => n.totalGpus))
-    : undefined;
-  const effectiveGpuCount = gpuCount ?? fallbackMaxNodeGpus;
+  const effectiveGpuCount = gpuCount ?? gpuCapacity?.maxContiguousAvailable;
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);
