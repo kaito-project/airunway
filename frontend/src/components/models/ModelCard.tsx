@@ -21,6 +21,27 @@ function parseGpuMemoryGb(memoryStr?: string): number | undefined {
   return match ? parseFloat(match[1]) : undefined
 }
 
+/**
+ * Estimate RAM needed for a GGUF model based on parameter count.
+ * GGUF Q4_K_M quantization ≈ 0.6 GB per billion parameters + overhead.
+ */
+function estimateGgufRamGb(sizeStr?: string): number | undefined {
+  if (!sizeStr) return undefined
+  // Handle MoE format like "8x7B"
+  const moeMatch = sizeStr.match(/(\d+)x(\d+(?:\.\d+)?)\s*B/i)
+  if (moeMatch) {
+    const experts = parseFloat(moeMatch[1])
+    const perExpert = parseFloat(moeMatch[2])
+    // MoE: all expert params exist in memory
+    return Math.ceil(experts * perExpert * 0.6 + 2)
+  }
+  const match = sizeStr.match(/(\d+(?:\.\d+)?)\s*B/i)
+  if (!match) return undefined
+  const billions = parseFloat(match[1])
+  // Q4_K_M ≈ 0.6 GB/B + ~2 GB overhead for KV cache and runtime
+  return Math.ceil(billions * 0.6 + 2)
+}
+
 export function ModelCard({ model, gpuCapacityGb, gpuCount }: ModelCardProps) {
   const navigate = useNavigate()
 
@@ -28,7 +49,9 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount }: ModelCardProps) {
     navigate(`/deploy/${encodeURIComponent(model.id)}`)
   }
 
+  const isCpuModel = model.minGpus === 0 || model.supportedEngines.every(e => e === 'llamacpp')
   const estimatedGpuMemoryGb = model.estimatedGpuMemoryGb ?? parseGpuMemoryGb(model.minGpuMemory)
+  const estimatedCpuRamGb = isCpuModel ? estimateGgufRamGb(model.size) : undefined
 
   return (
     <div
@@ -61,7 +84,9 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount }: ModelCardProps) {
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <Cpu className="h-4 w-4 shrink-0" />
-            {estimatedGpuMemoryGb && gpuCapacityGb ? (
+            {isCpuModel && estimatedCpuRamGb ? (
+              <span className="truncate">CPU · ~{estimatedCpuRamGb} GB RAM</span>
+            ) : estimatedGpuMemoryGb && gpuCapacityGb ? (
               <GpuFitIndicator
                 estimatedGpuMemoryGb={estimatedGpuMemoryGb}
                 clusterCapacityGb={gpuCapacityGb}

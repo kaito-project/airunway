@@ -17,6 +17,8 @@ interface GpuFitIndicatorProps {
   clusterCapacityGb?: number;
   /** Number of GPUs available — capacity is multiplied by this (default 1) */
   gpuCount?: number;
+  /** Whether this is a CPU (RAM) or GPU (VRAM) fit indicator */
+  mode?: 'gpu' | 'cpu';
   className?: string;
 }
 
@@ -55,46 +57,46 @@ const fitConfig: Record<GpuFitLevel, {
   bar: string;
   text: string;
   icon: typeof CheckCircle2;
-  detail: (estGb: number, capGb: number, pct: number) => string;
+  detail: (estGb: number, capGb: number, pct: number, memLabel: string) => string;
 }> = {
   perfect: {
     label: 'Perfect fit',
     bar: 'from-green-400 to-emerald-500',
     text: 'text-green-400',
     icon: CheckCircle2,
-    detail: (est, cap, pct) =>
-      `${est.toFixed(1)} GB of ${cap} GB VRAM (${pct}% utilization) — plenty of headroom`,
+    detail: (est, cap, pct, memLabel) =>
+      `${est.toFixed(1)} GB of ${cap} GB ${memLabel} (${pct}% utilization) — plenty of headroom`,
   },
   good: {
     label: 'Good fit',
     bar: 'from-cyan-400 to-green-400',
     text: 'text-cyan-400',
     icon: CheckCircle2,
-    detail: (est, cap, pct) =>
-      `${est.toFixed(1)} GB of ${cap} GB VRAM (${pct}% utilization) — fits comfortably`,
+    detail: (est, cap, pct, memLabel) =>
+      `${est.toFixed(1)} GB of ${cap} GB ${memLabel} (${pct}% utilization) — fits comfortably`,
   },
   marginal: {
     label: 'Tight fit',
     bar: 'from-amber-400 to-orange-400',
     text: 'text-amber-400',
     icon: AlertCircle,
-    detail: (est, cap, pct) =>
-      `${est.toFixed(1)} GB of ${cap} GB VRAM (${pct}% utilization) — may not leave headroom for KV cache`,
+    detail: (est, cap, pct, memLabel) =>
+      `${est.toFixed(1)} GB of ${cap} GB ${memLabel} (${pct}% utilization) — may not leave headroom for KV cache`,
   },
   'too-large': {
     label: 'Won\u2019t fit',
     bar: 'from-red-400 to-red-500',
     text: 'text-red-400',
     icon: XCircle,
-    detail: (est, cap, pct) =>
-      `Needs ${est.toFixed(1)} GB but cluster only has ${cap} GB VRAM (${pct}% — exceeds capacity)`,
+    detail: (est, cap, pct, memLabel) =>
+      `Needs ${est.toFixed(1)} GB but cluster only has ${cap} GB ${memLabel} (${pct}% — exceeds capacity)`,
   },
   unknown: {
     label: 'Unknown',
     bar: 'from-slate-600 to-slate-500',
     text: 'text-slate-400',
     icon: AlertTriangle,
-    detail: () => 'Cluster GPU capacity unknown — cannot determine fit',
+    detail: () => 'Cluster capacity unknown — cannot determine fit',
   },
 };
 
@@ -132,8 +134,10 @@ export function GpuFitIndicator({
   estimatedGpuMemoryGb,
   clusterCapacityGb,
   gpuCount = 1,
+  mode = 'gpu',
   className
 }: GpuFitIndicatorProps) {
+  const memLabel = mode === 'cpu' ? 'RAM' : 'VRAM';
   // Multiply per-GPU capacity by the number of available GPUs
   const effectiveCapacityGb = clusterCapacityGb !== undefined ? clusterCapacityGb * Math.max(gpuCount, 1) : undefined;
 
@@ -151,10 +155,10 @@ export function GpuFitIndicator({
 
   const tooltipDetail =
     estimatedGpuMemoryGb !== undefined && effectiveCapacityGb !== undefined && effectiveCapacityGb > 0
-      ? config.detail(estimatedGpuMemoryGb, effectiveCapacityGb, utilizationPct)
+      ? config.detail(estimatedGpuMemoryGb, effectiveCapacityGb, utilizationPct, memLabel)
       : estimatedGpuMemoryGb === undefined
         ? 'Model size unknown — deploy with caution'
-        : config.detail(estimatedGpuMemoryGb ?? 0, effectiveCapacityGb ?? 0, utilizationPct);
+        : config.detail(estimatedGpuMemoryGb ?? 0, effectiveCapacityGb ?? 0, utilizationPct, memLabel);
 
   return (
     <TooltipProvider>
@@ -187,10 +191,10 @@ export function GpuFitIndicator({
               )}
             </div>
 
-            {/* Upgrade delta — how much more VRAM is needed */}
+            {/* Upgrade delta — how much more memory is needed */}
             {upgradeDelta && (
               <p className="text-xs text-slate-500 mt-1">
-                +{upgradeDelta.additionalGb} GB VRAM needed for comfortable fit
+                +{upgradeDelta.additionalGb} GB {memLabel} needed for comfortable fit
               </p>
             )}
           </div>
