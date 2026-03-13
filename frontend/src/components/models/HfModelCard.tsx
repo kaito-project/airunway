@@ -92,11 +92,12 @@ export function HfModelCard({ model, gpuCapacityGb, gpuCount }: HfModelCardProps
       </div>
 
       <div className="pt-4">
-        <Button
-          onClick={handleDeploy}
-          className="w-full rounded-xl"
+        <Button 
+          variant="ghost"
+          onClick={handleDeploy} 
+          className="w-full text-cyan-400 hover:text-cyan-300 hover:bg-cyan-400/10 rounded-xl"
         >
-          Deploy
+          Deploy →
         </Button>
       </div>
     </div>

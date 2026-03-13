@@ -125,10 +125,11 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount }: ModelCardProps) {
 
       <div className="pt-4">
         <Button
+          variant="ghost"
           onClick={handleDeploy}
-          className="w-full rounded-xl"
+          className="w-full text-cyan-400 hover:text-cyan-300 hover:bg-cyan-400/10 rounded-xl"
         >
-          Deploy
+          Deploy →
         </Button>
       </div>
     </div>
