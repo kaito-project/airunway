@@ -138,10 +138,13 @@ export function GpuFitIndicator({
   className
 }: GpuFitIndicatorProps) {
   const memLabel = mode === 'cpu' ? 'RAM' : 'VRAM';
-  // Multiply per-GPU capacity by the number of available GPUs
-  const effectiveCapacityGb = clusterCapacityGb !== undefined ? clusterCapacityGb * Math.max(gpuCount, 1) : undefined;
+  // Multiply per-GPU capacity by the number of available GPUs.
+  // When gpuCount is 0 (fully allocated cluster), effective capacity is 0 → "Won't fit".
+  const effectiveCapacityGb = clusterCapacityGb !== undefined ? clusterCapacityGb * gpuCount : undefined;
+  // A cluster with known per-GPU capacity but 0 available GPUs is "too-large", not "unknown"
+  const noAvailableGpus = clusterCapacityGb !== undefined && clusterCapacityGb > 0 && gpuCount === 0;
 
-  const level = getGpuFitLevel(estimatedGpuMemoryGb, effectiveCapacityGb);
+  const level = noAvailableGpus ? 'too-large' as GpuFitLevel : getGpuFitLevel(estimatedGpuMemoryGb, effectiveCapacityGb);
   const config = fitConfig[level];
   const Icon = config.icon;
   const upgradeDelta = getUpgradeDelta(estimatedGpuMemoryGb, effectiveCapacityGb);

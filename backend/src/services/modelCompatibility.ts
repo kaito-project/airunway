@@ -402,7 +402,7 @@ const ARCHITECTURE_INFERENCE_PATTERNS: Array<{ pattern: RegExp; architecture: st
   { pattern: /\bmistral[-_]?large/i, architecture: 'MistralLarge3ForCausalLM' },
   { pattern: /\bmistral/i, architecture: 'MistralForCausalLM' },
   // Qwen family (more specific versions first)
-  { pattern: /\bqwen[-_]?3[-_]?5/i, architecture: 'Qwen3_5ForConditionalGeneration' },
+  { pattern: /\bqwen[-_.]?3[-_.]?5/i, architecture: 'Qwen3_5ForConditionalGeneration' },
   { pattern: /\bqwen[-_]?3.*moe/i, architecture: 'Qwen3MoeForCausalLM' },
   { pattern: /\bqwen[-_]?3/i, architecture: 'Qwen3ForCausalLM' },
   { pattern: /\bqwen[-_]?2.*moe/i, architecture: 'Qwen2MoeForCausalLM' },
