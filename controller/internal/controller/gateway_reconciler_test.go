@@ -21,13 +21,19 @@ import (
 	"fmt"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -51,7 +57,14 @@ func boolPtr(b bool) *bool { return &b }
 // newTestReconciler creates a ModelDeploymentReconciler with a fake client and
 // an optional gateway detector.
 func newTestReconciler(scheme *runtime.Scheme, detector *gateway.Detector, objs ...client.Object) *ModelDeploymentReconciler {
+	return newTestReconcilerWithRESTMapper(scheme, detector, nil, objs...)
+}
+
+func newTestReconcilerWithRESTMapper(scheme *runtime.Scheme, detector *gateway.Detector, restMapper meta.RESTMapper, objs ...client.Object) *ModelDeploymentReconciler {
 	cb := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&kubeairunwayv1alpha1.ModelDeployment{})
+	if restMapper != nil {
+		cb = cb.WithRESTMapper(restMapper)
+	}
 	if len(objs) > 0 {
 		cb = cb.WithObjects(objs...)
 	}
@@ -60,6 +73,17 @@ func newTestReconciler(scheme *runtime.Scheme, detector *gateway.Detector, objs 
 		Scheme:          scheme,
 		GatewayDetector: detector,
 	}
+}
+
+func newDestinationRuleRESTMapper(version string) meta.RESTMapper {
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{{Group: "networking.istio.io", Version: version}})
+	mapper.AddSpecific(
+		schema.GroupVersionKind{Group: "networking.istio.io", Version: version, Kind: "DestinationRule"},
+		schema.GroupVersionResource{Group: "networking.istio.io", Version: version, Resource: "destinationrules"},
+		schema.GroupVersionResource{},
+		meta.RESTScopeNamespace,
+	)
+	return mapper
 }
 
 func newModelDeployment(name, ns string) *kubeairunwayv1alpha1.ModelDeployment {
@@ -188,6 +212,45 @@ func TestGateway_InferencePoolDefaultPort(t *testing.T) {
 	}
 }
 
+func TestGateway_InferencePoolCreationDoesNotRestartBBR(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	bbr := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "body-based-router",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"existing": "true",
+					},
+				},
+			},
+		},
+	}
+	r := newTestReconciler(scheme, detector, md, bbr)
+	ctx := context.Background()
+
+	err := r.reconcileInferencePool(ctx, md, 8080)
+	if err != nil {
+		t.Fatalf("reconcileInferencePool failed: %v", err)
+	}
+
+	var updated appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: "body-based-router", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("body-based-router Deployment not found: %v", err)
+	}
+	if updated.Spec.Template.Annotations["existing"] != "true" {
+		t.Errorf("expected existing annotation to be preserved, got %q", updated.Spec.Template.Annotations["existing"])
+	}
+	if _, ok := updated.Spec.Template.Annotations["kubeairunway.ai/restartedAt"]; ok {
+		t.Fatal("expected InferencePool creation to avoid restarting body-based-router")
+	}
+}
+
 func TestGateway_HTTPRouteCreation(t *testing.T) {
 	scheme := newTestScheme()
 	md := newModelDeployment("test-model", "default")
@@ -200,9 +263,12 @@ func TestGateway_HTTPRouteCreation(t *testing.T) {
 		GatewayNamespace: "gateway-ns",
 	}
 
-	err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B")
+	routeStatus, err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B")
 	if err != nil {
 		t.Fatalf("reconcileHTTPRoute failed: %v", err)
+	}
+	if !routeStatus.active {
+		t.Fatalf("expected HTTPRoute to be active after creation, got %#v", routeStatus)
 	}
 
 	// Verify HTTPRoute was created
@@ -241,12 +307,292 @@ func TestGateway_HTTPRouteCreation(t *testing.T) {
 		t.Errorf("expected backend ref kind %q, got %v", "InferencePool", backendRef.Kind)
 	}
 
+	if len(route.Spec.Rules[0].Matches) != 2 {
+		t.Fatalf("expected 2 route matches (header + fallback), got %d", len(route.Spec.Rules[0].Matches))
+	}
+
+	headerMatch := route.Spec.Rules[0].Matches[0]
+	if headerMatch.Path == nil || headerMatch.Path.Value == nil || *headerMatch.Path.Value != "/" {
+		t.Fatalf("expected header match to use path prefix '/', got %#v", headerMatch.Path)
+	}
+	if len(headerMatch.Headers) != 1 {
+		t.Fatalf("expected 1 header match, got %d", len(headerMatch.Headers))
+	}
+	if headerMatch.Headers[0].Name != "X-Gateway-Model-Name" {
+		t.Errorf("expected header name %q, got %q", "X-Gateway-Model-Name", headerMatch.Headers[0].Name)
+	}
+	if headerMatch.Headers[0].Value != "meta-llama/Llama-3-8B" {
+		t.Errorf("expected header value %q, got %q", "meta-llama/Llama-3-8B", headerMatch.Headers[0].Value)
+	}
+
+	fallbackMatch := route.Spec.Rules[0].Matches[1]
+	if fallbackMatch.Path == nil || fallbackMatch.Path.Value == nil || *fallbackMatch.Path.Value != "/" {
+		t.Fatalf("expected fallback match to use path prefix '/', got %#v", fallbackMatch.Path)
+	}
+	if len(fallbackMatch.Headers) != 0 {
+		t.Fatalf("expected fallback match to omit headers, got %d", len(fallbackMatch.Headers))
+	}
+
 	// Check OwnerReference
 	if len(route.OwnerReferences) != 1 {
 		t.Fatalf("expected 1 owner reference, got %d", len(route.OwnerReferences))
 	}
 	if route.OwnerReferences[0].Name != "test-model" {
 		t.Errorf("expected owner ref name %q, got %q", "test-model", route.OwnerReferences[0].Name)
+	}
+}
+
+func TestGateway_HTTPRouteExistingRouteBackfillsAnnotation(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	gwConfig := &gateway.GatewayConfig{
+		GatewayName:      "my-gateway",
+		GatewayNamespace: "gateway-ns",
+	}
+
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      md.Name,
+			Namespace: md.Namespace,
+		},
+		Spec: desiredHTTPRouteSpec(md, gwConfig, "old-model", true),
+	}
+	if err := ctrl.SetControllerReference(md, route, scheme); err != nil {
+		t.Fatalf("failed to set controller reference: %v", err)
+	}
+
+	r := newTestReconciler(scheme, detector, md, route)
+	ctx := context.Background()
+
+	routeStatus, err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B")
+	if err != nil {
+		t.Fatalf("reconcileHTTPRoute failed: %v", err)
+	}
+	if !routeStatus.active {
+		t.Fatalf("expected HTTPRoute to remain active, got %#v", routeStatus)
+	}
+
+	var storedMD kubeairunwayv1alpha1.ModelDeployment
+	if err := r.Get(ctx, types.NamespacedName{Name: md.Name, Namespace: md.Namespace}, &storedMD); err != nil {
+		t.Fatalf("ModelDeployment not found: %v", err)
+	}
+	if storedMD.Annotations[kubeairunwayv1alpha1.HTTPRouteCreated] != "true" {
+		t.Fatalf("expected ModelDeployment to backfill %s annotation", kubeairunwayv1alpha1.HTTPRouteCreated)
+	}
+
+	var storedRoute gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: route.Name, Namespace: route.Namespace}, &storedRoute); err != nil {
+		t.Fatalf("HTTPRoute not found: %v", err)
+	}
+	if len(storedRoute.Spec.Rules) != 1 || len(storedRoute.Spec.Rules[0].Matches) != 2 {
+		t.Fatalf("expected updated HTTPRoute to retain header and fallback matches, got %#v", storedRoute.Spec.Rules)
+	}
+}
+
+func TestGateway_HTTPRouteDeletedByUserIsNotRecreated(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	md.Annotations = map[string]string{
+		kubeairunwayv1alpha1.HTTPRouteCreated: "true",
+	}
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, md)
+	ctx := context.Background()
+
+	gwConfig := &gateway.GatewayConfig{
+		GatewayName:      "my-gateway",
+		GatewayNamespace: "gateway-ns",
+	}
+
+	routeStatus, err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B")
+	if err != nil {
+		t.Fatalf("reconcileHTTPRoute failed: %v", err)
+	}
+	if routeStatus.active {
+		t.Fatalf("expected deleted controller-managed HTTPRoute to be inactive, got %#v", routeStatus)
+	}
+	if routeStatus.reason != "HTTPRouteDeleted" {
+		t.Fatalf("expected HTTPRouteDeleted reason, got %#v", routeStatus)
+	}
+
+	var route gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: md.Name, Namespace: md.Namespace}, &route); err == nil {
+		t.Fatal("expected deleted controller-managed HTTPRoute to stay absent")
+	}
+
+	var storedMD kubeairunwayv1alpha1.ModelDeployment
+	if err := r.Get(ctx, types.NamespacedName{Name: md.Name, Namespace: md.Namespace}, &storedMD); err != nil {
+		t.Fatalf("ModelDeployment not found: %v", err)
+	}
+	if storedMD.Annotations[httpRouteSuppressedAnnotation] != "true" {
+		t.Fatalf("expected managed HTTPRoute deletion marker to be persisted")
+	}
+	if _, ok := storedMD.Annotations[kubeairunwayv1alpha1.HTTPRouteCreated]; ok {
+		t.Fatal("expected HTTPRouteCreated annotation to be cleared after user deletion")
+	}
+}
+
+func TestGateway_HTTPRouteMultiModelRoutesBecomeHeaderOnly(t *testing.T) {
+	scheme := newTestScheme()
+	mdA := newModelDeployment("model-a", "default")
+	mdA.Spec.Model.ServedName = "served-a"
+	mdB := newModelDeployment("model-b", "default")
+	mdB.Spec.Model.ServedName = "served-b"
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, mdA, mdB)
+	ctx := context.Background()
+
+	if err := r.reconcileGateway(ctx, mdA); err != nil {
+		t.Fatalf("reconcileGateway(model-a) failed: %v", err)
+	}
+
+	var routeA gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: mdA.Name, Namespace: mdA.Namespace}, &routeA); err != nil {
+		t.Fatalf("model-a HTTPRoute not found: %v", err)
+	}
+	if got := len(routeA.Spec.Rules[0].Matches); got != 2 {
+		t.Fatalf("expected single-model route to include fallback, got %d matches", got)
+	}
+
+	if err := r.reconcileGateway(ctx, mdB); err != nil {
+		t.Fatalf("reconcileGateway(model-b) failed: %v", err)
+	}
+
+	var routeB gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: mdB.Name, Namespace: mdB.Namespace}, &routeB); err != nil {
+		t.Fatalf("model-b HTTPRoute not found: %v", err)
+	}
+	if err := r.Get(ctx, types.NamespacedName{Name: mdA.Name, Namespace: mdA.Namespace}, &routeA); err != nil {
+		t.Fatalf("model-a HTTPRoute not found after sync: %v", err)
+	}
+
+	for name, route := range map[string]gatewayv1.HTTPRoute{"model-a": routeA, "model-b": routeB} {
+		if got := len(route.Spec.Rules[0].Matches); got != 1 {
+			t.Fatalf("expected %s route to become header-only in multi-model mode, got %d matches", name, got)
+		}
+		if len(route.Spec.Rules[0].Matches[0].Headers) != 1 {
+			t.Fatalf("expected %s route to keep a single header match", name)
+		}
+	}
+}
+
+func TestGateway_CleanupRestoresFallbackWhenOneRouteRemains(t *testing.T) {
+	scheme := newTestScheme()
+	mdA := newModelDeployment("model-a", "default")
+	mdA.Spec.Model.ServedName = "served-a"
+	mdB := newModelDeployment("model-b", "default")
+	mdB.Spec.Model.ServedName = "served-b"
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, mdA, mdB)
+	ctx := context.Background()
+
+	if err := r.reconcileGateway(ctx, mdA); err != nil {
+		t.Fatalf("reconcileGateway(model-a) failed: %v", err)
+	}
+	if err := r.reconcileGateway(ctx, mdB); err != nil {
+		t.Fatalf("reconcileGateway(model-b) failed: %v", err)
+	}
+
+	if err := r.cleanupGatewayResources(ctx, mdB); err != nil {
+		t.Fatalf("cleanupGatewayResources(model-b) failed: %v", err)
+	}
+
+	var routeA gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: mdA.Name, Namespace: mdA.Namespace}, &routeA); err != nil {
+		t.Fatalf("model-a HTTPRoute not found after cleanup: %v", err)
+	}
+	if got := len(routeA.Spec.Rules[0].Matches); got != 2 {
+		t.Fatalf("expected remaining route to regain fallback, got %d matches", got)
+	}
+}
+
+func TestGateway_ReconcileGatewayDeletedManagedRouteSetsStatusFalse(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	md.Spec.Model.ServedName = "served-test"
+	md.Annotations = map[string]string{
+		kubeairunwayv1alpha1.HTTPRouteCreated: "true",
+	}
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, md)
+	ctx := context.Background()
+
+	if err := r.reconcileGateway(ctx, md); err != nil {
+		t.Fatalf("reconcileGateway failed: %v", err)
+	}
+
+	if md.Status.Gateway != nil {
+		t.Fatal("expected gateway status to stay nil when managed HTTPRoute was deleted")
+	}
+
+	found := false
+	for _, c := range md.Status.Conditions {
+		if c.Type == kubeairunwayv1alpha1.ConditionTypeGatewayReady {
+			found = true
+			if c.Status != metav1.ConditionFalse {
+				t.Fatalf("expected GatewayReady=False, got %s", c.Status)
+			}
+			if c.Reason != "HTTPRouteDeleted" {
+				t.Fatalf("expected GatewayReady reason HTTPRouteDeleted, got %s", c.Reason)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected GatewayReady condition to be set")
+	}
+}
+
+func TestGateway_CleanupPreservesDeletedHTTPRouteOptOut(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	md.Spec.Model.ServedName = "served-test"
+	md.Annotations = map[string]string{
+		httpRouteSuppressedAnnotation: "true",
+	}
+	md.Status.Gateway = &kubeairunwayv1alpha1.GatewayStatus{
+		Endpoint:  "10.0.0.1",
+		ModelName: "served-test",
+	}
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, md)
+	ctx := context.Background()
+
+	if err := r.cleanupGatewayResources(ctx, md); err != nil {
+		t.Fatalf("cleanupGatewayResources failed: %v", err)
+	}
+	if md.Annotations[httpRouteSuppressedAnnotation] != "true" {
+		t.Fatal("expected cleanup to preserve managed HTTPRoute opt-out marker")
+	}
+
+	if err := r.reconcileGateway(ctx, md); err != nil {
+		t.Fatalf("reconcileGateway failed: %v", err)
+	}
+
+	var route gatewayv1.HTTPRoute
+	if err := r.Get(ctx, types.NamespacedName{Name: md.Name, Namespace: md.Namespace}, &route); err == nil {
+		t.Fatal("expected suppressed HTTPRoute to remain absent after cleanup and recovery")
+	}
+}
+
+func TestGateway_EPPDestinationRuleUsesDiscoveredVersion(t *testing.T) {
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	restMapper := newDestinationRuleRESTMapper("v1alpha3")
+	r := newTestReconcilerWithRESTMapper(scheme, nil, restMapper, md)
+	ctx := context.Background()
+
+	if err := r.reconcileEPPDestinationRule(ctx, md, "test-model-epp"); err != nil {
+		t.Fatalf("reconcileEPPDestinationRule failed: %v", err)
+	}
+
+	dr := &unstructured.Unstructured{}
+	dr.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1alpha3", Kind: "DestinationRule"})
+	if err := r.Get(ctx, types.NamespacedName{Name: "test-model-epp", Namespace: md.Namespace}, dr); err != nil {
+		t.Fatalf("DestinationRule not found: %v", err)
+	}
+	if got := dr.GroupVersionKind().Version; got != "v1alpha3" {
+		t.Fatalf("expected DestinationRule version v1alpha3, got %s", got)
 	}
 }
 
@@ -283,6 +629,9 @@ func TestGateway_DisabledSkipsCreation(t *testing.T) {
 func TestGateway_DisabledCleansUpExistingResources(t *testing.T) {
 	scheme := newTestScheme()
 	md := newModelDeployment("test-model", "default")
+	md.Annotations = map[string]string{
+		kubeairunwayv1alpha1.HTTPRouteCreated: "true",
+	}
 	detector := fakeDetector(true, "my-gateway", "gateway-ns")
 
 	// Pre-create gateway resources
@@ -315,6 +664,9 @@ func TestGateway_DisabledCleansUpExistingResources(t *testing.T) {
 	// Verify gateway status is cleared
 	if md.Status.Gateway != nil {
 		t.Error("expected gateway status to be nil after cleanup")
+	}
+	if _, ok := md.Annotations[kubeairunwayv1alpha1.HTTPRouteCreated]; ok {
+		t.Error("expected HTTPRouteCreated annotation to be cleared during cleanup")
 	}
 
 	// Verify GatewayReady condition is set to False

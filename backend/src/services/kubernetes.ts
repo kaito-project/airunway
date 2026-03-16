@@ -228,7 +228,7 @@ class KubernetesService {
 
   async createDeployment(config: DeploymentConfig): Promise<void> {
     // Generate ModelDeployment manifest from config
-    const manifest = toModelDeploymentManifest(config) as Record<string, unknown>;
+    const manifest = toModelDeploymentManifest(config);
 
     logger.info({ name: config.name, namespace: config.namespace }, 'Creating ModelDeployment');
 
@@ -238,7 +238,7 @@ class KubernetesService {
         MODEL_DEPLOYMENT_CRD.apiVersion,
         config.namespace,
         MODEL_DEPLOYMENT_CRD.plural,
-        manifest
+        manifest as unknown as Record<string, unknown>
       ),
       { operationName: 'createDeployment' }
     );
@@ -1383,42 +1383,49 @@ class KubernetesService {
 
   /**
    * Get gateway status: checks if Gateway API InferencePool CRD exists,
-   * lists InferencePool resources, and finds gateway endpoint from Gateway resources.
+   * and requires at least one Gateway resource before reporting availability.
    */
   async getGatewayStatus(): Promise<GatewayInfo> {
-    // Check if InferencePool CRD exists
-    const inferencePoolCrdExists = await this.checkCRDExists('inferencepools.inference.networking.k8s.io');
-    if (!inferencePoolCrdExists) {
+    const [inferencePoolCrdExists, gatewayCrdExists] = await Promise.all([
+      this.checkCRDExists('inferencepools.inference.networking.k8s.io'),
+      this.checkCRDExists('gateways.gateway.networking.k8s.io'),
+    ]);
+
+    if (!inferencePoolCrdExists || !gatewayCrdExists) {
       return { available: false };
     }
 
-    // Try to find a Gateway endpoint
-    let endpoint: string | undefined;
-    const gatewayCrdExists = await this.checkCRDExists('gateways.gateway.networking.k8s.io');
-    if (gatewayCrdExists) {
-      try {
-        const response = await withRetry(
-          () => this.customObjectsApi.listClusterCustomObject(
-            'gateway.networking.k8s.io',
-            'v1',
-            'gateways'
-          ),
-          { operationName: 'listGateways', maxRetries: 1 }
-        );
-        const items = (response.body as { items?: Array<{ status?: { addresses?: Array<{ value?: string }> } }> }).items || [];
-        for (const gw of items) {
-          const addr = gw.status?.addresses?.[0]?.value;
-          if (addr) {
-            endpoint = addr;
-            break;
-          }
-        }
-      } catch (error: any) {
-        logger.debug({ error: error?.message }, 'Could not list Gateway resources');
-      }
-    }
+    try {
+      const response = await withRetry(
+        () => this.customObjectsApi.listClusterCustomObject(
+          'gateway.networking.k8s.io',
+          'v1',
+          'gateways'
+        ),
+        { operationName: 'listGateways', maxRetries: 1 }
+      );
+      const items = (response.body as {
+        items?: Array<{ status?: { addresses?: Array<{ value?: string }> } }>;
+      }).items || [];
 
-    return { available: true, endpoint };
+      if (items.length === 0) {
+        return { available: false };
+      }
+
+      let endpoint: string | undefined;
+      for (const gw of items) {
+        const addr = gw.status?.addresses?.[0]?.value;
+        if (addr) {
+          endpoint = addr;
+          break;
+        }
+      }
+
+      return { available: true, endpoint };
+    } catch (error: any) {
+      logger.debug({ error: error?.message }, 'Could not list Gateway resources');
+      return { available: false };
+    }
   }
 
   /**

@@ -13,6 +13,8 @@ export const BUILDKIT_CONFIG = {
   },
 } as const;
 
+const statusCommandTimeoutMs = 3000;
+
 /**
  * BuildKit builder status
  */
@@ -130,7 +132,12 @@ class BuildKitService {
    * Check if Docker CLI is available
    */
   async checkDockerAvailable(): Promise<{ available: boolean; version?: string; error?: string }> {
-    const result = await this.execute(this.dockerPath, ['version', '--format', '{{.Client.Version}}']);
+    const result = await this.execute(
+      this.dockerPath,
+      ['version', '--format', '{{.Client.Version}}'],
+      undefined,
+      statusCommandTimeoutMs
+    );
 
     if (result.success) {
       return {
@@ -149,7 +156,12 @@ class BuildKitService {
    * Check if buildx is available
    */
   async checkBuildxAvailable(): Promise<{ available: boolean; version?: string; error?: string }> {
-    const result = await this.execute(this.dockerPath, ['buildx', 'version']);
+    const result = await this.execute(
+      this.dockerPath,
+      ['buildx', 'version'],
+      undefined,
+      statusCommandTimeoutMs
+    );
 
     if (result.success) {
       // Parse version from output like "github.com/docker/buildx v0.12.0 abc123"
@@ -171,7 +183,12 @@ class BuildKitService {
    */
   async getBuilderStatus(): Promise<BuilderStatus> {
     // List all builders
-    const result = await this.execute(this.dockerPath, ['buildx', 'ls']);
+    const result = await this.execute(
+      this.dockerPath,
+      ['buildx', 'ls'],
+      undefined,
+      statusCommandTimeoutMs
+    );
 
     if (!result.success) {
       return {

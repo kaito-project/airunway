@@ -1,6 +1,8 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterEach } from 'bun:test';
+import { kubernetesService } from './kubernetes';
 import type { ClusterGpuCapacity, NodeGpuInfo, GPUAvailability, GPUOperatorStatus } from './kubernetes';
 import type { ClusterStatus, PodStatus, DeploymentStatus, PodPhase } from '@kubeairunway/shared';
+import { mockServiceMethod } from '../test/helpers';
 
 describe('KubernetesService - Type Definitions', () => {
   describe('ClusterGpuCapacity', () => {
@@ -418,5 +420,115 @@ describe('KubernetesService - Node Pool Label Detection', () => {
   test('returns default for unrecognized labels', () => {
     const labels = { 'custom-label': 'value' };
     expect(getNodePoolName(labels)).toBe('default');
+  });
+});
+
+describe('KubernetesService - Gateway Status', () => {
+  const restores: Array<() => void> = [];
+
+  afterEach(() => {
+    restores.forEach((restore) => restore());
+    restores.length = 0;
+  });
+
+  function mockGatewayCrdChecks(options: { inferencePool: boolean; gateway: boolean }) {
+    restores.push(
+      mockServiceMethod(
+        kubernetesService,
+        'checkCRDExists',
+        async (crdName: string) => {
+          if (crdName === 'inferencepools.inference.networking.k8s.io') {
+            return options.inferencePool;
+          }
+          if (crdName === 'gateways.gateway.networking.k8s.io') {
+            return options.gateway;
+          }
+          return false;
+        },
+      ),
+    );
+  }
+
+  function mockGatewayList(
+    implementation: () => Promise<{ body: { items?: Array<{ status?: { addresses?: Array<{ value?: string }> } }> } }>,
+  ) {
+    const service = kubernetesService as unknown as {
+      customObjectsApi: {
+        listClusterCustomObject: () => Promise<{ body: { items?: Array<{ status?: { addresses?: Array<{ value?: string }> } }> } }>;
+      };
+    };
+    const original = service.customObjectsApi;
+    service.customObjectsApi = {
+      ...original,
+      listClusterCustomObject: implementation,
+    };
+    restores.push(() => {
+      service.customObjectsApi = original;
+    });
+  }
+
+  test('returns unavailable when the InferencePool CRD is missing', async () => {
+    mockGatewayCrdChecks({ inferencePool: false, gateway: true });
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: false });
+  });
+
+  test('returns unavailable when the Gateway CRD is missing', async () => {
+    mockGatewayCrdChecks({ inferencePool: true, gateway: false });
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: false });
+  });
+
+  test('returns unavailable when no Gateway resources exist', async () => {
+    mockGatewayCrdChecks({ inferencePool: true, gateway: true });
+    mockGatewayList(async () => ({ body: { items: [] } }));
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: false });
+  });
+
+  test('returns unavailable when Gateway listing fails', async () => {
+    mockGatewayCrdChecks({ inferencePool: true, gateway: true });
+    mockGatewayList(async () => {
+      throw new Error('boom');
+    });
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: false });
+  });
+
+  test('returns available and includes the first endpoint when a Gateway exists', async () => {
+    mockGatewayCrdChecks({ inferencePool: true, gateway: true });
+    mockGatewayList(async () => ({
+      body: {
+        items: [
+          { status: { addresses: [{ value: '10.0.0.50' }] } },
+          { status: { addresses: [{ value: '10.0.0.51' }] } },
+        ],
+      },
+    }));
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: true, endpoint: '10.0.0.50' });
+  });
+
+  test('returns available without an endpoint when a Gateway exists but has no address yet', async () => {
+    mockGatewayCrdChecks({ inferencePool: true, gateway: true });
+    mockGatewayList(async () => ({
+      body: {
+        items: [{ status: { addresses: [] } }],
+      },
+    }));
+
+    const status = await kubernetesService.getGatewayStatus();
+
+    expect(status).toEqual({ available: true, endpoint: undefined });
   });
 });

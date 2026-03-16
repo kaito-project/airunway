@@ -28,8 +28,7 @@ export function mockFetch(
   options?: { ok?: boolean; status?: number }
 ): () => void {
   const originalFetch = globalThis.fetch;
-  // @ts-expect-error - mocking fetch for tests
-  globalThis.fetch = mock(() =>
+  const mockedFetch = mock(() =>
     Promise.resolve({
       ok: options?.ok ?? true,
       status: options?.status ?? 200,
@@ -37,6 +36,7 @@ export function mockFetch(
       json: () => Promise.resolve(response),
     } as Response)
   );
+  globalThis.fetch = mockedFetch as unknown as typeof fetch;
   return () => {
     globalThis.fetch = originalFetch;
   };
