@@ -328,7 +328,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   // Calculate GPU recommendation based on model characteristics
   const gpuRecommendation = calculateGpuRecommendation(model, detailedCapacity)
   const currentNodeCount = getNodeCountFromOverrides(config.providerOverrides)
-  const currentTensorParallel = getNumericEngineArg(config.engineArgs, TENSOR_PARALLEL_SIZE_ARG)
   const currentPipelineParallel = getNumericEngineArg(config.engineArgs, PIPELINE_PARALLEL_SIZE_ARG)
 
   // Set initial GPU value from recommendation when component mounts
@@ -353,34 +352,43 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       config.mode === 'aggregated' &&
       config.engine === 'vllm';
 
-    if (!shouldManageDynamoParallelism) {
-      if (currentNodeCount > 1 || currentTensorParallel !== undefined || currentPipelineParallel !== undefined) {
-        setConfig(prev => ({
-          ...prev,
-          providerOverrides: undefined,
-          engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
-        }))
-      }
-      return;
-    }
-
     if (topologyManagedByAIConfig) {
       return;
     }
 
-    if (gpuRecommendation.multiNode) {
-      const recommendedPipelineParallel = gpuRecommendation.multiNode.pipelineParallelSize;
-      const gpuCount = config.resources?.gpu ?? 0;
+    setConfig(prev => {
+      const prevNodeCount = getNodeCountFromOverrides(prev.providerOverrides)
+      const prevTensorParallel = getNumericEngineArg(prev.engineArgs, TENSOR_PARALLEL_SIZE_ARG)
+      const prevPipelineParallel = getNumericEngineArg(prev.engineArgs, PIPELINE_PARALLEL_SIZE_ARG)
 
-      // Apply multi-node settings if they differ from current state.
-      // Also sync resources.gpu to recommendedGpus so GPU count, TP, PP, and nodeCount stay consistent.
-      if (
-        currentNodeCount !== gpuRecommendation.multiNode.nodeCount ||
-        currentTensorParallel !== gpuRecommendation.multiNode.gpusPerNode ||
-        currentPipelineParallel !== recommendedPipelineParallel ||
-        gpuCount !== gpuRecommendation.recommendedGpus
-      ) {
-        setConfig(prev => ({
+      if (!shouldManageDynamoParallelism) {
+        if (prevNodeCount <= 1 && prevTensorParallel === undefined && prevPipelineParallel === undefined) {
+          return prev
+        }
+
+        return {
+          ...prev,
+          providerOverrides: undefined,
+          engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
+        }
+      }
+
+      if (gpuRecommendation.multiNode) {
+        const recommendedPipelineParallel = gpuRecommendation.multiNode.pipelineParallelSize
+        const gpuCount = prev.resources?.gpu ?? 0
+
+        // Intentionally compare against the previous config inside setState so
+        // manual topology edits do not trigger this effect and get snapped back.
+        if (
+          prevNodeCount === gpuRecommendation.multiNode.nodeCount &&
+          prevTensorParallel === gpuRecommendation.multiNode.gpusPerNode &&
+          prevPipelineParallel === recommendedPipelineParallel &&
+          gpuCount === gpuRecommendation.recommendedGpus
+        ) {
+          return prev
+        }
+
+        return {
           ...prev,
           resources: {
             ...prev.resources,
@@ -388,18 +396,19 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
           },
           providerOverrides: buildDynamoMultiNodeOverrides(gpuRecommendation.multiNode!.nodeCount),
           engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, gpuRecommendation.multiNode!),
-        }))
+        }
       }
-      return;
-    }
 
-    if (currentNodeCount > 1 || currentTensorParallel !== undefined || currentPipelineParallel !== undefined) {
-      setConfig(prev => ({
+      if (prevNodeCount <= 1 && prevTensorParallel === undefined && prevPipelineParallel === undefined) {
+        return prev
+      }
+
+      return {
         ...prev,
         providerOverrides: undefined,
         engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
-      }))
-    }
+      }
+    })
   }, [
     gpuRecommendation.multiNode?.gpusPerNode,
     gpuRecommendation.multiNode?.nodeCount,
@@ -408,10 +417,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
     selectedRuntime,
     config.engine,
     config.mode,
-    config.resources?.gpu,
-    currentNodeCount,
-    currentPipelineParallel,
-    currentTensorParallel,
     topologyManagedByAIConfig,
   ])
 
