@@ -1,5 +1,5 @@
 KUSTOMIZE ?= ../../controller/bin/kustomize
-IMG ?= ghcr.io/kaito-project/kubeairunway/dynamo-provider:latest
+IMG ?= ghcr.io/kaito-project/airunway/dynamo-provider:latest
 
 .PHONY: build docker-build deploy generate-deploy-manifests test-e2e
 
@@ -10,7 +10,7 @@ build:
 
 ## Build provider Docker image
 docker-build:
-	docker build -f Dockerfile -t $(IMG) ../..
+	docker build --platform linux/amd64,linux/arm64 --push -f Dockerfile -t $(IMG) ../..
 	@echo "✅ Dynamo provider image built: $(IMG)"
 
 ## Deploy provider to the K8s cluster
