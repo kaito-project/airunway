@@ -23,11 +23,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	fakediscovery "k8s.io/client-go/discovery/fake"
@@ -57,14 +54,7 @@ func boolPtr(b bool) *bool { return &b }
 // newTestReconciler creates a ModelDeploymentReconciler with a fake client and
 // an optional gateway detector.
 func newTestReconciler(scheme *runtime.Scheme, detector *gateway.Detector, objs ...client.Object) *ModelDeploymentReconciler {
-	return newTestReconcilerWithRESTMapper(scheme, detector, nil, objs...)
-}
-
-func newTestReconcilerWithRESTMapper(scheme *runtime.Scheme, detector *gateway.Detector, restMapper meta.RESTMapper, objs ...client.Object) *ModelDeploymentReconciler {
 	cb := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&kubeairunwayv1alpha1.ModelDeployment{})
-	if restMapper != nil {
-		cb = cb.WithRESTMapper(restMapper)
-	}
 	if len(objs) > 0 {
 		cb = cb.WithObjects(objs...)
 	}
@@ -73,17 +63,6 @@ func newTestReconcilerWithRESTMapper(scheme *runtime.Scheme, detector *gateway.D
 		Scheme:          scheme,
 		GatewayDetector: detector,
 	}
-}
-
-func newDestinationRuleRESTMapper(version string) meta.RESTMapper {
-	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{{Group: "networking.istio.io", Version: version}})
-	mapper.AddSpecific(
-		schema.GroupVersionKind{Group: "networking.istio.io", Version: version, Kind: "DestinationRule"},
-		schema.GroupVersionResource{Group: "networking.istio.io", Version: version, Resource: "destinationrules"},
-		schema.GroupVersionResource{},
-		meta.RESTScopeNamespace,
-	)
-	return mapper
 }
 
 func newModelDeployment(name, ns string) *kubeairunwayv1alpha1.ModelDeployment {
@@ -572,27 +551,6 @@ func TestGateway_CleanupPreservesDeletedHTTPRouteOptOut(t *testing.T) {
 	var route gatewayv1.HTTPRoute
 	if err := r.Get(ctx, types.NamespacedName{Name: md.Name, Namespace: md.Namespace}, &route); err == nil {
 		t.Fatal("expected suppressed HTTPRoute to remain absent after cleanup and recovery")
-	}
-}
-
-func TestGateway_EPPDestinationRuleUsesDiscoveredVersion(t *testing.T) {
-	scheme := newTestScheme()
-	md := newModelDeployment("test-model", "default")
-	restMapper := newDestinationRuleRESTMapper("v1alpha3")
-	r := newTestReconcilerWithRESTMapper(scheme, nil, restMapper, md)
-	ctx := context.Background()
-
-	if err := r.reconcileEPPDestinationRule(ctx, md, "test-model-epp"); err != nil {
-		t.Fatalf("reconcileEPPDestinationRule failed: %v", err)
-	}
-
-	dr := &unstructured.Unstructured{}
-	dr.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1alpha3", Kind: "DestinationRule"})
-	if err := r.Get(ctx, types.NamespacedName{Name: "test-model-epp", Namespace: md.Namespace}, dr); err != nil {
-		t.Fatalf("DestinationRule not found: %v", err)
-	}
-	if got := dr.GroupVersionKind().Version; got != "v1alpha3" {
-		t.Fatalf("expected DestinationRule version v1alpha3, got %s", got)
 	}
 }
 
