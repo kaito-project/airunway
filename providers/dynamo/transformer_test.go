@@ -204,25 +204,25 @@ func TestGetImage(t *testing.T) {
 	// Default vLLM image
 	md.Spec.Image = ""
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.0" {
 		t.Errorf("expected default vllm image, got %s", img)
 	}
 
 	// Default SGLang image
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeSGLang
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1" {
+	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.0.0" {
 		t.Errorf("expected default sglang image, got %s", img)
 	}
 
 	// Default TRT-LLM image
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeTRTLLM
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:1.0.0" {
 		t.Errorf("expected default trtllm image, got %s", img)
 	}
 
 	// Unknown engine → fallback
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineType("unknown")
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.0" {
 		t.Errorf("expected fallback to vllm image, got %s", img)
 	}
 }
@@ -249,7 +249,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--context-length", "4096"}
+	expected = []string{"--model-path", "meta-llama/Llama-2-7b-chat-hf", "--context-length", "4096"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -362,6 +362,26 @@ func sliceEqual(a, b []string) bool {
 	return true
 }
 
+func containerEnvValue(container map[string]interface{}, name string) (string, bool) {
+	envList, ok := container["env"].([]interface{})
+	if !ok {
+		return "", false
+	}
+
+	for _, entry := range envList {
+		envMap, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if envMap["name"] == name {
+			value, ok := envMap["value"].(string)
+			return value, ok
+		}
+	}
+
+	return "", false
+}
+
 func TestBuildResourceLimits(t *testing.T) {
 	tr := NewTransformer()
 
@@ -470,8 +490,13 @@ func TestBuildFrontendService(t *testing.T) {
 	if frontend["replicas"] != int64(DefaultFrontendReplicas) {
 		t.Errorf("expected default replicas, got %v", frontend["replicas"])
 	}
-	if frontend["router-mode"] != DefaultRouterMode {
-		t.Errorf("expected default router mode, got %v", frontend["router-mode"])
+	if _, ok := frontend["router-mode"]; ok {
+		t.Errorf("did not expect legacy router-mode field, got %v", frontend["router-mode"])
+	}
+	eps, _ := frontend["extraPodSpec"].(map[string]interface{})
+	mc, _ := eps["mainContainer"].(map[string]interface{})
+	if routerMode, ok := containerEnvValue(mc, "DYN_ROUTER_MODE"); !ok || routerMode != DefaultRouterMode {
+		t.Errorf("expected DYN_ROUTER_MODE=%q, got %q (found=%v)", DefaultRouterMode, routerMode, ok)
 	}
 
 	// With overrides
@@ -489,8 +514,10 @@ func TestBuildFrontendService(t *testing.T) {
 	if frontend["replicas"] != int64(5) {
 		t.Errorf("expected replicas 5, got %v", frontend["replicas"])
 	}
-	if frontend["router-mode"] != "kv" {
-		t.Errorf("expected router-mode 'kv', got %v", frontend["router-mode"])
+	eps, _ = frontend["extraPodSpec"].(map[string]interface{})
+	mc, _ = eps["mainContainer"].(map[string]interface{})
+	if routerMode, ok := containerEnvValue(mc, "DYN_ROUTER_MODE"); !ok || routerMode != "kv" {
+		t.Errorf("expected DYN_ROUTER_MODE=%q, got %q (found=%v)", "kv", routerMode, ok)
 	}
 }
 
@@ -654,19 +681,19 @@ func TestBuildPrefillWorkerWithSecret(t *testing.T) {
 	if worker["envFromSecret"] != "hf-secret" {
 		t.Errorf("expected envFromSecret, got %v", worker["envFromSecret"])
 	}
-	// Check --is-prefill-worker flag in args
+	// Check explicit disaggregation mode in args
 	eps, _ := worker["extraPodSpec"].(map[string]interface{})
 	mc, _ := eps["mainContainer"].(map[string]interface{})
 	args, _ := mc["args"].([]interface{})
-	found := false
-	for _, a := range args {
-		if a == "--is-prefill-worker" {
-			found = true
+	foundMode := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypePrefill {
+			foundMode = true
 			break
 		}
 	}
-	if !found {
-		t.Errorf("expected --is-prefill-worker in args: %v", args)
+	if !foundMode {
+		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypePrefill, args)
 	}
 }
 
@@ -691,6 +718,19 @@ func TestBuildDecodeWorkerWithSecret(t *testing.T) {
 	}
 	if worker["replicas"] != int64(2) {
 		t.Errorf("expected replicas 2")
+	}
+	eps, _ := worker["extraPodSpec"].(map[string]interface{})
+	mc, _ := eps["mainContainer"].(map[string]interface{})
+	args, _ := mc["args"].([]interface{})
+	foundMode := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypeDecode {
+			foundMode = true
+			break
+		}
+	}
+	if !foundMode {
+		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypeDecode, args)
 	}
 }
 

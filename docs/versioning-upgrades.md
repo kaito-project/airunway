@@ -53,12 +53,12 @@ kubectl rollout undo deployment/airunway-controller-manager -n airunway-system
 
 | AI Runway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
 |------------------------|------------|----------------|-----------------|------------------|
-| v0.1.x                 | 1.26-1.30  | v0.3.x         | v0.1.x          | v1.1.x           |
+| v0.1.x                 | 1.26-1.30  | v0.3.x         | v1.0.x          | v1.1.x           |
 
 | Provider | Minimum Version | CRD API Version     | Notes                                        |
 |----------|-----------------|---------------------|----------------------------------------------|
 | KAITO    | v0.3.0          | kaito.sh/v1beta1    | Requires GPU operator for GPU workloads      |
-| Dynamo   | v0.1.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator                 |
+| Dynamo   | v1.0.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator; CRDs are bundled in the platform chart |
 | KubeRay  | v1.1.0          | ray.io/v1           | Optional: KubeRay autoscaler for scaling     |
 
 Controller version is independent of provider operator versions. The controller detects provider CRD versions dynamically.

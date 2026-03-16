@@ -41,6 +41,19 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Fatalf("expected 4 selection rules, got %d", len(spec.SelectionRules))
 	}
 
+	if spec.Installation == nil {
+		t.Fatal("installation should not be nil")
+	}
+	if len(spec.Installation.HelmCharts) != 1 {
+		t.Fatalf("expected 1 helm chart, got %d", len(spec.Installation.HelmCharts))
+	}
+	if spec.Installation.HelmCharts[0].Chart != DynamoPlatformChartURL {
+		t.Errorf("expected platform chart URL %q, got %q", DynamoPlatformChartURL, spec.Installation.HelmCharts[0].Chart)
+	}
+	if len(spec.Installation.Steps) != 1 {
+		t.Fatalf("expected 1 installation step, got %d", len(spec.Installation.Steps))
+	}
+
 	if spec.Documentation != ProviderDocumentation {
 		t.Errorf("expected documentation %s, got %s", ProviderDocumentation, spec.Documentation)
 	}
@@ -57,8 +70,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "dynamo" {
 		t.Errorf("expected provider config name 'dynamo', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "dynamo-provider:v0.1.0" {
-		t.Errorf("expected provider version 'dynamo-provider:v0.1.0', got %s", ProviderVersion)
+	if ProviderVersion != "dynamo-provider:v1.0.0" {
+		t.Errorf("expected provider version 'dynamo-provider:v1.0.0', got %s", ProviderVersion)
 	}
 }
 

@@ -342,10 +342,13 @@ Get provider installation status.
 **Response:**
 ```json
 {
+  "providerId": "dynamo",
+  "providerName": "Dynamo",
   "installed": true,
-  "crdInstalled": true,
-  "operatorInstalled": true,
-  "version": "0.1.0"
+  "crdFound": true,
+  "operatorRunning": true,
+  "version": "dynamo-provider:v1.0.0",
+  "message": "Dynamo is installed and running"
 }
 ```
 
@@ -356,8 +359,9 @@ Get manual installation commands for a provider.
 ```json
 {
   "commands": [
-    "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz && helm install dynamo-crds dynamo-crds-0.7.1.tgz --namespace default",
-    "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz && helm install dynamo-platform dynamo-platform-0.7.1.tgz --namespace dynamo-system --create-namespace"
+    "helm repo add nvidia-ai-dynamo https://helm.ngc.nvidia.com/nvidia/ai-dynamo",
+    "helm repo update",
+    "helm install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.0.tgz --namespace dynamo-system --create-namespace"
   ]
 }
 ```
@@ -810,11 +814,11 @@ Get installation and health status of all runtimes.
   "runtimes": [
     {
       "id": "dynamo",
-      "name": "NVIDIA Dynamo",
+      "name": "Dynamo",
       "installed": true,
       "healthy": true,
-      "version": "0.7.1",
-      "message": "Operator running"
+      "version": "dynamo-provider:v1.0.0",
+      "message": "Provider ready"
     },
     {
       "id": "kuberay",

@@ -255,7 +255,6 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 		"componentType":   ComponentTypeFrontend,
 		"dynamoNamespace": md.Name,
 		"replicas":        replicas,
-		"router-mode":     routerMode,
 		"resources": map[string]interface{}{
 			"requests": map[string]interface{}{
 				"cpu":    cpu,
@@ -268,6 +267,12 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 			},
 			"mainContainer": map[string]interface{}{
 				"image": t.getImage(md),
+				"env": []interface{}{
+					map[string]interface{}{
+						"name":  "DYN_ROUTER_MODE",
+						"value": routerMode,
+					},
+				},
 			},
 		},
 	}
@@ -351,12 +356,12 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 		"requests": requests,
 	}
 
-	// Build engine arguments with prefill flag
+	// Disaggregated workers use an explicit mode in Dynamo 1.0.0.
 	args, err := t.buildEngineArgs(md)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, "--is-prefill-worker")
+	args = append(args, "--disaggregation-mode", SubComponentTypePrefill)
 
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
@@ -413,11 +418,12 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 		"requests": requests,
 	}
 
-	// Build engine arguments (decode workers don't need special flags)
+	// Disaggregated workers use an explicit mode in Dynamo 1.0.0.
 	args, err := t.buildEngineArgs(md)
 	if err != nil {
 		return nil, err
 	}
+	args = append(args, "--disaggregation-mode", SubComponentTypeDecode)
 
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
@@ -488,8 +494,12 @@ func (t *Transformer) buildResourceLimits(spec *airunwayv1alpha1.ResourceSpec) m
 func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]string, error) {
 	var args []string
 
-	// Add model
-	args = append(args, "--model", md.Spec.Model.ID)
+	// SGLang expects --model-path while the other runtimes continue to use --model.
+	modelArg := "--model"
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeSGLang {
+		modelArg = "--model-path"
+	}
+	args = append(args, modelArg, md.Spec.Model.ID)
 
 	// Add served name if specified
 	if md.Spec.Model.ServedName != "" {
@@ -611,9 +621,9 @@ func toInterfaceSlice(ss []string) []interface{} {
 
 // defaultImages contains the default container images for each engine type
 var defaultImages = map[airunwayv1alpha1.EngineType]string{
-	airunwayv1alpha1.EngineTypeVLLM:   "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1",
-	airunwayv1alpha1.EngineTypeSGLang: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1",
-	airunwayv1alpha1.EngineTypeTRTLLM: "nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1",
+	airunwayv1alpha1.EngineTypeVLLM:   "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.0",
+	airunwayv1alpha1.EngineTypeSGLang: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.0.0",
+	airunwayv1alpha1.EngineTypeTRTLLM: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:1.0.0",
 }
 
 // getImage returns the container image to use
@@ -629,7 +639,7 @@ func (t *Transformer) getImage(md *airunwayv1alpha1.ModelDeployment) string {
 	}
 
 	// Fallback to vLLM default
-	return "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+	return "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.0"
 }
 
 // buildPVCs creates the pvcs list for DynamoGraphDeployment from StorageSpec volumes.
