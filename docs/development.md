@@ -43,6 +43,11 @@ make controller-generate
 # Build the docker container image
 make controller-docker-build CONTROLLER_IMG=<YOUR IMAGE>
 
+# Defaults: PUSH=false and PLATFORM=linux/amd64
+
+# Optional: push instead of load, or target a different platform
+make controller-docker-build CONTROLLER_IMG=<YOUR IMAGE> PUSH=true PLATFORM=linux/amd64,linux/arm64
+
 # Install CRDs into the cluster
 make controller-install
 
@@ -238,6 +243,11 @@ cd providers/llmd && make build
 # Build provider Docker image
 cd providers/kaito && make docker-build IMG=<YOUR IMAGE>
 cd providers/llmd && make docker-build IMG=<YOUR IMAGE>
+
+# Defaults: PUSH=false and PLATFORM=linux/amd64
+
+# Optional: push instead of load, or target a different platform
+cd providers/llmd && make docker-build IMG=<YOUR IMAGE> PUSH=true PLATFORM=linux/amd64,linux/arm64
 
 # Deploy provider to cluster
 cd providers/kaito && make deploy IMG=<YOUR IMAGE>

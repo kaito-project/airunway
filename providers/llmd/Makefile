@@ -1,5 +1,9 @@
 KUSTOMIZE ?= ../../controller/bin/kustomize
 IMG ?= ghcr.io/kaito-project/airunway/llmd-provider:latest
+PLATFORM ?= linux/amd64
+PUSH ?= false
+PUSH_ENABLED := $(filter true TRUE 1 yes YES on ON,$(PUSH))
+IMAGE_OUTPUT_FLAG := $(if $(PUSH_ENABLED),--push,--load)
 
 .PHONY: build docker-build deploy generate-deploy-manifests
 
@@ -10,8 +14,8 @@ build:
 
 ## Build provider Docker image
 docker-build:
-	docker build --platform linux/amd64,linux/arm64 --push -f Dockerfile -t $(IMG) ../..
-	@echo "✅ llm-d provider image built: $(IMG)"
+	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) -f Dockerfile -t $(IMG) ../..
+	@echo "✅ llm-d provider image built: $(IMG) ($(PLATFORM), $(if $(PUSH_ENABLED),pushed,loaded locally))"
 
 ## Deploy provider to the K8s cluster
 deploy:

@@ -11,6 +11,12 @@ DASHBOARD_IMG ?= ghcr.io/kaito-project/airunway/dashboard:latest
 # Model downloader image
 MODEL_DOWNLOADER_IMG ?= ghcr.io/kaito-project/airunway/model-downloader:latest
 
+# Image build settings
+PLATFORM ?= linux/amd64
+PUSH ?= false
+PUSH_ENABLED := $(filter true TRUE 1 yes YES on ON,$(PUSH))
+IMAGE_OUTPUT_FLAG := $(if $(PUSH_ENABLED),--push,--load)
+
 # Gateway API Inference Extension version
 GAIE_VERSION ?= v1.3.1
 
@@ -43,6 +49,10 @@ help:
 	@echo "  controller-deploy      Deploy controller to cluster"
 	@echo "  controller-generate    Generate CRD manifests and code"
 	@echo "  generate-deploy-manifests  Generate deploy/controller.yaml"
+	@echo ""
+	@echo "Image Build Variables:"
+	@echo "  PLATFORM=<platform>    Target platform for image builds (default: linux/amd64)"
+	@echo "  PUSH=true              Push image instead of loading it locally (default: false)"
 	@echo ""
 	@echo "  help                   Show this help message"
 
@@ -118,8 +128,8 @@ controller-build:
 
 # Build controller Docker image
 controller-docker-build:
-	docker build -f controller/Dockerfile -t $(CONTROLLER_IMG) .
-	@echo "✅ Controller image built: $(CONTROLLER_IMG)"
+	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) -f controller/Dockerfile -t $(CONTROLLER_IMG) .
+	@echo "✅ Controller image built: $(CONTROLLER_IMG) ($(PLATFORM), $(if $(PUSH_ENABLED),pushed,loaded locally))"
 
 # Generate CRD manifests and deep copy code
 controller-generate:
@@ -170,5 +180,5 @@ generate-deploy-manifests:
 
 # Build model downloader Docker image
 model-downloader-docker-build:
-	docker build -f images/model-downloader/Dockerfile -t $(MODEL_DOWNLOADER_IMG) images/model-downloader
-	@echo "✅ Model downloader image built: $(MODEL_DOWNLOADER_IMG)"
+	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) -f images/model-downloader/Dockerfile -t $(MODEL_DOWNLOADER_IMG) images/model-downloader
+	@echo "✅ Model downloader image built: $(MODEL_DOWNLOADER_IMG) ($(PLATFORM), $(if $(PUSH_ENABLED),pushed,loaded locally))"
