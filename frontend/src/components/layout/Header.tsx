@@ -1,10 +1,9 @@
 import { useClusterStatus } from '@/hooks/useClusterStatus'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Wifi, WifiOff, Menu, ChevronRight, RefreshCw } from 'lucide-react'
+import { Wifi, WifiOff, Menu, ChevronRight } from 'lucide-react'
 import { useSidebar } from './MainLayout'
 import { useLocation, Link } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
 
 const routeLabels: Record<string, string> = {
   '': 'Models',
@@ -47,7 +46,6 @@ export function Header() {
   const { data: clusterStatus, isLoading } = useClusterStatus()
   const { toggle } = useSidebar()
   const breadcrumbs = useBreadcrumbs()
-  const queryClient = useQueryClient()
 
   return (
     <header className="sticky top-0 z-30 h-14 bg-white/[0.03] backdrop-blur-md border-b border-white/5">
@@ -111,15 +109,6 @@ export function Header() {
             </Badge>
           )}
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => queryClient.invalidateQueries()}
-            aria-label="Refresh"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
         </div>
       </div>
     </header>

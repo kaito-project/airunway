@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { MetricGrid } from './MetricCard'
 import { MetricsUnavailable } from './MetricsUnavailable'
 import { useMetrics, type ComputedMetrics } from '@/hooks/useMetrics'
-import { RefreshCw, Pause, Play, Activity } from 'lucide-react'
+import { Pause, Play, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface MetricsTabProps {
@@ -74,7 +74,7 @@ export function MetricsTab({ deploymentName, namespace, provider, className }: M
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [activeCategory, setActiveCategory] = useState<MetricCategory>('all')
 
-  const { metrics, isLoading, error, refetch, dataUpdatedAt } = useMetrics(
+  const { metrics, isLoading, error, dataUpdatedAt } = useMetrics(
     deploymentName,
     namespace,
     provider,
@@ -89,10 +89,6 @@ export function MetricsTab({ deploymentName, namespace, provider, className }: M
   // Reset to 'all' if current category is not available
   if (!availableCategories.includes(activeCategory)) {
     setActiveCategory('all')
-  }
-
-  const handleRefresh = () => {
-    refetch()
   }
 
   const toggleAutoRefresh = () => {
@@ -132,14 +128,6 @@ export function MetricsTab({ deploymentName, namespace, provider, className }: M
                   Paused
                 </>
               )}
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleRefresh}
-              disabled={isLoading}
-            >
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
             </Button>
           </div>
         </div>

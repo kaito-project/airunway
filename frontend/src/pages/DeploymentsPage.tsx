@@ -2,10 +2,10 @@ import { Link } from 'react-router-dom'
 import { useDeployments } from '@/hooks/useDeployments'
 import { DeploymentList } from '@/components/deployments/DeploymentList'
 import { Button } from '@/components/ui/button'
-import { Plus, RefreshCw, Layers } from 'lucide-react'
+import { Plus, Layers } from 'lucide-react'
 
 export function DeploymentsPage() {
-  const { data: deployments, isLoading, error, refetch, isFetching } = useDeployments()
+  const { data: deployments, isLoading, error, refetch } = useDeployments()
 
   if (error) {
     return (
@@ -42,16 +42,6 @@ export function DeploymentsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="shrink-0"
-          >
-            <RefreshCw className={`h-4 w-4 transition-transform ${isFetching ? 'animate-spin' : ''}`} />
-          </Button>
-
           <Link to="/">
             <Button className="shrink-0">
               <Plus className="mr-2 h-4 w-4" />
