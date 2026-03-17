@@ -1,10 +1,10 @@
-# AIRunway Headlamp Plugin - ArtifactHub Package Metadata
+# AI Runway Headlamp Plugin - ArtifactHub Package Metadata
 version: "0.1.0"
 name: airunway-headlamp-plugin
-displayName: AIRunway
+displayName: AI Runway
 createdAt: "2024-01-01T00:00:00Z"
 description: |
-  AIRunway Headlamp Plugin provides ML model deployment management within the
+  AI Runway Headlamp Plugin provides ML model deployment management within the
   Headlamp Kubernetes dashboard. It supports KAITO, KubeRay, and Dynamo runtimes
   for deploying and managing machine learning inference workloads.
 
@@ -20,7 +20,7 @@ description: |
   ## Requirements
 
   - Headlamp 0.25.0 or later
-  - AIRunway backend service running in the cluster
+  - AI Runway backend service running in the cluster
   - At least one supported ML runtime (KAITO, KubeRay, or Dynamo) installed
 
 logoPath: logo.png

@@ -1,7 +1,7 @@
 /**
  * Plugin Settings Component
  *
- * Allows users to configure the AIRunway backend URL and other settings.
+ * Allows users to configure the AI Runway backend URL and other settings.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -86,7 +86,7 @@ export function PluginSettings() {
 
   return (
     <div style={{ padding: '24px', maxWidth: '600px' }}>
-      <h1 style={{ marginBottom: '24px' }}>AIRunway Settings</h1>
+      <h1 style={{ marginBottom: '24px' }}>AI Runway Settings</h1>
 
       {/* Backend URL Section */}
       <section style={{ marginBottom: '32px' }}>
@@ -136,7 +136,7 @@ export function PluginSettings() {
             }}
           />
           <p style={{ fontSize: '12px', opacity: 0.6, marginTop: '4px' }}>
-            Namespace where AIRunway backend is deployed (for service discovery).
+            Namespace where AI Runway backend is deployed (for service discovery).
           </p>
         </div>
 
@@ -237,7 +237,7 @@ export function PluginSettings() {
       <section>
         <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Help</h2>
         <div style={{ fontSize: '14px', opacity: 0.7, lineHeight: '1.6' }}>
-          <p>The AIRunway plugin connects to the AIRunway backend to manage deployments.</p>
+          <p>The AI Runway plugin connects to the AI Runway backend to manage deployments.</p>
           <p style={{ marginTop: '8px' }}>
             <strong>Discovery order:</strong>
           </p>

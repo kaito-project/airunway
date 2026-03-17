@@ -62,8 +62,8 @@ body:
   - type: input
     id: app-version
     attributes:
-      label: AIRunway Version
-      description: What version of AIRunway are you using?
+      label: AI Runway Version
+      description: What version of AI Runway are you using?
       placeholder: e.g., 1.0.0 or commit hash
     validations:
       required: true

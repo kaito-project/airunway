@@ -1,7 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import logger from '../lib/logger';
 
-// Default namespace for AIRunway deployments
+// Default namespace for AI Runway deployments
 const DEFAULT_KUBEAIRUNWAY_NAMESPACE = 'airunway-system';
 
 /**

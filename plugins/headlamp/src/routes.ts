@@ -1,9 +1,9 @@
 /**
- * Route path constants for the AIRunway Headlamp plugin
+ * Route path constants for the AI Runway Headlamp plugin
  */
 
 export const ROUTES = {
-  /** Base path for all AIRunway routes */
+  /** Base path for all AI Runway routes */
   BASE: '/airunway',
 
   /** Deployments list page */

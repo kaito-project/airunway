@@ -11,7 +11,7 @@ import * as fs from 'fs';
 const K8S_SERVICE_ACCOUNT_TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 
 /**
- * Check if AIRunway is running inside a Kubernetes cluster
+ * Check if AI Runway is running inside a Kubernetes cluster
  * AI Configurator is only available when running locally, not in-cluster
  */
 function isRunningInCluster(): boolean {
@@ -96,7 +96,7 @@ class AIConfiguratorService {
       return {
         available: false,
         runningInCluster: true,
-        error: 'AI Configurator is only available when running AIRunway locally',
+        error: 'AI Configurator is only available when running AI Runway locally',
       };
     }
 

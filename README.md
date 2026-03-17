@@ -1,13 +1,13 @@
-# AIRunway
+# AI Runway
 
-<img src="./frontend/public/logo.png" alt="AIRunway Logo" width="200">
+<img src="./frontend/public/logo.png" alt="AI Runway Logo" width="200">
 
 Deploy and manage large language models on Kubernetes — no YAML required.
 
 > [!NOTE]
-> AIRunway is still under heavy development and the APIs are not currently considered stable. Feedback is welcome! ❤️
+> AI Runway is still under heavy development and the APIs are not currently considered stable. Feedback is welcome! ❤️
 
-AIRunway gives you a web UI and a unified Kubernetes CRD (`ModelDeployment`) to deploy models across multiple inference providers. Browse [HuggingFace](https://huggingface.co/), pick a model, click deploy.
+AI Runway gives you a web UI and a unified Kubernetes CRD (`ModelDeployment`) to deploy models across multiple inference providers. Browse [HuggingFace](https://huggingface.co/), pick a model, click deploy.
 
 ## Highlights
 
@@ -63,7 +63,7 @@ Open **http://localhost:3001** — see [deployment docs](deploy/README.md) for m
 
 ### Getting Started
 
-1. **Install a provider shim** — Apply one or more provider shims to register providers with AIRunway. See [Supported Providers](#supported-providers) for available options.
+1. **Install a provider shim** — Apply one or more provider shims to register providers with AI Runway. See [Supported Providers](#supported-providers) for available options.
 2. **Install the provider** — Go to the Installation page and install the upstream provider via Helm
 3. **Connect HuggingFace** — Sign in via Settings → HuggingFace (optional for non-gated models)
 4. **Deploy a model** — Browse the catalog, pick a model, configure, and deploy

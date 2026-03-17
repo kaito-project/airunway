@@ -1,7 +1,7 @@
 /**
  * Backend Discovery Service
  *
- * Discovers the AIRunway backend URL using multiple strategies:
+ * Discovers the AI Runway backend URL using multiple strategies:
  * 1. Plugin settings (user-configured)
  * 2. In-cluster service discovery
  * 3. Default fallback (localhost for development)
@@ -78,7 +78,7 @@ async function isBackendReachable(url: string, timeout = 3000): Promise<boolean>
 }
 
 /**
- * Discover the AIRunway backend
+ * Discover the AI Runway backend
  *
  * Tries in order:
  * 1. User-configured URL from settings

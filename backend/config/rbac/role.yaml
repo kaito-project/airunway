@@ -40,14 +40,14 @@ rules:
       - replicasets
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # AIRunway CRDs - ModelDeployments
+  # AI Runway CRDs - ModelDeployments
   - apiGroups: ["airunway.ai"]
     resources:
       - modeldeployments
       - modeldeployments/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # AIRunway CRDs - InferenceProviderConfigs (read + delete for uninstall)
+  # AI Runway CRDs - InferenceProviderConfigs (read + delete for uninstall)
   - apiGroups: ["airunway.ai"]
     resources:
       - inferenceproviderconfigs

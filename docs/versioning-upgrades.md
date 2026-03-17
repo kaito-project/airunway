@@ -51,7 +51,7 @@ kubectl rollout undo deployment/airunway-controller-manager -n airunway-system
 
 ### Version Compatibility Matrix
 
-| AIRunway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
+| AI Runway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
 |------------------------|------------|----------------|-----------------|------------------|
 | v0.1.x                 | 1.26-1.30  | v0.3.x         | v0.1.x          | v1.1.x           |
 

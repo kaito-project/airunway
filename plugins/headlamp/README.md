@@ -1,4 +1,4 @@
-# AIRunway Headlamp Plugin
+# AI Runway Headlamp Plugin
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/airunway)](https://artifacthub.io/packages/headlamp/airunway/airunway-headlamp-plugin)
 
@@ -6,7 +6,7 @@ A [Headlamp](https://headlamp.dev/) plugin that integrates AIRunway's ML deploym
 
 ## Features
 
-- **Full Feature Parity**: Complete AIRunway functionality within Headlamp
+- **Full Feature Parity**: Complete AI Runway functionality within Headlamp
 - **Multi-Runtime Support**: KAITO, KubeRay, llm-d, and Dynamo runtimes
 - **Model Catalog**: Browse curated models and search HuggingFace
 - **Deployment Management**: Create, view, and delete deployments
@@ -36,14 +36,14 @@ make setup
 ## Prerequisites
 
 - Headlamp v0.20+ installed
-- AIRunway backend deployed in your cluster (or running locally)
+- AI Runway backend deployed in your cluster (or running locally)
 - Kubernetes cluster with kubectl access
 
 ## Configuration
 
 ### Backend URL
 
-The plugin attempts to discover the AIRunway backend in this order:
+The plugin attempts to discover the AI Runway backend in this order:
 
 1. **Plugin Settings**: Configure URL in Headlamp Plugin Settings
 2. **In-Cluster Discovery**: Automatically discovers `airunway.<namespace>.svc`
@@ -145,7 +145,7 @@ import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/li
 registerRoute({
   path: '/airunway/deployments',
   sidebar: 'kf-deployments',
-  name: 'AIRunway Deployments',
+  name: 'AI Runway Deployments',
   exact: true,
   component: () => <DeploymentsList />,
 });
@@ -188,7 +188,7 @@ cd ../plugins/headlamp && bun run build
 
 ```
 ┌──────────────────┐     ┌─────────────────────┐
-│    Headlamp      │     │  AIRunway       │
+│    Headlamp      │     │  AI Runway       │
 │   (Browser)      │────▶│    Backend          │
 │                  │     │                     │
 │  ┌────────────┐  │     │  ┌───────────────┐  │

@@ -1,6 +1,6 @@
-# AIRunway Kubernetes Deployment
+# AI Runway Kubernetes Deployment
 
-This directory contains Kubernetes manifests for deploying AIRunway to a cluster. The deployment is split into two manifests:
+This directory contains Kubernetes manifests for deploying AI Runway to a cluster. The deployment is split into two manifests:
 
 - **`controller.yaml`** — CRDs, controller, webhooks, and RBAC (required)
 - **`dashboard.yaml`** — Web UI dashboard deployment and service (optional)
@@ -11,7 +11,7 @@ This directory contains Kubernetes manifests for deploying AIRunway to a cluster
 # 1. Install CRDs and controller (required)
 kubectl apply -f controller.yaml
 
-# 2. Install one or more provider shims (required — registers providers with AIRunway)
+# 2. Install one or more provider shims (required — registers providers with AI Runway)
 # See "Available provider shims" below for the full list
 kubectl apply -f https://raw.githubusercontent.com/kaito-project/airunway/main/providers/<provider>/deploy/<provider>.yaml
 
@@ -29,7 +29,7 @@ Available provider shims:
 
 ## Access AIRunway
 
-After deploying the dashboard, access AIRunway using port-forward:
+After deploying the dashboard, access AI Runway using port-forward:
 
 ```bash
 kubectl port-forward -n airunway-system svc/airunway 3001:80
@@ -120,4 +120,4 @@ kubectl delete -f controller.yaml
 
 ## Metrics Feature
 
-Once deployed in-cluster, AIRunway can fetch real-time metrics from inference deployments (vLLM, Ray Serve). This feature requires in-cluster deployment as it uses Kubernetes service DNS to reach metrics endpoints.
+Once deployed in-cluster, AI Runway can fetch real-time metrics from inference deployments (vLLM, Ray Serve). This feature requires in-cluster deployment as it uses Kubernetes service DNS to reach metrics endpoints.

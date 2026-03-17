@@ -1,7 +1,7 @@
 /**
  * Connection Banner Component
  *
- * Shows a banner when the AIRunway backend is not reachable.
+ * Shows a banner when the AI Runway backend is not reachable.
  * Provides helpful information about how to fix the connection issue.
  */
 
@@ -72,8 +72,8 @@ export function ConnectionBanner({ showOnError = true }: ConnectionBannerProps) 
             marginBottom: '4px',
           }}
         >
-          {status === 'checking' && '⏳ Connecting to AIRunway backend...'}
-          {status === 'error' && '⚠️ Cannot connect to AIRunway backend'}
+          {status === 'checking' && '⏳ Connecting to AI Runway backend...'}
+          {status === 'error' && '⚠️ Cannot connect to AI Runway backend'}
         </div>
         {status === 'error' && (
           <div style={{ fontSize: '13px', opacity: 0.8 }}>
@@ -187,7 +187,7 @@ export function ConnectionError({ error, onRetry }: ConnectionErrorProps) {
           </div>
           <ol style={{ margin: 0, paddingLeft: '20px', lineHeight: 1.8, opacity: 0.8 }}>
             <li>
-              Ensure the AIRunway backend is running:
+              Ensure the AI Runway backend is running:
               <code
                 style={{
                   display: 'block',
@@ -208,7 +208,7 @@ export function ConnectionError({ error, onRetry }: ConnectionErrorProps) {
               </div>
             </li>
             <li>
-              For in-cluster deployments, ensure AIRunway is deployed to your cluster
+              For in-cluster deployments, ensure AI Runway is deployed to your cluster
             </li>
           </ol>
         </div>

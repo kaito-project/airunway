@@ -1,9 +1,9 @@
 # ============================================================================
-#                    Makefile for AIRunway Headlamp Plugin
+#                    Makefile for AI Runway Headlamp Plugin
 # ============================================================================
 #
 # This Makefile automates the entire build and deployment process for the
-# AIRunway Headlamp Plugin. It provides a streamlined development workflow
+# AI Runway Headlamp Plugin. It provides a streamlined development workflow
 # with commands for building, testing, deploying, and maintaining the plugin.
 #
 # OVERVIEW:
@@ -279,7 +279,7 @@ watch:
 .PHONY: help
 help:
 	@echo "============================================================================"
-	@echo "AIRunway Headlamp Plugin Makefile"
+	@echo "AI Runway Headlamp Plugin Makefile"
 	@echo "============================================================================"
 	@echo ""
 	@echo "COMMON WORKFLOWS:"

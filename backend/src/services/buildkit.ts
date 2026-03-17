@@ -187,7 +187,7 @@ class BuildKitService {
   }
 
   /**
-   * Get the status of the AIRunway builder
+   * Get the status of the AI Runway builder
    */
   async getBuilderStatus(): Promise<BuilderStatus> {
     // List all builders

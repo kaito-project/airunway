@@ -105,7 +105,7 @@ airunway/
 
 ### Provider Pattern
 
-AIRunway uses a two-tier provider architecture. The core controller handles `ModelDeployment` validation and provider selection, while independent out-of-tree provider controllers (in `providers/`) handle provider-specific resource creation:
+AI Runway uses a two-tier provider architecture. The core controller handles `ModelDeployment` validation and provider selection, while independent out-of-tree provider controllers (in `providers/`) handle provider-specific resource creation:
 
 - **Core controller**: Validates specs, selects providers via `InferenceProviderConfig` CRDs, updates status
 - **Provider controllers**: Watch `ModelDeployment` resources, create provider-specific resources (KAITO Workspace, DynamoGraphDeployment, RayService)

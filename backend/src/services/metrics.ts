@@ -23,7 +23,7 @@ const DEFAULT_METRICS_CONFIG = {
 };
 
 /**
- * Check if AIRunway is running inside a Kubernetes cluster
+ * Check if AI Runway is running inside a Kubernetes cluster
  * This is determined by the presence of the service account token
  */
 function isRunningInCluster(): boolean {

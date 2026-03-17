@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# AIRunway Gateway Body-Based Routing (BBR) Demo
+# AI Runway Gateway Body-Based Routing (BBR) Demo
 # =============================================================================
 #
 # This script demonstrates deploying TWO models behind a single Gateway and
@@ -190,7 +190,7 @@ wait_for "KAITO operator to be ready" 24 5 \
     -l app.kubernetes.io/name=workspace --timeout=5s
 
 # ---------------------------------------------------------------------------
-# Step 6: Build & deploy AIRunway controller + KAITO provider
+# Step 6: Build & deploy AI Runway controller + KAITO provider
 # ---------------------------------------------------------------------------
 echo ""
 echo "============================================================"

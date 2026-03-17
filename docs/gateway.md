@@ -2,9 +2,9 @@
 
 ## Overview
 
-AIRunway integrates with the [Gateway API Inference Extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension) to provide a unified inference gateway. Instead of accessing each model's Service individually, you deploy a single Gateway and call **all** models through one endpoint using the standard OpenAI-compatible API. The Gateway routes requests to the correct model based on the `model` field in the request body.
+AI Runway integrates with the [Gateway API Inference Extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension) to provide a unified inference gateway. Instead of accessing each model's Service individually, you deploy a single Gateway and call **all** models through one endpoint using the standard OpenAI-compatible API. The Gateway routes requests to the correct model based on the `model` field in the request body.
 
-When gateway integration is active, AIRunway automatically creates an **InferencePool**, **Endpoint Picker (EPP)**, and an **HTTPRoute** for each `ModelDeployment`. You only need to provide the Gateway itself.
+When gateway integration is active, AI Runway automatically creates an **InferencePool**, **Endpoint Picker (EPP)**, and an **HTTPRoute** for each `ModelDeployment`. You only need to provide the Gateway itself.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ When gateway integration is active, AIRunway automatically creates an **Inferenc
 
 **Request flow:** Client → Gateway (+BBR) → HTTPRoute → InferencePool → Endpoint Picker (EPP) → Model Server Pod
 
-**What AIRunway creates automatically** (when `gateway.enabled` is `true` or omitted, and Gateway CRDs are detected):
+**What AI Runway creates automatically** (when `gateway.enabled` is `true` or omitted, and Gateway CRDs are detected):
 - `InferencePool` — selects pods labeled with `airunway.ai/model-deployment: <name>` on the model's serving port
 - `HTTPRoute` — routes from the Gateway to the InferencePool (unless `httpRouteRef` is set)
 - `EPP` — Endpoint Picker Proxy for intelligent endpoint selection
@@ -57,7 +57,7 @@ When gateway integration is active, AIRunway automatically creates an **Inferenc
 
 ## Gateway Implementations
 
-AIRunway works with any Gateway API implementation that supports the [Inference Extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension). You are responsible for installing and managing your own gateway. Some known implementations:
+AI Runway works with any Gateway API implementation that supports the [Inference Extension](https://github.com/kubernetes-sigs/gateway-api-inference-extension). You are responsible for installing and managing your own gateway. Some known implementations:
 
 | Implementation | `gatewayClassName` | Docs |
 |---|---|---|
@@ -119,7 +119,7 @@ metadata:
 
 ### Step 5: Deploy Models
 
-Deploy models as usual. AIRunway automatically creates the InferencePool, EPP, and HTTPRoute:
+Deploy models as usual. AI Runway automatically creates the InferencePool, EPP, and HTTPRoute:
 
 ```yaml
 apiVersion: airunway.ai/v1alpha1
@@ -180,7 +180,7 @@ helm install body-based-router \
 ```
 
 > [!NOTE]
-> It is recommended that BBR chart version to match the GAIE version used by AIRunway (currently v1.3.1). Check the [go.mod](https://github.com/kaito-project/airunway/blob/main/controller/go.mod) for the `sigs.k8s.io/gateway-api-inference-extension` dependency version.
+> It is recommended that BBR chart version to match the GAIE version used by AI Runway (currently v1.3.1). Check the [go.mod](https://github.com/kaito-project/airunway/blob/main/controller/go.mod) for the `sigs.k8s.io/gateway-api-inference-extension` dependency version.
 
 Replace `provider.name` with your gateway implementation (`istio`, `gke`, or omit for others). The chart deploys the BBR container and any provider-specific resources (e.g. EnvoyFilter for Istio).
 

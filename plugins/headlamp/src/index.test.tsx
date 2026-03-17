@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { ROUTES, getDeploymentDetailsUrl } from './routes';
 
-describe('AIRunway Plugin Routes', () => {
+describe('AI Runway Plugin Routes', () => {
   it('exports ROUTES configuration', () => {
     expect(ROUTES).toBeDefined();
     expect(ROUTES.BASE).toBe('/airunway');

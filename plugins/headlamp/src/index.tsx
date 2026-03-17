@@ -1,5 +1,5 @@
 /**
- * AIRunway Headlamp Plugin
+ * AI Runway Headlamp Plugin
  *
  * This plugin provides ML deployment management capabilities within Headlamp,
  * supporting KAITO, KubeRay, and Dynamo runtimes.
@@ -92,7 +92,7 @@ registerRoute({
 registerRoute({
   path: ROUTES.DEPLOYMENTS,
   sidebar: 'kf-deployments',
-  name: 'AIRunway Deployments',
+  name: 'AI Runway Deployments',
   exact: true,
   component: () => <DeploymentsList />,
 });
@@ -110,7 +110,7 @@ registerRoute({
 registerRoute({
   path: ROUTES.MODELS,
   sidebar: 'kf-models',
-  name: 'AIRunway Models',
+  name: 'AI Runway Models',
   exact: true,
   component: () => <ModelsCatalog />,
 });
@@ -119,7 +119,7 @@ registerRoute({
 registerRoute({
   path: ROUTES.RUNTIMES,
   sidebar: 'kf-runtimes',
-  name: 'AIRunway Runtimes',
+  name: 'AI Runway Runtimes',
   exact: true,
   component: () => <RuntimesStatus />,
 });
@@ -128,7 +128,7 @@ registerRoute({
 registerRoute({
   path: ROUTES.INTEGRATIONS,
   sidebar: 'kf-integrations',
-  name: 'AIRunway Integrations',
+  name: 'AI Runway Integrations',
   exact: true,
   component: () => <Integrations />,
 });
@@ -146,7 +146,7 @@ registerRoute({
 registerRoute({
   path: ROUTES.SETTINGS,
   sidebar: 'kf-settings',
-  name: 'AIRunway Settings',
+  name: 'AI Runway Settings',
   exact: true,
   component: () => <PluginSettings />,
 });
@@ -156,7 +156,7 @@ registerRoute({
 // ============================================================================
 
 registerPluginSettings(
-  'airunway-headlamp-plugin',
+  'ai-runway-headlamp-plugin',
   PluginSettings,
   true // showInMenu
 );

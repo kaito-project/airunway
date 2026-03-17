@@ -22,7 +22,7 @@ GAIE_VERSION ?= v1.3.1
 
 # Default target
 help:
-	@echo "AIRunway Development Commands"
+	@echo "AI Runway Development Commands"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

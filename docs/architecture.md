@@ -2,9 +2,9 @@
 
 ## System Overview
 
-AIRunway is a **fully decoupled** platform. The core value lives in the Kubernetes controller and CRDs. The UI is an optional, swappable layer that communicates exclusively through a REST API. Any frontend (Headlamp, a custom CLI, or the bundled React UI) can drive the same backend.
+AI Runway is a **fully decoupled** platform. The core value lives in the Kubernetes controller and CRDs. The UI is an optional, swappable layer that communicates exclusively through a REST API. Any frontend (Headlamp, a custom CLI, or the bundled React UI) can drive the same backend.
 
-![AIRunway Architecture](architecture.png)
+![AI Runway Architecture](architecture.png)
 
 ### Components at a Glance
 
@@ -62,7 +62,7 @@ Note: The UI layer shown above includes the Frontend layer and the Backend layer
  │                    KUBERNETES CLUSTER                                     │
  │                             │                                             │
  │              ┌──────────────▼──────────────┐                             │
- │              │    AIRunway Controller   │  (core operator)           │
+ │              │    AI Runway Controller   │  (core operator)           │
  │              │    • Validates specs         │                             │
  │              │    • Selects providers (CEL) │                             │
  │              │    • Manages CRD lifecycle   │                             │
@@ -100,7 +100,7 @@ Note: The UI layer shown above includes the Frontend layer and the Backend layer
 
 ## Gateway API Integration
 
-AIRunway optionally integrates with the [Gateway API Inference Extension](https://gateway-api.sigs.k8s.io/geps/gep-3567/) to provide a unified inference gateway. When Gateway API Custom Resources are detected in the cluster, the controller automatically creates an **InferencePool** and **HTTPRoute** for each `ModelDeployment`, allowing all models to be called through a single Gateway endpoint using body-based routing on the `model` field.
+AI Runway optionally integrates with the [Gateway API Inference Extension](https://gateway-api.sigs.k8s.io/geps/gep-3567/) to provide a unified inference gateway. When Gateway API Custom Resources are detected in the cluster, the controller automatically creates an **InferencePool** and **HTTPRoute** for each `ModelDeployment`, allowing all models to be called through a single Gateway endpoint using body-based routing on the `model` field.
 
 The feature is auto-detected at startup and silently disabled if the required CRDs are not present. See [Gateway Integration](gateway.md) for full details.
 

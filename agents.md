@@ -1,8 +1,8 @@
-# AIRunway - Agent Instructions
+# AI Runway - Agent Instructions
 
 ## WHY: Project Purpose
 
-**AIRunway** is a platform for deploying and managing machine learning models on Kubernetes. It provides a unified CRD abstraction (`ModelDeployment`) that works across multiple inference providers (KAITO, Dynamo, KubeRay, llm-d, etc.).
+**AI Runway** is a platform for deploying and managing machine learning models on Kubernetes. It provides a unified CRD abstraction (`ModelDeployment`) that works across multiple inference providers (KAITO, Dynamo, KubeRay, llm-d, etc.).
 
 ## WHAT: Tech Stack & Structure
 

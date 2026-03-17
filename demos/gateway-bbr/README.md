@@ -106,7 +106,7 @@ For more information, see [Using Gateway API with Azure](https://istio.io/latest
 
 ## BYO HTTPRoute Explained
 
-By default, the AIRunway controller auto-creates an HTTPRoute per
+By default, the AI Runway controller auto-creates an HTTPRoute per
 `ModelDeployment`. When two models share one gateway, this can cause route
 conflicts. The **BYO HTTPRoute** pattern solves this:
 

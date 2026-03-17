@@ -127,7 +127,7 @@ controller/
 ```
 
 ### CRDs
-AIRunway defines two CRDs:
+AI Runway defines two CRDs:
 
 1. **ModelDeployment** (namespaced) - User-facing API for deploying models
 2. **InferenceProviderConfig** (cluster-scoped) - Provider registration
@@ -205,7 +205,7 @@ cd controller && go test -v ./...
 
 ### Version Compatibility Matrix
 
-| AIRunway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
+| AI Runway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
 |------------------------|------------|----------------|-----------------|------------------|
 | v0.1.x                 | 1.26-1.30  | v0.3.x         | v0.1.x          | v1.1.x           |
 
@@ -276,7 +276,7 @@ AUTH_ENABLED=false
 
 ## Authentication
 
-AIRunway supports optional authentication using Kubernetes OIDC tokens from your kubeconfig.
+AI Runway supports optional authentication using Kubernetes OIDC tokens from your kubeconfig.
 
 ### Enabling Authentication
 
@@ -412,7 +412,7 @@ make clean              # Remove build artifacts
 #### Prerequisites for Headlamp Plugin
 
 - Headlamp Desktop (v0.20+) or Headlamp running in-cluster
-- AIRunway backend deployed or running locally
+- AI Runway backend deployed or running locally
 
 #### Configuring Backend URL
 
@@ -429,7 +429,7 @@ The plugin discovers the backend in this order:
    make setup
    ```
 
-2. Start AIRunway backend:
+2. Start AI Runway backend:
    ```bash
    cd ../..
    bun run dev:backend
@@ -718,7 +718,7 @@ curl http://localhost:5000/v1/chat/completions \
 - Check events: `kubectl get events -n kaito-workspace --sort-by=.lastTimestamp`
 
 ### Metrics not available
-- Metrics require AIRunway to run in-cluster
+- Metrics require AI Runway to run in-cluster
 - Check deployment pods are running: `kubectl get pods -n <namespace>`
 - Verify metrics endpoint is exposed (port 8000 for vLLM, port 5000 for llama.cpp)
 
@@ -745,7 +745,7 @@ curl http://localhost:5000/v1/chat/completions \
 
 #### Plugin shows "Connection Failed" banner
 - The plugin auto-discovers the backend; ensure it's running
-- In-cluster: Deploy AIRunway backend to `airunway-system` namespace
+- In-cluster: Deploy AI Runway backend to `airunway-system` namespace
 - Local development: Start backend with `bun run dev:backend`
 
 #### Type errors after shared package changes

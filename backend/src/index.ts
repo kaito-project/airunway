@@ -22,7 +22,7 @@ async function handleLogin(args: string[]): Promise<void> {
     }
   }
 
-  console.log('🔐 AIRunway Login\n');
+  console.log('🔐 AI Runway Login\n');
   console.log('Extracting credentials from kubeconfig...');
 
   const credentials = await authService.extractTokenFromKubeconfig(contextName);
@@ -70,17 +70,17 @@ function handleLogout(): void {
 }
 
 function handleVersion(): void {
-  console.log('AIRunway v1.0.0');
+  console.log('AI Runway v1.0.0');
 }
 
 function printUsage(): void {
   console.log(`
-AIRunway - ML Model Deployment Platform
+AI Runway - ML Model Deployment Platform
 
 Usage: airunway <command> [options]
 
 Commands:
-  serve              Start the AIRunway server (default)
+  serve              Start the AI Runway server (default)
   login              Authenticate using kubeconfig credentials
   logout             Clear stored credentials
   version            Show version information
@@ -108,7 +108,7 @@ async function startServer(): Promise<void> {
 
   const authEnabled = authService.isAuthEnabled();
   
-  logger.info({ port: server.port, authEnabled }, `🚀 AIRunway backend running on http://localhost:${server.port}`);
+  logger.info({ port: server.port, authEnabled }, `🚀 AI Runway backend running on http://localhost:${server.port}`);
   
   if (authEnabled) {
     console.log('\n🔐 Authentication is ENABLED');

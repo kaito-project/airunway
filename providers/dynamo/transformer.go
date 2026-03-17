@@ -158,7 +158,7 @@ func (t *Transformer) parseOverrides(md *airunwayv1alpha1.ModelDeployment) (*Dyn
 	return &overrides, nil
 }
 
-// mapEngineType maps AIRunway engine types to Dynamo backend framework names
+// mapEngineType maps AI Runway engine types to Dynamo backend framework names
 func (t *Transformer) mapEngineType(engineType airunwayv1alpha1.EngineType) string {
 	switch engineType {
 	case airunwayv1alpha1.EngineTypeVLLM:

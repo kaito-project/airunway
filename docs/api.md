@@ -1,6 +1,6 @@
 # API Reference
 
-AIRunway provides two APIs for managing deployments:
+AI Runway provides two APIs for managing deployments:
 
 1. **CRD API** (Recommended) - Create `ModelDeployment` custom resources directly via kubectl
 2. **REST API** - Web UI backend API for browser-based management
@@ -935,7 +935,7 @@ Get Prometheus metrics from a deployment's inference service.
 ```json
 {
   "available": false,
-  "error": "Metrics are only available when AIRunway is deployed inside the Kubernetes cluster.",
+  "error": "Metrics are only available when AI Runway is deployed inside the Kubernetes cluster.",
   "timestamp": "2025-01-15T10:30:00.000Z",
   "metrics": [],
   "runningOffCluster": true
@@ -943,7 +943,7 @@ Get Prometheus metrics from a deployment's inference service.
 ```
 
 **Notes:**
-- Metrics require AIRunway to be running inside the cluster
+- Metrics require AI Runway to be running inside the cluster
 - Supports both vLLM and llama.cpp metric formats
 - Returns `runningOffCluster: true` when running locally
 
@@ -980,7 +980,7 @@ Get reasons why deployment pods are pending (unschedulable).
 
 ## HuggingFace OAuth
 
-AIRunway supports HuggingFace OAuth with PKCE for secure token acquisition. This enables access to gated models (e.g., Llama, Mistral) without manually managing tokens.
+AI Runway supports HuggingFace OAuth with PKCE for secure token acquisition. This enables access to gated models (e.g., Llama, Mistral) without manually managing tokens.
 
 ### GET /oauth/huggingface/config
 Get OAuth configuration for initiating HuggingFace sign-in.
@@ -1275,7 +1275,7 @@ Check if AI Configurator CLI is available on the system.
 {
   "available": false,
   "runningInCluster": true,
-  "error": "AI Configurator is only available when running AIRunway locally"
+  "error": "AI Configurator is only available when running AI Runway locally"
 }
 ```
 

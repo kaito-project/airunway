@@ -1,6 +1,6 @@
-# AIRunway Headlamp Plugin - Architecture & Design
+# AI Runway Headlamp Plugin - Architecture & Design
 
-This document describes the architecture, design decisions, and technical details of the AIRunway Headlamp plugin.
+This document describes the architecture, design decisions, and technical details of the AI Runway Headlamp plugin.
 
 For installation and development instructions, see the [plugin README](../plugins/headlamp/README.md).
 
@@ -8,7 +8,7 @@ For installation and development instructions, see the [plugin README](../plugin
 
 ## Overview
 
-The AIRunway Headlamp plugin integrates ML deployment management capabilities directly into the [Headlamp](https://headlamp.dev/) Kubernetes dashboard. It provides full feature parity with the main AIRunway UI, supporting all runtimes (KAITO, KubeRay, Dynamo, llm-d) through a full backend proxy architecture.
+The AI Runway Headlamp plugin integrates ML deployment management capabilities directly into the [Headlamp](https://headlamp.dev/) Kubernetes dashboard. It provides full feature parity with the main AI Runway UI, supporting all runtimes (KAITO, KubeRay, Dynamo, llm-d) through a full backend proxy architecture.
 
 ---
 
@@ -43,7 +43,7 @@ The monorepo + full backend proxy approach enables significant code reuse:
 - Styling/CSS — Headlamp uses its own theming
 - UI-specific hooks
 
-UI components are written using Headlamp's `CommonComponents` (`SectionBox`, `SimpleTable`, `Link`, `Loader`, etc.). The main AIRunway frontend is completely unaffected by the plugin.
+UI components are written using Headlamp's `CommonComponents` (`SectionBox`, `SimpleTable`, `Link`, `Loader`, etc.). The main AI Runway frontend is completely unaffected by the plugin.
 
 ---
 
@@ -51,7 +51,7 @@ UI components are written using Headlamp's `CommonComponents` (`SectionBox`, `Si
 
 ```
 ┌─────────────┐    K8s Token     ┌─────────────────────┐
-│  Headlamp   │ ───────────────► │ AIRunway Backend │
+│  Headlamp   │ ───────────────► │ AI Runway Backend │
 │  (Browser)  │                  │                     │
 └─────────────┘                  └─────────────────────┘
        │                                   │
@@ -63,13 +63,13 @@ UI components are written using Headlamp's `CommonComponents` (`SectionBox`, `Si
 └─────────────┘                  └─────────────────────┘
 ```
 
-The plugin reuses the same Kubernetes token that Headlamp already holds. The AIRunway backend validates it via TokenReview, so no additional authentication is needed.
+The plugin reuses the same Kubernetes token that Headlamp already holds. The AI Runway backend validates it via TokenReview, so no additional authentication is needed.
 
 ---
 
 ## Backend Discovery
 
-The plugin locates the AIRunway backend in priority order:
+The plugin locates the AI Runway backend in priority order:
 
 1. **Plugin Settings** — User-configured URL in Headlamp Plugin Settings
 2. **In-Cluster Service Discovery** — `airunway.<namespace>.svc:3001`
@@ -81,9 +81,9 @@ The plugin locates the AIRunway backend in priority order:
 
 ```
 airunway/
-├── frontend/                          # Main AIRunway UI (unchanged)
+├── frontend/                          # Main AI Runway UI (unchanged)
 │
-├── backend/                           # AIRunway Backend (unchanged)
+├── backend/                           # AI Runway Backend (unchanged)
 │
 ├── shared/                            # Shared code
 │   ├── types/                         # TypeScript type definitions

@@ -371,7 +371,7 @@ class KubernetesService {
         return {
           installed: false,
           crdFound: false,
-          message: 'ModelDeployment CRD not found. Please install AIRunway controller.',
+          message: 'ModelDeployment CRD not found. Please install AI Runway controller.',
         };
       }
       logger.error({ error }, 'Error checking CRD installation');
@@ -405,7 +405,7 @@ class KubernetesService {
   async getRuntimesStatus(): Promise<RuntimeStatus[]> {
     const runtimes: RuntimeStatus[] = [];
 
-    // Check if AIRunway controller is installed by checking for the CRD
+    // Check if AI Runway controller is installed by checking for the CRD
     const crdStatus = await this.checkCRDInstallation();
 
     // List InferenceProviderConfig resources to discover registered providers

@@ -1,7 +1,7 @@
 {
   "name": "@airunway/frontend",
   "version": "1.0.0",
-  "description": "AIRunway Frontend Application",
+  "description": "AI Runway Frontend Application",
   "type": "module",
   "scripts": {
     "dev": "bunx --bun vite",

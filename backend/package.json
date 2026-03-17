@@ -1,7 +1,7 @@
 {
   "name": "@airunway/backend",
   "version": "1.0.0",
-  "description": "AIRunway Backend API",
+  "description": "AI Runway Backend API",
   "main": "dist/index.js",
   "scripts": {
     "dev": "bun --watch src/index.ts",

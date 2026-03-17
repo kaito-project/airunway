@@ -271,7 +271,7 @@ export function RuntimesStatus() {
 
       {runtimes.length === 0 && (
         <div style={{ padding: '24px', textAlign: 'center', opacity: 0.7 }}>
-          No runtimes found. Check your connection to the AIRunway backend.
+          No runtimes found. Check your connection to the AI Runway backend.
         </div>
       )}
     </SectionBox>

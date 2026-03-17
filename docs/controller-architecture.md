@@ -1,16 +1,16 @@
 # Controller Architecture
 
-The AIRunway controller follows a **two-tier reconciliation model**, inspired by the Kubernetes Container Runtime Interface (CRI) and Cluster API provider patterns:
+The AI Runway controller follows a **two-tier reconciliation model**, inspired by the Kubernetes Container Runtime Interface (CRI) and Cluster API provider patterns:
 
 ```
 CRI Pattern:
    kubelet ──► CRI Interface ──► containerd/CRI-O/dockershim ──► containers
 
-AIRunway Provider Pattern:
+AI Runway Provider Pattern:
    core ──► Provider Interface ──► kaito-provider/dynamo-provider ──► provider CRs
 ```
 
-Just as `dockershim` was an adapter that made Docker work with the CRI interface, `kaito-provider` is an adapter that makes KAITO (which doesn't know about AIRunway) work with the AIRunway provider interface.
+Just as `dockershim` was an adapter that made Docker work with the CRI interface, `kaito-provider` is an adapter that makes KAITO (which doesn't know about AI Runway) work with the AI Runway provider interface.
 
 ### Lessons from Dockershim
 

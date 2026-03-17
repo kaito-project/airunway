@@ -1,10 +1,10 @@
 # Azure Cluster Autoscaling for AIRunway
 
-This guide explains how to enable cluster autoscaling for GPU workloads in Azure Kubernetes Service (AKS), allowing your cluster to automatically provision GPU nodes when AIRunway deployments require more resources than currently available.
+This guide explains how to enable cluster autoscaling for GPU workloads in Azure Kubernetes Service (AKS), allowing your cluster to automatically provision GPU nodes when AI Runway deployments require more resources than currently available.
 
 ## Overview
 
-AIRunway integrates with Kubernetes cluster autoscaling to provide visibility and guidance when deploying models that exceed available GPU capacity.
+AI Runway integrates with Kubernetes cluster autoscaling to provide visibility and guidance when deploying models that exceed available GPU capacity.
 
 ## Prerequisites
 
@@ -117,7 +117,7 @@ az aks nodepool show \
 
 ### Check Autoscaler Status ConfigMap
 
-AIRunway detects the autoscaler using AKS-specific node labels (`cluster-autoscaler.kubernetes.io/enabled`) first, then falls back to checking the `cluster-autoscaler-status` ConfigMap:
+AI Runway detects the autoscaler using AKS-specific node labels (`cluster-autoscaler.kubernetes.io/enabled`) first, then falls back to checking the `cluster-autoscaler-status` ConfigMap:
 
 ```bash
 kubectl get configmap cluster-autoscaler-status -n kube-system -o yaml
@@ -127,7 +127,7 @@ kubectl get configmap cluster-autoscaler-status -n kube-system -o yaml
 
 ## Troubleshooting
 
-### Issue: AIRunway Shows "Not Detected"
+### Issue: AI Runway Shows "Not Detected"
 
 **Check if autoscaling is enabled:**
 ```bash
