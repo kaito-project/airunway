@@ -236,7 +236,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf"}
+	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--connector", VLLMConnectorNone}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -260,7 +260,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096"}
+	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096", "--connector", VLLMConnectorNone}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -711,6 +711,58 @@ func TestBuildEngineArgsWithCustomArgs(t *testing.T) {
 	}
 }
 
+func TestBuildEngineArgsDefaultsAggregatedVLLMConnectorToNone(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test", "default")
+
+	args, err := tr.buildEngineArgs(md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertArg(t, args, "--connector", VLLMConnectorNone)
+}
+
+func TestBuildEngineArgsPreservesExplicitConnectorOverride(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test", "default")
+	md.Spec.Engine.Args = map[string]string{
+		"connector": VLLMConnectorNIXL,
+	}
+
+	args, err := tr.buildEngineArgs(md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertArg(t, args, "--connector", VLLMConnectorNIXL)
+
+	connectorFlags := 0
+	for _, arg := range args {
+		if arg == "--connector" {
+			connectorFlags++
+		}
+	}
+	if connectorFlags != 1 {
+		t.Fatalf("expected exactly one --connector flag, got %d in %v", connectorFlags, args)
+	}
+}
+
+func TestBuildEngineArgsDisaggregatedLeavesConnectorToRuntimeDefault(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test", "default")
+	md.Spec.Serving = &airunwayv1alpha1.ServingSpec{
+		Mode: airunwayv1alpha1.ServingModeDisaggregated,
+	}
+
+	args, err := tr.buildEngineArgs(md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertNoArg(t, args, "--connector")
+}
+
 func TestBuildEngineArgsDeterministicOrder(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test", "default")
@@ -1101,9 +1153,31 @@ func TestTransformWithCustomImage(t *testing.T) {
 	}
 }
 
-func TestTransformVLLMWorkersInjectNixlSideChannelHost(t *testing.T) {
+func TestTransformAggregatedVLLMWorkersDoNotInjectNixlSideChannelHostByDefault(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test-model", "default")
+
+	resources, err := tr.Transform(context.Background(), md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dgd := resources[0]
+	spec, _, _ := unstructured.NestedMap(dgd.Object, "spec")
+	services, _ := spec["services"].(map[string]interface{})
+	worker, _ := services["VllmWorker"].(map[string]interface{})
+
+	if env := findEnvVar(worker, "VLLM_NIXL_SIDE_CHANNEL_HOST"); env != nil {
+		t.Fatalf("did not expect VLLM_NIXL_SIDE_CHANNEL_HOST for aggregated vLLM worker, got %v", env)
+	}
+}
+
+func TestTransformAggregatedVLLMWorkersInjectNixlSideChannelHostWhenConnectorIsNixl(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test-model", "default")
+	md.Spec.Engine.Args = map[string]string{
+		"connector": VLLMConnectorNIXL,
+	}
 
 	resources, err := tr.Transform(context.Background(), md)
 	if err != nil {
@@ -1628,5 +1702,30 @@ func assertFieldRefEnvVar(t *testing.T, service map[string]interface{}, name, fi
 	fieldRef, _ := valueFrom["fieldRef"].(map[string]interface{})
 	if fieldRef["fieldPath"] != fieldPath {
 		t.Fatalf("expected %s fieldPath %q, got %v", name, fieldPath, fieldRef["fieldPath"])
+	}
+}
+
+func assertArg(t *testing.T, args []string, flag, value string) {
+	t.Helper()
+
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			if args[i+1] != value {
+				t.Fatalf("expected %s value %q, got %q in %v", flag, value, args[i+1], args)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("expected %s %q in args: %v", flag, value, args)
+}
+
+func assertNoArg(t *testing.T, args []string, flag string) {
+	t.Helper()
+
+	for _, arg := range args {
+		if arg == flag {
+			t.Fatalf("did not expect %s in args: %v", flag, args)
+		}
 	}
 }

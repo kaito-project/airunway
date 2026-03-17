@@ -49,6 +49,10 @@ const (
 	// Sub-component types for disaggregated mode
 	SubComponentTypePrefill = "prefill"
 	SubComponentTypeDecode  = "decode"
+
+	// vLLM connector modes used by Dynamo.
+	VLLMConnectorNIXL = "nixl"
+	VLLMConnectorNone = "none"
 )
 
 // DynamoOverrides contains Dynamo-specific override configuration
@@ -511,6 +515,15 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 		}
 	}
 
+	// Aggregated vLLM deployments do not need a KV transfer connector, so make the
+	// default explicit instead of inheriting Dynamo's runtime default.
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+		if _, hasConnectorOverride := md.Spec.Engine.Args["connector"]; !hasConnectorOverride &&
+			t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
+			args = append(args, "--connector", VLLMConnectorNone)
+		}
+	}
+
 	// Add custom engine args with key validation (sorted for deterministic output)
 	keys := make([]string, 0, len(md.Spec.Engine.Args))
 	for k := range md.Spec.Engine.Args {
@@ -530,6 +543,29 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 	}
 
 	return args, nil
+}
+
+func (t *Transformer) resolvedServingMode(md *airunwayv1alpha1.ModelDeployment) airunwayv1alpha1.ServingMode {
+	if md.Spec.Serving != nil && md.Spec.Serving.Mode != "" {
+		return md.Spec.Serving.Mode
+	}
+	return airunwayv1alpha1.ServingModeAggregated
+}
+
+func (t *Transformer) effectiveVLLMConnector(md *airunwayv1alpha1.ModelDeployment) string {
+	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM {
+		return ""
+	}
+
+	if connector, hasConnectorOverride := md.Spec.Engine.Args["connector"]; hasConnectorOverride {
+		return connector
+	}
+
+	if t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
+		return VLLMConnectorNone
+	}
+
+	return VLLMConnectorNIXL
 }
 
 // engineCommand returns the command slice for the given engine type
@@ -672,9 +708,9 @@ func hasEnvVar(md *airunwayv1alpha1.ModelDeployment, name string) bool {
 	return false
 }
 
-// maybeInjectVLLMSideChannelHost ensures each vLLM worker advertises its own pod IP.
+// maybeInjectVLLMSideChannelHost ensures each NIXL-backed vLLM worker advertises its own pod IP.
 func (t *Transformer) maybeInjectVLLMSideChannelHost(service map[string]interface{}, md *airunwayv1alpha1.ModelDeployment) {
-	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM {
+	if !strings.EqualFold(t.effectiveVLLMConnector(md), VLLMConnectorNIXL) {
 		return
 	}
 
