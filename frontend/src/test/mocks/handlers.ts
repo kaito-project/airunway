@@ -68,22 +68,22 @@ export const mockSettings = {
   },
   providers: [
     {
-      id: 'dynamo',
-      name: 'NVIDIA Dynamo',
-      description: 'GPU-accelerated inference with disaggregated serving',
-      defaultNamespace: 'airunway-system',
+      id: 'runtime-a',
+      name: 'Primary Runtime',
+      description: 'General-purpose runtime for standard workloads',
+      defaultNamespace: 'runtime-a-system',
     },
     {
-      id: 'kuberay',
-      name: 'KubeRay',
-      description: 'Ray-based distributed inference',
-      defaultNamespace: 'kuberay',
+      id: 'runtime-b',
+      name: 'Distributed Runtime',
+      description: 'Runtime for larger distributed workloads',
+      defaultNamespace: 'runtime-b-system',
     },
     {
-      id: 'llmd',
-      name: 'llm-d',
-      description: 'vLLM with aggregated or disaggregated serving',
-      defaultNamespace: 'airunway-system',
+      id: 'runtime-c',
+      name: 'Flexible Runtime',
+      description: 'Runtime with multiple deployment styles',
+      defaultNamespace: 'runtime-c-system',
     },
   ],
 }
@@ -176,8 +176,8 @@ export const handlers = [
       namespace: 'airunway-system',
       clusterName: 'test-cluster',
       provider: {
-        id: 'dynamo',
-        name: 'NVIDIA Dynamo',
+        id: 'runtime-a',
+        name: 'Primary Runtime',
       },
       providerInstallation: {
         installed: true,
@@ -206,17 +206,17 @@ export const handlers = [
   }),
 
   http.get(`${API_BASE}/settings/providers/:id`, ({ params }) => {
-    const provider = mockSettings.providers.find(p => p.id === params.id)
-    if (!provider) {
-      return HttpResponse.json({ error: { message: 'Provider not found' } }, { status: 404 })
+    const runtimeEntry = mockSettings.providers.find(entry => entry.id === params.id)
+    if (!runtimeEntry) {
+      return HttpResponse.json({ error: { message: 'Runtime catalog entry not found' } }, { status: 404 })
     }
     return HttpResponse.json({
-      ...provider,
+      ...runtimeEntry,
       crdConfig: {
-        apiGroup: 'nvidia.com',
+        apiGroup: 'example.ai',
         apiVersion: 'v1alpha1',
-        plural: 'dynamographdeployments',
-        kind: 'DynamoGraphDeployment',
+        plural: 'runtimedeployments',
+        kind: 'RuntimeDeployment',
       },
       installationSteps: [],
       helmRepos: [],
@@ -233,9 +233,10 @@ export const handlers = [
   }),
 
   http.get(`${API_BASE}/installation/providers/:id/status`, ({ params }) => {
+    const runtimeEntry = mockSettings.providers.find(entry => entry.id === params.id)
     return HttpResponse.json({
       providerId: params.id,
-      providerName: params.id === 'dynamo' ? 'NVIDIA Dynamo' : params.id === 'llmd' ? 'LLM-D' :'KubeRay',
+      providerName: runtimeEntry?.name || 'Runtime',
       installed: true,
       version: '1.0.0',
       crdFound: true,
@@ -248,21 +249,21 @@ export const handlers = [
   http.post(`${API_BASE}/installation/providers/:id/install`, () => {
     return HttpResponse.json({
       success: true,
-      message: 'Provider installed successfully',
+      message: 'Runtime installed successfully',
     })
   }),
 
   http.post(`${API_BASE}/installation/providers/:id/upgrade`, () => {
     return HttpResponse.json({
       success: true,
-      message: 'Provider upgraded successfully',
+      message: 'Runtime upgraded successfully',
     })
   }),
 
   http.post(`${API_BASE}/installation/providers/:id/uninstall`, () => {
     return HttpResponse.json({
       success: true,
-      message: 'Provider uninstalled successfully',
+      message: 'Runtime uninstalled successfully',
     })
   }),
 
@@ -347,8 +348,8 @@ export const handlers = [
     return HttpResponse.json({
       configured: true,
       namespaces: [
-        { name: 'dynamo-system', exists: true },
-        { name: 'kuberay-system', exists: true },
+        { name: 'runtime-a-system', exists: true },
+        { name: 'runtime-b-system', exists: true },
         { name: 'default', exists: true },
       ],
       user: {
@@ -373,8 +374,8 @@ export const handlers = [
         fullname: 'Test User',
       },
       results: [
-        { namespace: 'dynamo-system', success: true },
-        { namespace: 'kuberay-system', success: true },
+        { namespace: 'runtime-a-system', success: true },
+        { namespace: 'runtime-b-system', success: true },
         { namespace: 'default', success: true },
       ],
     })
@@ -385,8 +386,8 @@ export const handlers = [
       success: true,
       message: 'HuggingFace secrets deleted successfully',
       results: [
-        { namespace: 'dynamo-system', success: true },
-        { namespace: 'kuberay-system', success: true },
+        { namespace: 'runtime-a-system', success: true },
+        { namespace: 'runtime-b-system', success: true },
         { namespace: 'default', success: true },
       ],
     })

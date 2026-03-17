@@ -89,8 +89,8 @@ function createCapacity(overrides: Partial<DetailedClusterCapacity> = {}): Detai
 
 function createRuntime(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {
   return {
-    id: 'dynamo',
-    name: 'NVIDIA Dynamo',
+    id: 'installed-runtime',
+    name: 'Installed Runtime',
     installed: true,
     ...overrides,
   } as RuntimeStatus
@@ -102,7 +102,7 @@ describe('DeploymentForm', () => {
     toast.mockReset()
   })
 
-  it('keeps manual Dynamo topology edits instead of snapping back to the recommendation', async () => {
+  it('keeps manual topology edits instead of snapping back to the recommendation', async () => {
     render(
       <MemoryRouter>
         <DeploymentForm

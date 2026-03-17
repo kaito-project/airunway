@@ -12,7 +12,6 @@ function createModel(overrides: Partial<Model> = {}): Model {
   return {
     id: 'test-model',
     name: 'Test Model',
-    provider: 'kuberay',
     description: 'A test model',
     ...overrides,
   } as Model;

@@ -18,7 +18,7 @@ describe('useSettings', () => {
     expect(result.current.data?.providers).toBeDefined()
   })
 
-  it('returns provider list', async () => {
+  it('returns the settings catalog list', async () => {
     const { result } = renderHook(() => useSettings(), {
       wrapper: createWrapper(),
     })
@@ -54,7 +54,7 @@ describe('useUpdateSettings', () => {
 })
 
 describe('useProviders', () => {
-  it('fetches providers list', async () => {
+  it('fetches the runtime catalog list', async () => {
     const { result } = renderHook(() => useProviders(), {
       wrapper: createWrapper(),
     })
@@ -66,30 +66,30 @@ describe('useProviders', () => {
     expect(result.current.data!.providers.length).toBeGreaterThan(0)
   })
 
-  it('returns provider objects with required fields', async () => {
+  it('returns catalog entries with required fields', async () => {
     const { result } = renderHook(() => useProviders(), {
       wrapper: createWrapper(),
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    const provider = result.current.data!.providers[0]
-    expect(provider.id).toBeDefined()
-    expect(provider.name).toBeDefined()
-    expect(provider.description).toBeDefined()
+    const entry = result.current.data!.providers[0]
+    expect(entry.id).toBeDefined()
+    expect(entry.name).toBeDefined()
+    expect(entry.description).toBeDefined()
   })
 })
 
 describe('useProviderDetails', () => {
-  it('fetches provider details by id', async () => {
-    const { result } = renderHook(() => useProviderDetails('dynamo'), {
+  it('fetches catalog details by id', async () => {
+    const { result } = renderHook(() => useProviderDetails('runtime-a'), {
       wrapper: createWrapper(),
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
     expect(result.current.data).toBeDefined()
-    expect(result.current.data?.id).toBe('dynamo')
+    expect(result.current.data?.id).toBe('runtime-a')
     expect(result.current.data?.name).toBeDefined()
     expect(result.current.data?.crdConfig).toBeDefined()
   })
