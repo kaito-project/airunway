@@ -51,49 +51,51 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapaci
 
   return (
     <div className="space-y-4">
-      {/* Search input */}
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-        <Input
-          type="text"
-          placeholder="Search HuggingFace models (e.g., llama, mistral, qwen)..."
-          value={query}
-          onChange={handleSearch}
-          className="pl-12 h-12 rounded-2xl bg-white/[0.03] border-white/5 text-base placeholder:text-slate-500"
-        />
-        {isFetching && (
-          <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+      <div className="glass-panel !p-4 space-y-4 md:!p-5">
+        {/* Search input */}
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <Input
+            type="text"
+            placeholder="Search HuggingFace models (e.g., llama, mistral, qwen)..."
+            value={query}
+            onChange={handleSearch}
+            className="h-12 rounded-2xl pl-12 text-base placeholder:text-slate-500"
+          />
+          {isFetching && (
+            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+          )}
+        </div>
+
+        {/* Login prompt for gated models */}
+        {showLoginPrompt && (
+          <Alert>
+            <LogIn className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>Log in with HuggingFace to access gated models like Llama and Mistral.</span>
+              {onLoginClick && (
+                <Button variant="outline" size="sm" onClick={onLoginClick} className="ml-2">
+                  Login
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Error state */}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error instanceof Error ? error.message : 'Failed to search models'}
+            </AlertDescription>
+          </Alert>
         )}
       </div>
 
-      {/* Login prompt for gated models */}
-      {showLoginPrompt && (
-        <Alert>
-          <LogIn className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between">
-            <span>Log in with HuggingFace to access gated models like Llama and Mistral.</span>
-            {onLoginClick && (
-              <Button variant="outline" size="sm" onClick={onLoginClick} className="ml-2">
-                Login
-              </Button>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Error state */}
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to search models'}
-          </AlertDescription>
-        </Alert>
-      )}
-
       {/* Empty state */}
       {query.length < 2 && (
-        <div className="text-center py-16 text-slate-400">
+        <div className="glass-panel py-16 text-center text-slate-400">
           <Search className="h-12 w-12 mx-auto mb-4 text-slate-600" />
           <p className="text-slate-300">Enter at least 2 characters to search HuggingFace models</p>
           <p className="text-sm mt-2 text-slate-500">
@@ -104,7 +106,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapaci
 
       {/* Loading state for initial search */}
       {isLoading && query.length >= 2 && (
-        <div className="text-center py-16">
+        <div className="glass-panel py-16 text-center">
           <Loader2 className="h-8 w-8 mx-auto animate-spin text-cyan-400" />
           <p className="mt-4 text-slate-400">Searching compatible models...</p>
         </div>
@@ -112,7 +114,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapaci
 
       {/* No results */}
       {searchResults && searchResults.models.length === 0 && !isLoading && (
-        <div className="text-center py-16 text-slate-400">
+        <div className="glass-panel py-16 text-center text-slate-400">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-slate-600" />
           <p className="text-slate-300">No compatible models found for &ldquo;{debouncedQuery}&rdquo;</p>
           <p className="text-sm mt-2 text-slate-500">
@@ -124,7 +126,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapaci
       {/* Results grid */}
       {searchResults && searchResults.models.length > 0 && (
         <>
-          <div className="text-sm text-muted-foreground">
+          <div className="glass-subtle inline-flex rounded-full px-3 py-1.5 text-sm text-muted-foreground">
             Showing {searchResults.models.length} of {searchResults.total} compatible models
           </div>
           

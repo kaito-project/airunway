@@ -48,20 +48,22 @@ export function Header() {
   const breadcrumbs = useBreadcrumbs()
 
   return (
-    <header className="sticky top-0 z-30 h-14 bg-white/[0.03] backdrop-blur-md border-b border-white/5">
-      <div className="flex h-full items-center justify-between px-4 md:px-6 gap-4">
-        <div className="flex items-center gap-3 min-w-0">
+    <header className="sticky top-0 z-30 px-4 pt-3 md:px-6">
+      <div className="glass-elevated relative flex h-14 items-center justify-between gap-4 overflow-hidden px-4 md:px-5">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_transparent_45%)]" />
+
+        <div className="relative flex min-w-0 items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden shrink-0 -ml-2"
+            className="md:hidden shrink-0 -ml-1 text-white/70 hover:bg-white/10 hover:text-white"
             onClick={toggle}
             aria-label="Toggle navigation menu"
           >
             <Menu className="h-5 w-5" />
           </Button>
 
-          <nav className="hidden md:flex items-center gap-1 min-w-0 text-sm">
+          <nav className="hidden min-w-0 items-center gap-1 rounded-full border border-white/8 bg-black/10 px-2.5 py-1.5 text-sm backdrop-blur-md md:flex">
             {breadcrumbs.map((crumb, i) => (
               <span key={crumb.path} className="flex items-center gap-1 min-w-0">
                 {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />}
@@ -80,7 +82,7 @@ export function Header() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-3 shrink-0">
+        <div className="relative flex shrink-0 items-center gap-2 md:gap-3">
           <div className="flex items-center">
             {isLoading ? (
               <Badge variant="outline" pulse className="gap-1.5">
@@ -103,12 +105,11 @@ export function Header() {
           {clusterStatus?.clusterName && (
             <Badge
               variant="outline"
-              className="hidden lg:inline-flex max-w-[150px] bg-white/[0.05] border-white/10 font-mono text-xs"
+              className="hidden max-w-[170px] font-mono text-[11px] tracking-wide lg:inline-flex"
             >
               <span className="truncate">{clusterStatus.clusterName}</span>
             </Badge>
           )}
-
         </div>
       </div>
     </header>

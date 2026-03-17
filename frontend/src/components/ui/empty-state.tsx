@@ -82,7 +82,7 @@ const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
       <div
         ref={ref}
         className={cn(
-          "flex flex-col items-center justify-center text-center py-12 px-6",
+          "glass-panel flex flex-col items-center justify-center px-6 py-12",
           "animate-fade-in",
           className
         )}

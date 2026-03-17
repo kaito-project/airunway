@@ -25,8 +25,8 @@ const buttonVariants = cva(
           "hover:bg-red-500/20",
         ],
         outline: [
-          "border border-white/10 bg-white/[0.03]",
-          "hover:bg-white/[0.06] hover:text-accent-foreground hover:border-white/20",
+          "border border-white/12 bg-white/[0.05] backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
+          "hover:bg-white/[0.08] hover:text-accent-foreground hover:border-white/20",
         ],
         secondary: [
           "bg-secondary text-secondary-foreground",

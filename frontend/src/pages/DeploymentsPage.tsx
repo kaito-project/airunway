@@ -9,7 +9,7 @@ export function DeploymentsPage() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
+      <div className="glass-panel flex flex-col items-center justify-center py-12 text-center">
         <p className="text-lg font-medium text-destructive">
           Failed to load deployments
         </p>
@@ -25,7 +25,7 @@ export function DeploymentsPage() {
 
   return (
     <div className="space-y-6 animate-slide-up">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="glass-panel flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-heading tracking-tight flex items-center gap-2">
             <Layers className="h-7 w-7 text-cyan-500" />

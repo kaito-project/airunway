@@ -37,13 +37,15 @@ export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel }
   return (
     <div
       className={cn(
-        "flex flex-col rounded-2xl p-5 group",
-        "bg-white/[0.03] border border-white/5",
+        "group relative flex h-full flex-col overflow-hidden rounded-[24px] p-5",
+        "border border-white/10 bg-white/[0.05] backdrop-blur-xl",
+        "shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_20px_45px_rgba(2,8,23,0.20)]",
         "transition-all duration-200 ease-out",
-        "hover:border-cyan-500/30 hover:shadow-glow-card hover:-translate-y-0.5"
+        "before:absolute before:inset-x-0 before:top-0 before:h-24 before:bg-gradient-to-b before:from-white/[0.08] before:to-transparent before:content-['']",
+        "hover:border-cyan-500/30 hover:shadow-glow-card hover:-translate-y-1"
       )}
     >
-      <div className="pb-2">
+      <div className="relative pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold text-white leading-tight truncate group-hover:text-cyan-400 transition-colors duration-200">{model.name}</h3>
@@ -60,7 +62,7 @@ export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel }
         </div>
       </div>
 
-      <div className="flex-1 pt-2">
+      <div className="relative flex-1 pt-2">
         {/* Stats row */}
         <div className="flex items-center gap-4 text-sm text-slate-400 mb-3">
           <div className="flex items-center gap-1">
@@ -93,7 +95,7 @@ export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel }
         </div>
       </div>
 
-      <div className="pt-4">
+      <div className="relative pt-4">
         <Button 
           variant="ghost"
           onClick={handleDeploy} 

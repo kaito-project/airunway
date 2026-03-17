@@ -35,9 +35,9 @@ function ClusterStatusDot() {
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="glass-subtle flex items-center gap-2 rounded-2xl px-3 py-2">
       <span className={dotClass} />
-      <span className="text-xs text-slate-400">{label}</span>
+      <span className="text-xs text-slate-300">{label}</span>
     </div>
   )
 }
@@ -52,12 +52,15 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   return (
     <div
       className={cn(
-        'flex h-full w-60 flex-col bg-background border-r border-white/5 overflow-hidden',
-        onNavigate && 'shadow-soft-sm'
+        'relative flex h-full w-64 flex-col overflow-hidden border-r border-white/10 bg-[#0F1419]/55 backdrop-blur-2xl',
+        'shadow-[inset_-1px_0_0_rgba(255,255,255,0.05)]',
+        onNavigate && 'shadow-[0_24px_60px_rgba(2,8,23,0.35)]'
       )}
     >
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.06),_transparent_40%),linear-gradient(180deg,_rgba(255,255,255,0.04)_0%,_transparent_40%)]" />
+
       {/* Logo */}
-      <div className="flex h-14 items-center border-b border-white/5 px-4 shrink-0">
+      <div className="relative flex h-14 shrink-0 items-center border-b border-white/10 px-4">
         <Link
           to="/"
           className="flex items-center gap-2 min-w-0"
@@ -83,7 +86,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 flex flex-col items-stretch gap-1 px-2 py-4">
+      <nav className="relative flex flex-1 flex-col items-stretch gap-1.5 px-3 py-4">
         {navigation.map((item) => {
           const isActive =
             location.pathname === item.href ||
@@ -95,11 +98,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               to={item.href}
               onClick={handleNavClick}
               className={cn(
-                'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium',
-                'transition-all duration-150 ease-out',
+                'group relative flex items-center gap-3 rounded-2xl border px-3 py-2.5 text-sm font-medium backdrop-blur-md',
+                'transition-all duration-200 ease-out',
                 isActive
-                  ? 'text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground active:scale-[0.98]'
+                  ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+                  : 'border-transparent text-muted-foreground hover:border-white/8 hover:bg-white/[0.05] hover:text-slate-100 active:scale-[0.98]'
               )}
             >
               <span
@@ -112,11 +115,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               />
               <item.icon
                 className={cn(
-                  'h-5 w-5 shrink-0 transition-transform duration-150',
-                  isActive && 'scale-110'
+                  'h-5 w-5 shrink-0 transition-all duration-150',
+                  isActive ? 'scale-110' : 'group-hover:scale-105'
                 )}
               />
-              <span className="whitespace-nowrap text-slate-300">
+              <span className="whitespace-nowrap text-slate-300 transition-colors duration-150">
                 {item.name}
               </span>
             </Link>
@@ -125,7 +128,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </nav>
 
       {/* Cluster status */}
-      <div className="shrink-0 border-t border-white/5 py-3 px-2">
+      <div className="relative shrink-0 border-t border-white/10 px-3 py-3">
         <ClusterStatusDot />
       </div>
     </div>

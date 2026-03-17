@@ -8,10 +8,10 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-white/[0.03] border-white/5 shadow-soft-sm",
-        elevated: "bg-white/[0.05] border-white/10 shadow-soft-md",
-        outline: "bg-transparent border-white/10 shadow-none",
-        glass: "bg-white/[0.03] border-white/5 backdrop-blur-xl shadow-soft-sm",
+        default: "overflow-hidden bg-white/[0.05] border-white/10 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_18px_40px_rgba(2,8,23,0.18)]",
+        elevated: "overflow-hidden bg-white/[0.08] border-white/12 backdrop-blur-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_50px_rgba(2,8,23,0.22)]",
+        outline: "bg-white/[0.02] border-white/10 backdrop-blur-lg shadow-none",
+        glass: "overflow-hidden bg-white/[0.06] border-white/10 backdrop-blur-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_50px_rgba(2,8,23,0.20)]",
       },
       interactive: {
         true: [
