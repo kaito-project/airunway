@@ -18,14 +18,14 @@ vi.mock('@/hooks/useRuntimes', () => ({
       runtimes: [
         {
           id: 'dynamo',
-          name: 'NVIDIA Dynamo',
+          name: 'Installed Runtime',
           installed: true,
           healthy: true,
           version: '1.0.0',
         },
         {
           id: 'kaito',
-          name: 'KAITO',
+          name: 'Available Runtime',
           installed: false,
           healthy: false,
         },
@@ -57,7 +57,7 @@ vi.mock('@/hooks/useInstallation', () => ({
     data: {
       installed: true,
       providerName: 'Runtime',
-      message: 'Provider ready',
+      message: 'Runtime ready',
       crdFound: true,
       operatorRunning: true,
       installationSteps: [],
@@ -157,8 +157,8 @@ describe('SettingsPage', () => {
     )
 
     expect(screen.getByText('Available Runtimes')).toBeInTheDocument()
-    expect(screen.getByText('NVIDIA Dynamo')).toBeInTheDocument()
-    expect(screen.getByText('KAITO')).toBeInTheDocument()
+    expect(screen.getByText('Installed Runtime')).toBeInTheDocument()
+    expect(screen.getByText('Available Runtime')).toBeInTheDocument()
     expect(container.querySelector('[style*="border-top-color"]')).toBeNull()
     expect(container.querySelector('[style*="border-top-width"]')).toBeNull()
   })
