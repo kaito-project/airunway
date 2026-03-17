@@ -1,0 +1,165 @@
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { SettingsPage } from './SettingsPage'
+
+const mutateAsync = vi.fn()
+const refetch = vi.fn()
+const startOAuth = vi.fn()
+const toast = vi.fn()
+
+vi.mock('@/hooks/useSettings', () => ({
+  useSettings: () => ({ isLoading: false }),
+}))
+
+vi.mock('@/hooks/useRuntimes', () => ({
+  useRuntimesStatus: () => ({
+    data: {
+      runtimes: [
+        {
+          id: 'dynamo',
+          name: 'NVIDIA Dynamo',
+          installed: true,
+          healthy: true,
+          version: '1.0.0',
+        },
+        {
+          id: 'kaito',
+          name: 'KAITO',
+          installed: false,
+          healthy: false,
+        },
+      ],
+    },
+    isLoading: false,
+  }),
+}))
+
+vi.mock('@/hooks/useClusterStatus', () => ({
+  useClusterStatus: () => ({
+    data: {
+      connected: true,
+      clusterName: 'test-cluster',
+    },
+    isLoading: false,
+  }),
+}))
+
+vi.mock('@/hooks/useInstallation', () => ({
+  useHelmStatus: () => ({
+    data: {
+      available: true,
+      version: '3.15.0',
+    },
+    isLoading: false,
+  }),
+  useProviderInstallationStatus: () => ({
+    data: {
+      installed: true,
+      providerName: 'NVIDIA Dynamo',
+      message: 'Provider ready',
+      crdFound: true,
+      operatorRunning: true,
+      installationSteps: [],
+    },
+    isLoading: false,
+    refetch,
+  }),
+  useInstallProvider: () => ({
+    mutateAsync,
+  }),
+  useUninstallProvider: () => ({
+    mutateAsync,
+  }),
+}))
+
+vi.mock('@/hooks/useAutoscaler', () => ({
+  useAutoscalerDetection: () => ({
+    data: null,
+    isLoading: false,
+  }),
+}))
+
+vi.mock('@/hooks/useGpuOperator', () => ({
+  useGpuOperatorStatus: () => ({
+    data: {
+      installed: false,
+      gpusAvailable: false,
+      message: '',
+      gpuNodes: [],
+      helmCommands: [],
+    },
+    isLoading: false,
+    refetch,
+  }),
+  useInstallGpuOperator: () => ({
+    mutateAsync,
+  }),
+}))
+
+vi.mock('@/hooks/useGateway', () => ({
+  useGatewayCRDStatus: () => ({
+    data: {
+      gatewayApiInstalled: false,
+      inferenceExtInstalled: false,
+      gatewayAvailable: false,
+      installCommands: [],
+      message: '',
+    },
+    isLoading: false,
+    refetch,
+  }),
+  useInstallGatewayCRDs: () => ({
+    mutateAsync,
+  }),
+}))
+
+vi.mock('@/hooks/useHuggingFace', () => ({
+  useHuggingFaceStatus: () => ({
+    data: {
+      configured: false,
+    },
+    isLoading: false,
+    refetch,
+  }),
+  useHuggingFaceOAuth: () => ({
+    startOAuth,
+  }),
+  useDeleteHuggingFaceSecret: () => ({
+    mutateAsync,
+    isPending: false,
+  }),
+}))
+
+vi.mock('@/hooks/useToast', () => ({
+  useToast: () => ({
+    toast,
+  }),
+}))
+
+vi.mock('@/components/autoscaler/AutoscalerGuidance', () => ({
+  AutoscalerGuidance: () => null,
+}))
+
+describe('SettingsPage', () => {
+  beforeEach(() => {
+    mutateAsync.mockReset()
+    refetch.mockReset()
+    startOAuth.mockReset()
+    toast.mockReset()
+  })
+
+  it('renders runtime cards without provider-specific inline border colors', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('Available Runtimes')).toBeInTheDocument()
+    expect(screen.getByText('NVIDIA Dynamo')).toBeInTheDocument()
+    expect(screen.getByText('KAITO')).toBeInTheDocument()
+    expect(container.querySelector('[style*="border-top-color"]')).toBeNull()
+    expect(container.querySelector('[style*="border-top-width"]')).toBeNull()
+  })
+})

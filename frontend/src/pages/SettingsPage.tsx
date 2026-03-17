@@ -52,13 +52,6 @@ import { useSearchParams } from 'react-router-dom'
 type SettingsTab = 'general' | 'runtimes' | 'integrations'
 type RuntimeId = 'dynamo' | 'kuberay' | 'kaito'| 'llmd'
 
-const providerColors: Record<string, string> = {
-  dynamo: '#76B900',
-  kuberay: '#3B82F6',
-  kaito: '#FBBF24',
-  llmd: '#3B82F6',
-}
-
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { isLoading: settingsLoading } = useSettings()
@@ -437,7 +430,6 @@ export function SettingsPage() {
                       ? 'ring-2 ring-cyan-400'
                       : 'hover:border-white/10'
                   )}
-                  style={{ borderTopColor: providerColors[runtime.id] || undefined, borderTopWidth: providerColors[runtime.id] ? '2px' : undefined }}
                   onClick={() => setSelectedRuntime(runtime.id as RuntimeId)}
                 >
                   <div className="mb-3">
