@@ -391,7 +391,12 @@ function resolveEngineType(config: DeploymentConfig): EngineType {
   return config.engine as EngineType;
 }
 
+export function isCpuOnlyDeployment(config: Pick<DeploymentConfig, 'computeType'>): boolean {
+  return config.computeType === 'cpu';
+}
+
 export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeploymentSpec {
+  const cpuOnlyDeployment = isCpuOnlyDeployment(config);
   const spec: ModelDeploymentSpec = {
     model: {
       id: config.modelId,
@@ -424,7 +429,7 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
     spec.scaling = {
       replicas: config.replicas,
     };
-    if (config.resources?.gpu) {
+    if (!cpuOnlyDeployment && config.resources?.gpu) {
       spec.resources = {
         gpu: {
           count: config.resources.gpu,
@@ -437,11 +442,15 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
     spec.scaling = {
       prefill: {
         replicas: config.prefillReplicas || 1,
-        gpu: config.prefillGpus ? { count: config.prefillGpus, type: 'nvidia.com/gpu' } : undefined,
+        gpu: !cpuOnlyDeployment && config.prefillGpus
+          ? { count: config.prefillGpus, type: 'nvidia.com/gpu' }
+          : undefined,
       },
       decode: {
         replicas: config.decodeReplicas || 1,
-        gpu: config.decodeGpus ? { count: config.decodeGpus, type: 'nvidia.com/gpu' } : undefined,
+        gpu: !cpuOnlyDeployment && config.decodeGpus
+          ? { count: config.decodeGpus, type: 'nvidia.com/gpu' }
+          : undefined,
       },
     };
   }

@@ -147,6 +147,35 @@ describe('Deployment Routes', () => {
       expect(data.resources[0].manifest.spec.image).toBe('ghcr.io/kaito-project/aikit/llama3.2:3b');
       expect(data.resources[0].manifest.spec.provider.name).toBe('kaito');
     });
+
+    test('omits GPU resources for KAITO CPU preview manifests', async () => {
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'kaito-workspace'),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          namespace: 'kaito-workspace',
+          provider: 'kaito',
+          engine: 'llamacpp',
+          modelId: 'unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF',
+          modelSource: 'huggingface',
+          ggufFile: 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf',
+          ggufRunMode: 'direct',
+          computeType: 'cpu',
+          resources: { gpu: 1 },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.resources[0].manifest.spec.resources).toBeUndefined();
+      expect(data.resources[0].manifest.spec.engine.type).toBe('llamacpp');
+    });
   });
 
   describe('POST /api/deployments - storage validation', () => {

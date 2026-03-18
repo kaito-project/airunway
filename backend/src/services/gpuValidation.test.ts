@@ -157,6 +157,21 @@ describe('calculateRequiredGpus', () => {
     expect(result.prefillPerWorker).toBe(2);
     expect(result.decodePerWorker).toBe(1);
   });
+
+  test('treats CPU deployments as requiring zero GPUs', () => {
+    const result = calculateRequiredGpus({
+      ...baseConfig,
+      provider: 'kaito',
+      engine: 'llamacpp',
+      computeType: 'cpu',
+      resources: { gpu: 4 },
+    });
+
+    expect(result.total).toBe(0);
+    expect(result.maxPerWorker).toBe(0);
+    expect(result.prefillPerWorker).toBe(0);
+    expect(result.decodePerWorker).toBe(0);
+  });
 });
 
 describe('validateGpuFit', () => {
@@ -227,6 +242,23 @@ describe('validateGpuFit', () => {
     );
     expect(result.fits).toBe(false);
     expect(result.warnings.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('skips GPU warnings for CPU deployments', () => {
+    const result = validateGpuFit(
+      {
+        ...baseConfig,
+        provider: 'kaito',
+        engine: 'llamacpp',
+        computeType: 'cpu',
+        resources: { gpu: 4 },
+      },
+      clusterWithCapacity(0, 0),
+      4
+    );
+
+    expect(result.fits).toBe(true);
+    expect(result.warnings).toHaveLength(0);
   });
 });
 

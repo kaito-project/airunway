@@ -1,4 +1,4 @@
-import type { DeploymentConfig } from '@airunway/shared';
+import { isCpuOnlyDeployment, type DeploymentConfig } from '@airunway/shared';
 import type { ClusterGpuCapacity } from './kubernetes';
 
 /**
@@ -93,6 +93,15 @@ export function calculateRequiredGpus(config: DeploymentConfig): {
   prefillPerWorker: number;
   decodePerWorker: number;
 } {
+  if (isCpuOnlyDeployment(config)) {
+    return {
+      total: 0,
+      maxPerWorker: 0,
+      prefillPerWorker: 0,
+      decodePerWorker: 0,
+    };
+  }
+
   const gpusPerReplica = config.resources?.gpu ?? 1;
 
   if (config.mode === 'disaggregated') {
@@ -149,6 +158,13 @@ export function validateGpuFit(
   capacity: ClusterGpuCapacity,
   modelMinGpus: number = 1
 ): GpuFitResult {
+  if (isCpuOnlyDeployment(config)) {
+    return {
+      fits: true,
+      warnings: [],
+    };
+  }
+
   const warnings: GpuWarning[] = [];
   const required = calculateRequiredGpus(config);
 
