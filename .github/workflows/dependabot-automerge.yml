@@ -123,4 +123,28 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.pr_url }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr merge "$PR_URL" --repo "$REPO" --auto --squash --match-head-commit "$HEAD_SHA"
+          set -euo pipefail
+
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt to enable merge for $PR_URL"
+
+            if gh pr merge "$PR_URL" --repo "$REPO" --auto --squash --match-head-commit "$HEAD_SHA"; then
+              exit 0
+            fi
+
+            pr_state="$(gh pr view "$PR_URL" --repo "$REPO" --json state,autoMergeRequest)"
+            state="$(jq -r '.state' <<<"$pr_state")"
+            auto_merge_enabled="$(jq -r 'if .autoMergeRequest == null then "false" else "true" end' <<<"$pr_state")"
+
+            if [ "$state" = "MERGED" ] || [ "$auto_merge_enabled" = "true" ]; then
+              echo "Merge was applied despite the previous CLI error."
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+
+          echo "Failed to enable merge for $PR_URL after retries."
+          exit 1
