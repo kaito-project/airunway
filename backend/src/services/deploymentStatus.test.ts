@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { toDeploymentStatus, type ModelDeployment } from '@airunway/shared';
+import { toDeploymentStatus, type ModelDeployment, type PodStatus } from '@airunway/shared';
 
 interface ModelDeploymentOverrides {
   metadata?: Partial<ModelDeployment['metadata']>;
@@ -81,5 +81,74 @@ describe('toDeploymentStatus', () => {
     });
 
     expect(toDeploymentStatus(deployment).frontendService).toBe('legacy-deploy');
+  });
+
+  test('derives aggregated replica counts from spec when CRD replica status is empty', () => {
+    const deployment = createModelDeployment({
+      spec: {
+        scaling: {
+          replicas: 1,
+        },
+      },
+      status: {
+        replicas: undefined,
+        conditions: [
+          {
+            type: 'Ready',
+            status: 'True',
+          },
+        ],
+      },
+    });
+
+    expect(toDeploymentStatus(deployment).replicas).toEqual({
+      desired: 1,
+      ready: 1,
+      available: 1,
+    });
+  });
+
+  test('keeps aggregated deployments deploying when replica status is empty until ready condition flips true', () => {
+    const deployment = createModelDeployment({
+      spec: {
+        scaling: {
+          replicas: 1,
+        },
+      },
+      status: {
+        phase: 'Deploying',
+        replicas: undefined,
+        conditions: [
+          {
+            type: 'Ready',
+            status: 'False',
+          },
+        ],
+      },
+    });
+
+    const pods: PodStatus[] = [
+      {
+        name: 'ds-r1-air-frontend',
+        phase: 'Running',
+        ready: true,
+        restarts: 0,
+      },
+      {
+        name: 'ds-r1-air-leader',
+        phase: 'Running',
+        ready: false,
+        restarts: 0,
+      },
+    ];
+
+    const status = toDeploymentStatus(deployment, pods);
+
+    expect(status.phase).toBe('Deploying');
+    expect(status.replicas).toEqual({
+      desired: 1,
+      ready: 0,
+      available: 0,
+    });
   });
 });

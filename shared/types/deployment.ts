@@ -86,7 +86,7 @@ export interface EngineSpec {
   type: EngineType;
   contextLength?: number;
   trustRemoteCode?: boolean;
-  args?: Record<string, unknown>;
+  args?: Record<string, string>;
 }
 
 export interface ServingSpec {
@@ -341,15 +341,60 @@ const FATAL_POD_REASONS = new Set([
   'StartError',
 ]);
 
-function resolveDeploymentPhase(status: ModelDeploymentStatus, pods: PodStatus[]): DeploymentPhase {
+function hasReadyCondition(status: ModelDeploymentStatus): boolean {
+  return status.conditions?.some((condition) => condition.type === 'Ready' && condition.status === 'True') ?? false;
+}
+
+function resolveReplicaStatus(
+  spec: ModelDeploymentSpec,
+  status: ModelDeploymentStatus,
+  pods: PodStatus[],
+): ReplicaStatus {
+  const desired = status.replicas?.desired;
+  const ready = status.replicas?.ready;
+  const available = status.replicas?.available;
+
+  if (desired !== undefined || ready !== undefined || available !== undefined) {
+    return {
+      desired: desired ?? 0,
+      ready: ready ?? 0,
+      available: available ?? 0,
+    };
+  }
+
+  if (spec.serving?.mode === 'disaggregated') {
+    const prefillDesired = status.prefillReplicas?.desired ?? spec.scaling?.prefill?.replicas ?? 0;
+    const decodeDesired = status.decodeReplicas?.desired ?? spec.scaling?.decode?.replicas ?? 0;
+    const prefillReady = status.prefillReplicas?.ready ?? 0;
+    const decodeReady = status.decodeReplicas?.ready ?? 0;
+    const totalReady = prefillReady + decodeReady;
+
+    return {
+      desired: prefillDesired + decodeDesired,
+      ready: totalReady,
+      available: totalReady,
+    };
+  }
+
+  const derivedDesired = spec.scaling?.replicas ?? (pods.length > 0 ? 1 : 0);
+  const allPodsReady = pods.length > 0 && pods.every((pod) => pod.ready);
+  const derivedReady = hasReadyCondition(status) || allPodsReady ? derivedDesired : 0;
+
+  return {
+    desired: derivedDesired,
+    ready: derivedReady,
+    available: derivedReady,
+  };
+}
+
+function resolveDeploymentPhase(spec: ModelDeploymentSpec, status: ModelDeploymentStatus, pods: PodStatus[]): DeploymentPhase {
   const reportedPhase = status.phase;
 
   if (reportedPhase === 'Terminating') {
     return 'Terminating';
   }
 
-  const desiredReplicas = status.replicas?.desired ?? 0;
-  const readyReplicas = status.replicas?.ready ?? 0;
+  const { desired: desiredReplicas, ready: readyReplicas } = resolveReplicaStatus(spec, status, pods);
   const hasReadyPods = pods.some((pod) => pod.ready);
   const hasRunningPods = pods.some((pod) => pod.phase === 'Running');
   const hasScheduledPendingPods = pods.some((pod) => pod.phase === 'Pending' && Boolean(pod.node));
@@ -391,6 +436,30 @@ function resolveEngineType(config: DeploymentConfig): EngineType {
   return config.engine as EngineType;
 }
 
+function normalizeEngineArgs(engineArgs?: Record<string, unknown>): Record<string, string> | undefined {
+  if (!engineArgs) {
+    return undefined;
+  }
+
+  const normalized = Object.entries(engineArgs).flatMap(([key, value]) => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+
+    if (typeof value === 'string') {
+      return [[key, value] as const];
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return [[key, String(value)] as const];
+    }
+
+    return [[key, JSON.stringify(value)] as const];
+  });
+
+  return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
+}
+
 export function isCpuOnlyDeployment(config: Pick<DeploymentConfig, 'computeType'>): boolean {
   return config.computeType === 'cpu';
 }
@@ -407,7 +476,7 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
       type: resolveEngineType(config),
       contextLength: config.contextLength || config.maxModelLen,
       trustRemoteCode: config.trustRemoteCode,
-      args: config.engineArgs,
+      args: normalizeEngineArgs(config.engineArgs),
     },
     serving: {
       mode: config.mode,
@@ -475,6 +544,7 @@ export function toDeploymentStatus(md: ModelDeployment, pods: PodStatus[] = []):
   const status = md.status || {};
   const spec = md.spec;
   const frontendServiceName = status.endpoint?.service || md.metadata.name;
+  const replicas = resolveReplicaStatus(spec, status, pods);
 
   return {
     name: md.metadata.name,
@@ -483,13 +553,9 @@ export function toDeploymentStatus(md: ModelDeployment, pods: PodStatus[] = []):
     servedModelName: spec.model.servedName,
     engine: (spec.engine?.type as Engine) || undefined,
     mode: spec.serving?.mode || 'aggregated',
-    phase: resolveDeploymentPhase(status, pods),
+    phase: resolveDeploymentPhase(spec, status, pods),
     provider: status.provider?.name || spec.provider?.name || 'unknown',
-    replicas: {
-      desired: status.replicas?.desired ?? 0,
-      ready: status.replicas?.ready ?? 0,
-      available: status.replicas?.available ?? 0,
-    },
+    replicas,
     conditions: status.conditions,
     pods,
     createdAt: md.metadata.creationTimestamp || new Date().toISOString(),

@@ -148,6 +148,38 @@ describe('Deployment Routes', () => {
       expect(data.resources[0].manifest.spec.provider.name).toBe('kaito');
     });
 
+    test('stringifies numeric engine args in preview manifests', async () => {
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'dynamo-system'),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          namespace: 'dynamo-system',
+          provider: 'dynamo',
+          engineArgs: {
+            'tensor-parallel-size': 8,
+            'pipeline-parallel-size': 3,
+            'gpu-memory-utilization': 0.95,
+            'enable-chunked-prefill': true,
+          },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.resources[0].manifest.spec.engine.args).toEqual({
+        'tensor-parallel-size': '8',
+        'pipeline-parallel-size': '3',
+        'gpu-memory-utilization': '0.95',
+        'enable-chunked-prefill': 'true',
+      });
+    });
+
     test('omits GPU resources for KAITO CPU preview manifests', async () => {
       restores.push(
         mockServiceMethod(configService, 'getDefaultNamespace', async () => 'kaito-workspace'),
