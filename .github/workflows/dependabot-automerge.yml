@@ -42,10 +42,18 @@ jobs:
           pr_url="$(jq -r '.url' <<<"$pr_json")"
           auto_merge_enabled="$(jq -r 'if .autoMergeRequest == null then "false" else "true" end' <<<"$pr_json")"
 
-          if [ "$author" != "dependabot[bot]" ]; then
-            echo "skip_reason=not_dependabot" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          echo "Evaluating PR #$PR_NUMBER from author $author"
+
+          # Dependabot PRs may be reported either as the bot user or the
+          # GitHub App, depending on which API surface returns the author.
+          case "$author" in
+            "dependabot[bot]"|"app/dependabot")
+              ;;
+            *)
+              echo "skip_reason=not_dependabot" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
 
           if [ "$state" != "OPEN" ] || [ "$is_draft" != "false" ]; then
             echo "skip_reason=not_open_ready" >> "$GITHUB_OUTPUT"
@@ -115,4 +123,4 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.pr_url }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr merge "$PR_URL" --repo "$REPO" --auto --merge --match-head-commit "$HEAD_SHA"
+          gh pr merge "$PR_URL" --repo "$REPO" --auto --squash --match-head-commit "$HEAD_SHA"
