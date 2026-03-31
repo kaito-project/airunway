@@ -47,6 +47,18 @@ function valuesToSetJsonArgs(values: Record<string, unknown>): string[] {
   return args;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function valuesToSetJsonCommandArgs(values: Record<string, unknown>): string[] {
+  const args: string[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    args.push(`--set-json ${shellQuote(`${key}=${JSON.stringify(value)}`)}`);
+  }
+  return args;
+}
+
 /**
  * NVIDIA GPU Operator Helm configuration
  */
@@ -365,6 +377,58 @@ class HelmService {
 
   private sanitizeNameForStep(name: string): string {
     return name.replace(/[^a-zA-Z0-9-]+/g, '-');
+  }
+
+  private getManagedChartVarPrefix(chart: HelmChart): string {
+    return this.sanitizeNameForStep(chart.name).replace(/-/g, '_').toUpperCase();
+  }
+
+  private buildInstallCommand(
+    chart: HelmChart,
+    chartRef: string = chart.chart,
+    includeVersion: boolean = true
+  ): string {
+    let cmd = `helm install ${chart.name} ${chartRef}`;
+    cmd += ` --namespace ${chart.namespace}`;
+    if (chart.createNamespace) {
+      cmd += ' --create-namespace';
+    }
+    if (includeVersion && chart.version) {
+      cmd += ` --version ${chart.version}`;
+    }
+    if (chart.values) {
+      cmd += ` ${valuesToSetJsonCommandArgs(chart.values).join(' ')}`;
+    }
+    if (chart.skipCrds) {
+      cmd += ' --skip-crds';
+    }
+    return cmd;
+  }
+
+  private buildPullChartCommand(chart: HelmChart, untarDir: string): string {
+    let cmd = `helm pull ${chart.fetchUrl || chart.chart} --untar --untardir ${untarDir}`;
+    if (!chart.fetchUrl && chart.version) {
+      cmd += ` --version ${chart.version}`;
+    }
+    return cmd;
+  }
+
+  private buildPreInstallMissingCrdsCommand(chart: HelmChart): string {
+    const varPrefix = this.getManagedChartVarPrefix(chart);
+    const chartDirVar = `${varPrefix}_CHART_DIR`;
+    const chartPathVar = `${varPrefix}_CHART_PATH`;
+    const chartDirRef = `$${chartDirVar}`;
+    const chartPathRef = `$${chartPathVar}`;
+
+    return [
+      `${chartDirVar}=$(mktemp -d)`,
+      this.buildPullChartCommand(chart, `"${chartDirRef}"`),
+      `${chartPathVar}=$(find "${chartDirRef}" -mindepth 1 -maxdepth 1 -type d -print -quit)`,
+      `test -n "${chartPathRef}"`,
+      `for crd in "${chartPathRef}/crds"/*.yaml; do [ -f "$crd" ] || continue; if [ -z "$(kubectl get -f "$crd" --ignore-not-found -o name)" ]; then kubectl apply -f "$crd"; fi; done`,
+      this.buildInstallCommand(chart, `"${chartPathRef}"`, false),
+      `rm -rf "${chartDirRef}"`,
+    ].join(' && ');
   }
 
   private createSyntheticResult(stdout: string): HelmResult {
@@ -807,24 +871,23 @@ class HelmService {
     }
 
     for (const chart of charts) {
+      if (chart.preCrdUrls && chart.preCrdUrls.length > 0) {
+        for (const crdUrl of chart.preCrdUrls) {
+          commands.push(`kubectl apply -f ${crdUrl}`);
+        }
+      }
+
+      if (chart.preInstallMissingCrds) {
+        commands.push(this.buildPreInstallMissingCrdsCommand(chart));
+        continue;
+      }
+
       if (chart.fetchUrl) {
         // Use fetch + install for charts with fetchUrl
-        let cmd = `helm fetch ${chart.fetchUrl} && helm install ${chart.name} ${chart.chart}`;
-        cmd += ` --namespace ${chart.namespace}`;
-        if (chart.createNamespace) {
-          cmd += ' --create-namespace';
-        }
+        let cmd = `helm fetch ${chart.fetchUrl} && ${this.buildInstallCommand(chart, chart.chart, false)}`;
         commands.push(cmd);
       } else {
-        let cmd = `helm install ${chart.name} ${chart.chart}`;
-        cmd += ` --namespace ${chart.namespace}`;
-        if (chart.createNamespace) {
-          cmd += ' --create-namespace';
-        }
-        if (chart.version) {
-          cmd += ` --version ${chart.version}`;
-        }
-        commands.push(cmd);
+        commands.push(this.buildInstallCommand(chart));
       }
     }
 

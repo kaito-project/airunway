@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ProviderCapabilities defines what a provider supports
@@ -71,6 +72,10 @@ type HelmChart struct {
 	// createNamespace indicates whether to create the namespace if it doesn't exist
 	// +optional
 	CreateNamespace bool `json:"createNamespace,omitempty"`
+
+	// values is an arbitrary Helm values object that will be passed to the chart
+	// +optional
+	Values runtime.RawExtension `json:"values,omitempty"`
 }
 
 // InstallationStep defines a step in the provider installation process

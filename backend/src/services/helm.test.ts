@@ -263,38 +263,7 @@ describe('HelmService - Command Building Logic', () => {
 
 describe('HelmService - getInstallCommands Logic', () => {
   function getInstallCommands(repos: HelmRepo[], charts: HelmChart[]): string[] {
-    const commands: string[] = [];
-
-    for (const repo of repos) {
-      commands.push(`helm repo add ${repo.name} ${repo.url}`);
-    }
-
-    if (repos.length > 0) {
-      commands.push('helm repo update');
-    }
-
-    for (const chart of charts) {
-      if (chart.fetchUrl) {
-        let cmd = `helm fetch ${chart.fetchUrl} && helm install ${chart.name} ${chart.chart}`;
-        cmd += ` --namespace ${chart.namespace}`;
-        if (chart.createNamespace) {
-          cmd += ' --create-namespace';
-        }
-        commands.push(cmd);
-      } else {
-        let cmd = `helm install ${chart.name} ${chart.chart}`;
-        cmd += ` --namespace ${chart.namespace}`;
-        if (chart.createNamespace) {
-          cmd += ' --create-namespace';
-        }
-        if (chart.version) {
-          cmd += ` --version ${chart.version}`;
-        }
-        commands.push(cmd);
-      }
-    }
-
-    return commands;
+    return helmService.getInstallCommands(repos, charts);
   }
 
   test('generates repo add commands', () => {
@@ -343,6 +312,76 @@ describe('HelmService - getInstallCommands Logic', () => {
     const commands = getInstallCommands([], charts);
     expect(commands[0]).toContain('helm fetch https://example.com/chart.tgz');
     expect(commands[0]).toContain('--create-namespace');
+  });
+
+  test('includes --set-json overrides in generated install commands', () => {
+    const charts: HelmChart[] = [
+      {
+        name: 'dynamo-platform',
+        chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz',
+        namespace: 'dynamo-system',
+        createNamespace: true,
+        values: {
+          'dynamo-operator': {
+            controllerManager: {
+              kubeRbacProxy: {
+                image: {
+                  repository: 'quay.io/brancz/kube-rbac-proxy',
+                  tag: 'v0.15.0',
+                },
+              },
+            },
+          },
+        },
+      },
+    ];
+
+    const commands = getInstallCommands([], charts);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("--set-json 'dynamo-operator=");
+    expect(commands[0]).toContain('"repository":"quay.io/brancz/kube-rbac-proxy"');
+    expect(commands[0]).toContain('"tag":"v0.15.0"');
+  });
+
+  test('includes pre-CRD apply commands and --skip-crds when requested', () => {
+    const charts: HelmChart[] = [
+      {
+        name: 'kaito-workspace',
+        chart: 'kaito/workspace',
+        namespace: 'kaito-workspace',
+        createNamespace: true,
+        preCrdUrls: ['https://example.com/crd.yaml'],
+        skipCrds: true,
+      },
+    ];
+
+    const commands = getInstallCommands([], charts);
+    expect(commands[0]).toBe('kubectl apply -f https://example.com/crd.yaml');
+    expect(commands[1]).toContain('helm install kaito-workspace kaito/workspace');
+    expect(commands[1]).toContain('--skip-crds');
+  });
+
+  test('emits selective chart CRD setup commands when preInstallMissingCrds is requested', () => {
+    const charts: HelmChart[] = [
+      {
+        name: 'kaito-workspace',
+        chart: 'kaito/workspace',
+        version: '0.9.0',
+        namespace: 'kaito-workspace',
+        createNamespace: true,
+        preInstallMissingCrds: true,
+        skipCrds: true,
+      },
+    ];
+
+    const commands = getInstallCommands([], charts);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('KAITO_WORKSPACE_CHART_DIR=$(mktemp -d)');
+    expect(commands[0]).toContain('helm pull kaito/workspace --untar --untardir "$KAITO_WORKSPACE_CHART_DIR" --version 0.9.0');
+    expect(commands[0]).toContain('kubectl get -f "$crd" --ignore-not-found -o name');
+    expect(commands[0]).toContain('kubectl apply -f "$crd"');
+    expect(commands[0]).toContain('helm install kaito-workspace "$KAITO_WORKSPACE_CHART_PATH"');
+    expect(commands[0]).toContain('--skip-crds');
   });
 });
 

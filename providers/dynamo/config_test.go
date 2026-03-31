@@ -2,6 +2,7 @@ package dynamo
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -43,6 +44,35 @@ func TestGetProviderConfigSpec(t *testing.T) {
 
 	if spec.Documentation != ProviderDocumentation {
 		t.Errorf("expected documentation %s, got %s", ProviderDocumentation, spec.Documentation)
+	}
+
+	if len(spec.Installation.HelmCharts) != 2 {
+		t.Fatalf("expected 2 installation charts, got %d", len(spec.Installation.HelmCharts))
+	}
+
+	platformChart := spec.Installation.HelmCharts[1]
+	if len(platformChart.Values.Raw) == 0 {
+		t.Fatal("expected dynamo platform chart to include helm values override")
+	}
+
+	valuesJSON := string(platformChart.Values.Raw)
+	if !strings.Contains(valuesJSON, `"repository":"quay.io/brancz/kube-rbac-proxy"`) {
+		t.Fatalf("expected values override to point kube-rbac-proxy at quay.io, got %s", valuesJSON)
+	}
+	if !strings.Contains(valuesJSON, `"tag":"v0.15.0"`) {
+		t.Fatalf("expected values override to pin kube-rbac-proxy tag, got %s", valuesJSON)
+	}
+
+	if len(spec.Installation.Steps) != 2 {
+		t.Fatalf("expected 2 installation steps, got %d", len(spec.Installation.Steps))
+	}
+
+	installCommand := spec.Installation.Steps[1].Command
+	if !strings.Contains(installCommand, "--set-json") {
+		t.Fatalf("expected dynamo platform install command to include --set-json, got %s", installCommand)
+	}
+	if !strings.Contains(installCommand, "quay.io/brancz/kube-rbac-proxy") {
+		t.Fatalf("expected dynamo platform install command to include kube-rbac-proxy override, got %s", installCommand)
 	}
 }
 

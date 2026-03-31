@@ -31,6 +31,7 @@ function extractProviderDetails(config: any) {
       version: c.version,
       namespace: c.namespace,
       createNamespace: c.createNamespace,
+      values: c.values && typeof c.values === 'object' ? c.values : undefined,
     })),
     installationSteps: (installation.steps || []).map((s: any) => ({
       title: s.title,
@@ -131,17 +132,13 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
     const status = config.status || {};
-    const installationStatus = providerId === 'kaito'
-      ? await kubernetesService.checkKaitoInstallationStatus()
-      : {
-          installed: status.ready === true,
-          crdFound: true,
-          operatorRunning: status.ready === true,
-          message: status.ready
-            ? `${provider.name} is installed and running`
-            : `${provider.name} is registered but not ready`,
-        };
+    const installationStatus = await kubernetesService.checkProviderInstallationStatus(
+      providerId,
+      status,
+      provider.name,
+    );
 
     return c.json({
       providerId: provider.id,
@@ -152,7 +149,7 @@ const installation = new Hono()
       version: status.version,
       message: installationStatus.message,
       installationSteps: provider.installationSteps,
-      helmCommands: helmService.getInstallCommands(provider.helmRepos, provider.helmCharts),
+      helmCommands: helmService.getInstallCommands(provider.helmRepos, charts),
     });
   })
   .get('/providers/:providerId/commands', async (c) => {
@@ -164,11 +161,12 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
 
     return c.json({
       providerId: provider.id,
       providerName: provider.name,
-      commands: helmService.getInstallCommands(provider.helmRepos, provider.helmCharts),
+      commands: helmService.getInstallCommands(provider.helmRepos, charts),
       steps: provider.installationSteps,
     });
   })

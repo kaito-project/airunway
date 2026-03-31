@@ -6,6 +6,40 @@ import { mockServiceMethod } from '../test/helpers';
 import { mockInferenceProviderConfig } from '../test/fixtures';
 
 describe('Installation Provider Routes', () => {
+  function createDynamoProviderConfig() {
+    return {
+      ...mockInferenceProviderConfig,
+      metadata: { ...mockInferenceProviderConfig.metadata, name: 'dynamo' },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
+        installation: {
+          ...mockInferenceProviderConfig.spec.installation,
+          helmRepos: [],
+          helmCharts: [
+            {
+              name: 'dynamo-platform',
+              chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz',
+              namespace: 'dynamo-system',
+              createNamespace: true,
+              values: {
+                'dynamo-operator': {
+                  controllerManager: {
+                    kubeRbacProxy: {
+                      image: {
+                        repository: 'quay.io/brancz/kube-rbac-proxy',
+                        tag: 'v0.15.0',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
   const restores: Array<() => void> = [];
 
   afterEach(() => {
@@ -48,13 +82,16 @@ describe('Installation Provider Routes', () => {
       expect(data.message).toBe('KAITO workspace CRD found but no running pods were detected in kaito-workspace');
       expect(data.installationSteps).toBeDefined();
       expect(data.helmCommands).toBeDefined();
+      expect(data.helmCommands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
+      expect(data.helmCommands.some((command: string) => command.includes('kubectl apply -f "$crd"'))).toBe(true);
+      expect(data.helmCommands.some((command: string) => command.includes('--skip-crds'))).toBe(true);
     });
 
-    test('keeps config-based readiness checks for non-KAITO providers', async () => {
+    test('uses live Dynamo installation status for non-KAITO providers', async () => {
       let kaitoStatusChecks = 0;
+      let dynamoStatusChecks = 0;
       const nonKaitoConfig = {
-        ...mockInferenceProviderConfig,
-        metadata: { ...mockInferenceProviderConfig.metadata, name: 'dynamo' },
+        ...createDynamoProviderConfig(),
         status: {
           ready: false,
           version: '1.2.3',
@@ -72,6 +109,15 @@ describe('Installation Provider Routes', () => {
             message: 'should not be used',
           };
         }),
+        mockServiceMethod(kubernetesService, 'checkDynamoInstallationStatus', async () => {
+          dynamoStatusChecks += 1;
+          return {
+            installed: false,
+            crdFound: false,
+            operatorRunning: false,
+            message: 'Dynamo CRD not found',
+          };
+        }),
       );
 
       const res = await app.request('/api/installation/providers/dynamo/status');
@@ -79,13 +125,17 @@ describe('Installation Provider Routes', () => {
 
       const data = await res.json();
       expect(kaitoStatusChecks).toBe(0);
+      expect(dynamoStatusChecks).toBe(1);
       expect(data.providerId).toBe('dynamo');
       expect(data.providerName).toBe('Dynamo');
       expect(data.installed).toBe(false);
-      expect(data.crdFound).toBe(true);
+      expect(data.crdFound).toBe(false);
       expect(data.operatorRunning).toBe(false);
       expect(data.version).toBe('1.2.3');
-      expect(data.message).toBe('Dynamo is registered but not ready');
+      expect(data.message).toBe('Dynamo CRD not found');
+      expect(data.helmCommands).toHaveLength(1);
+      expect(data.helmCommands[0]).toContain("--set-json 'dynamo-operator=");
+      expect(data.helmCommands[0]).toContain('"repository":"quay.io/brancz/kube-rbac-proxy"');
     });
 
     test('returns 404 for unknown provider', async () => {
@@ -115,7 +165,26 @@ describe('Installation Provider Routes', () => {
       expect(data.providerId).toBe('kaito');
       expect(data.providerName).toBe('Kaito');
       expect(data.commands).toBeDefined();
+      expect(data.commands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
+      expect(data.commands.some((command: string) => command.includes('kubectl apply -f "$crd"'))).toBe(true);
+      expect(data.commands.some((command: string) => command.includes('--skip-crds'))).toBe(true);
       expect(data.steps).toBeDefined();
+    });
+
+    test('preserves chart values in generated commands for non-KAITO providers', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => createDynamoProviderConfig()),
+      );
+
+      const res = await app.request('/api/installation/providers/dynamo/commands');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.providerId).toBe('dynamo');
+      expect(data.providerName).toBe('Dynamo');
+      expect(data.commands).toHaveLength(1);
+      expect(data.commands[0]).toContain("--set-json 'dynamo-operator=");
+      expect(data.commands[0]).toContain('"tag":"v0.15.0"');
     });
 
     test('returns 404 for unknown provider', async () => {
@@ -181,25 +250,7 @@ describe('Installation Provider Routes', () => {
 
     test('keeps standard chart install behavior for non-KAITO providers', async () => {
       let installCharts: any[] = [];
-      const nonKaitoConfig = {
-        ...mockInferenceProviderConfig,
-        metadata: { ...mockInferenceProviderConfig.metadata, name: 'dynamo' },
-        spec: {
-          ...mockInferenceProviderConfig.spec,
-          installation: {
-            ...mockInferenceProviderConfig.spec.installation,
-            helmCharts: [
-              {
-                name: 'dynamo',
-                chart: 'dynamo/dynamo',
-                version: '1.2.3',
-                namespace: 'dynamo-system',
-                createNamespace: true,
-              },
-            ],
-          },
-        },
-      };
+      const nonKaitoConfig = createDynamoProviderConfig();
 
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => nonKaitoConfig),
@@ -217,9 +268,10 @@ describe('Installation Provider Routes', () => {
       expect(res.status).toBe(200);
 
       expect(installCharts).toHaveLength(1);
-      expect(installCharts[0].chart).toBe('dynamo/dynamo');
+      expect(installCharts[0].chart).toBe('https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz');
       expect(installCharts[0].preInstallMissingCrds).toBeUndefined();
       expect(installCharts[0].skipCrds).toBeUndefined();
+      expect(installCharts[0].values?.['dynamo-operator']?.controllerManager?.kubeRbacProxy?.image?.repository).toBe('quay.io/brancz/kube-rbac-proxy');
     });
   });
 

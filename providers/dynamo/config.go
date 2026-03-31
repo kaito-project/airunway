@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,6 +43,10 @@ const (
 
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
+
+	dynamoPlatformImageOverrideValue = `{"controllerManager":{"kubeRbacProxy":{"image":{"repository":"quay.io/brancz/kube-rbac-proxy","tag":"v0.15.0"}}}}`
+	dynamoPlatformValuesJSON         = `{"dynamo-operator":` + dynamoPlatformImageOverrideValue + `}`
+	dynamoPlatformSetJSONArg         = `dynamo-operator=` + dynamoPlatformImageOverrideValue
 )
 
 // ProviderConfigManager handles registration and heartbeat for the Dynamo provider
@@ -111,6 +116,9 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 					Chart:           "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz",
 					Namespace:       "dynamo-system",
 					CreateNamespace: true,
+					Values: runtime.RawExtension{
+						Raw: []byte(dynamoPlatformValuesJSON),
+					},
 				},
 			},
 			Steps: []airunwayv1alpha1.InstallationStep{
@@ -121,7 +129,7 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 				},
 				{
 					Title:       "Install Dynamo Platform",
-					Command:     "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz && helm install dynamo-platform dynamo-platform-0.7.1.tgz --namespace dynamo-system --create-namespace",
+					Command:     fmt.Sprintf("helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz && helm install dynamo-platform dynamo-platform-0.7.1.tgz --namespace dynamo-system --create-namespace --set-json '%s'", dynamoPlatformSetJSONArg),
 					Description: "Install the Dynamo platform operator v0.7.1.",
 				},
 			},
@@ -176,8 +184,8 @@ func (m *ProviderConfigManager) UpdateStatus(ctx context.Context, ready bool) er
 	now := metav1.Now()
 	config.Status = airunwayv1alpha1.InferenceProviderConfigStatus{
 		Ready:              ready,
-		Version:           ProviderVersion,
-		LastHeartbeat:     &now,
+		Version:            ProviderVersion,
+		LastHeartbeat:      &now,
 		UpstreamCRDVersion: fmt.Sprintf("%s/%s", DynamoAPIGroup, DynamoAPIVersion),
 	}
 
