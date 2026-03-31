@@ -82,6 +82,7 @@ safe-outputs:
 
 engine:
   id: copilot
+  model: claude-opus-4.6
 source: githubnext/agentics/workflows/vex-generator.md@1f672aef974f4246124860fc532f82fe8a93a57e
 ---
 
