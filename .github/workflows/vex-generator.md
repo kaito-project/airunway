@@ -166,6 +166,7 @@ For this workflow:
 - For every other dismissal reason, only proceed when all of these explicit inputs are present: `ALERT_VEX_STATUS`, `ALERT_VEX_JUSTIFICATION`, and `ALERT_VEX_IMPACT_STATEMENT`.
 - If any explicit VEX input is missing, skip and explain that the workflow requires structured maintainer-provided VEX metadata instead of inferring VEX truth from the dismissal reason.
 - For this repository workflow, only generate a statement when `ALERT_VEX_STATUS` is `not_affected`. If another explicit status is supplied, skip instead of guessing how to represent it.
+- Only accept these `ALERT_VEX_JUSTIFICATION` values for `not_affected`: `component_not_present`, `vulnerable_code_not_present`, `vulnerable_code_not_in_execute_path`, `vulnerable_code_cannot_be_controlled_by_adversary`, or `inline_mitigations_already_exist`. If any other value is supplied, skip and explain that the justification is unsupported.
 - Use `ALERT_VEX_JUSTIFICATION` exactly as supplied after confirming it is plausible for `not_affected`. Do not substitute a different justification based only on the dismissal reason.
 - Use `ALERT_VEX_IMPACT_STATEMENT` as the source of truth for `impact_statement`. Preserve the maintainer's meaning and make only minimal formatting cleanup if needed.
 

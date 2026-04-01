@@ -15,6 +15,14 @@ on:
         required: false
         default: '5'
         type: string
+      alert_number:
+        description: Optional dismissed Dependabot alert number to backfill directly
+        required: false
+        type: string
+      ghsa_id:
+        description: Optional GHSA ID to backfill from dismissed alerts without lookback filtering
+        required: false
+        type: string
       dry_run:
         description: Log candidate dispatches without triggering the VEX workflow
         required: false
@@ -38,6 +46,8 @@ jobs:
       LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours }}
       MAX_PAGES_INPUT: ${{ github.event.inputs.max_pages }}
       REPO: ${{ github.repository }}
+      TARGET_ALERT_NUMBER_INPUT: ${{ github.event.inputs.alert_number }}
+      TARGET_GHSA_ID_INPUT: ${{ github.event.inputs.ghsa_id }}
       WORKFLOW_FILE: vex-generator.lock.yml
     steps:
       - name: Poll dismissed Dependabot alerts and dispatch the VEX workflow
@@ -88,6 +98,21 @@ jobs:
             ' <<<"$comment_text"
           }
 
+          is_valid_vex_justification() {
+            case "$1" in
+              component_not_present|\
+              vulnerable_code_not_present|\
+              vulnerable_code_not_in_execute_path|\
+              vulnerable_code_cannot_be_controlled_by_adversary|\
+              inline_mitigations_already_exist)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
           if [ -z "${GH_TOKEN:-}" ]; then
             echo "::error::VEX_AUTOMATION_TOKEN is not configured."
             exit 1
@@ -98,6 +123,9 @@ jobs:
           dry_run="${DRY_RUN_INPUT:-false}"
           default_branch="${DEFAULT_BRANCH:-$DISPATCH_REF}"
           dispatch_ref="${DISPATCH_REF:-$default_branch}"
+          target_alert_number="$(trim "${TARGET_ALERT_NUMBER_INPUT:-}")"
+          target_ghsa_id="$(trim "${TARGET_GHSA_ID_INPUT:-}")"
+          target_ghsa_id="$(printf '%s' "$target_ghsa_id" | tr '[:upper:]' '[:lower:]')"
 
           case "$lookback_hours" in
             ''|*[!0-9]*)
@@ -123,7 +151,29 @@ jobs:
             exit 1
           fi
 
-          cutoff="$(date -u -d "$lookback_hours hours ago" +"%Y-%m-%dT%H:%M:%SZ")"
+          case "$target_alert_number" in
+            '')
+              ;;
+            *[!0-9]*)
+              echo "::error::alert_number must be a positive integer when provided."
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$target_alert_number" ]; then
+            scan_mode="alert_number"
+          elif [ -n "$target_ghsa_id" ]; then
+            scan_mode="ghsa_id"
+          else
+            scan_mode="lookback"
+          fi
+
+          if [ "$scan_mode" = "lookback" ]; then
+            cutoff="$(date -u -d "$lookback_hours hours ago" +"%Y-%m-%dT%H:%M:%SZ")"
+          else
+            cutoff=""
+          fi
+
           tmpdir="$(mktemp -d)"
           trap 'rm -rf "$tmpdir"' EXIT
 
@@ -131,49 +181,168 @@ jobs:
           ambiguous_ghsas_file="$tmpdir/ambiguous-ghsas.txt"
           open_vex_prs_json="$tmpdir/open-vex-prs.json"
           open_vex_pr_files="$tmpdir/open-vex-pr-files.tsv"
+          summary_rows_file="$tmpdir/summary-rows.md"
+          supported_vex_justifications="component_not_present, vulnerable_code_not_present, vulnerable_code_not_in_execute_path, vulnerable_code_cannot_be_controlled_by_adversary, inline_mitigations_already_exist"
 
           : > "$recent_alerts_jsonl"
           : > "$ambiguous_ghsas_file"
           : > "$open_vex_pr_files"
+          : > "$summary_rows_file"
+
+          recent_alert_count=0
+          dispatched_count=0
+          skipped_count=0
+          dry_run_count=0
+
+          append_summary_row() {
+            local outcome="$1"
+            local alert_ref="$2"
+            local ghsa_ref="$3"
+            local detail="$4"
+
+            printf '| %s | %s | %s | %s |\n' \
+              "$outcome" \
+              "${alert_ref:-n/a}" \
+              "${ghsa_ref:-n/a}" \
+              "${detail:-n/a}" \
+              >> "$summary_rows_file"
+          }
+
+          emit_summary() {
+            if [ -z "${GITHUB_STEP_SUMMARY:-}" ]; then
+              return 0
+            fi
+
+            {
+              echo "## Dependabot VEX Dispatch"
+              echo ""
+              case "$scan_mode" in
+                alert_number)
+                  echo "- Mode: targeted alert backfill"
+                  echo "- Alert number: #$target_alert_number"
+                  if [ -n "$target_ghsa_id" ]; then
+                    echo "- GHSA filter: $target_ghsa_id"
+                  fi
+                  ;;
+                ghsa_id)
+                  echo "- Mode: targeted GHSA backfill"
+                  echo "- GHSA filter: $target_ghsa_id"
+                  echo "- Max pages scanned: $max_pages"
+                  ;;
+                *)
+                  echo "- Mode: lookback scan"
+                  echo "- Lookback hours: $lookback_hours"
+                  echo "- Cutoff: $cutoff"
+                  echo "- Max pages scanned: $max_pages"
+                  ;;
+              esac
+              echo "- Default branch: $default_branch"
+              echo "- Dispatch ref: $dispatch_ref"
+              echo "- Dry run: $dry_run"
+              echo ""
+              echo "| Outcome | Alert | GHSA | Detail |"
+              echo "|---|---|---|---|"
+              if [ -s "$summary_rows_file" ]; then
+                cat "$summary_rows_file"
+              else
+                echo "| none | - | - | No matching dismissed alerts were processed. |"
+              fi
+              echo ""
+              echo "- Alerts considered: $recent_alert_count"
+              echo "- Alerts skipped: $skipped_count"
+              echo "- Dry-run dispatches: $dry_run_count"
+              echo "- Workflow dispatches created: $dispatched_count"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
 
           echo "Scanning dismissed Dependabot alerts for $REPO"
-          echo "Cutoff: $cutoff"
+          echo "Scan mode: $scan_mode"
+          if [ "$scan_mode" = "lookback" ]; then
+            echo "Cutoff: $cutoff"
+          else
+            echo "Target alert number: ${target_alert_number:-<none>}"
+            echo "Target GHSA: ${target_ghsa_id:-<none>}"
+          fi
           echo "Default branch: $default_branch"
           echo "Dispatch ref: $dispatch_ref"
           echo "Dry run: $dry_run"
 
-          for page in $(seq 1 "$max_pages"); do
-            echo "Fetching dismissed alert page $page"
+          if [ "$scan_mode" = "alert_number" ]; then
+            echo "Fetching dismissed alert #$target_alert_number"
+            if target_alert_json="$(api --method GET "repos/$REPO/dependabot/alerts/$target_alert_number" 2>/dev/null)"; then
+              target_alert_state="$(jq -r '.state // ""' <<<"$target_alert_json")"
+              fetched_ghsa_id="$(jq -r '.security_advisory.ghsa_id // ""' <<<"$target_alert_json")"
+              fetched_ghsa_id_normalized="$(printf '%s' "$fetched_ghsa_id" | tr '[:upper:]' '[:lower:]')"
 
-            page_json="$(api --method GET "repos/$REPO/dependabot/alerts" \
-              -f state="dismissed" \
-              -f sort="updated" \
-              -f direction="desc" \
-              -F per_page=100 \
-              -F page="$page")"
+              if [ "$target_alert_state" != "dismissed" ]; then
+                echo "Requested alert #$target_alert_number is in state '$target_alert_state', not dismissed."
+                append_summary_row "skipped" "#$target_alert_number" "${fetched_ghsa_id:-n/a}" "requested alert is not dismissed"
+                emit_summary
+                exit 0
+              fi
 
-            page_count="$(jq 'length' <<<"$page_json")"
+              if [ -n "$target_ghsa_id" ] && [ "$fetched_ghsa_id_normalized" != "$target_ghsa_id" ]; then
+                echo "::error::alert_number #$target_alert_number does not match ghsa_id $target_ghsa_id."
+                append_summary_row "error" "#$target_alert_number" "${fetched_ghsa_id:-n/a}" "alert_number and ghsa_id filters do not match"
+                emit_summary
+                exit 1
+              fi
 
-            if [ "$page_count" -eq 0 ]; then
-              echo "No more dismissed alerts returned."
-              break
+              printf '%s\n' "$target_alert_json" >> "$recent_alerts_jsonl"
+            else
+              echo "::warning::Dependabot alert #$target_alert_number was not found."
+              append_summary_row "skipped" "#$target_alert_number" "${target_ghsa_id:-n/a}" "requested alert was not found"
+              emit_summary
+              exit 0
             fi
+          else
+            for page in $(seq 1 "$max_pages"); do
+              echo "Fetching dismissed alert page $page"
 
-            jq -c --arg cutoff "$cutoff" '
-              map(select((.updated_at // "") >= $cutoff))
-              | .[]
-            ' <<<"$page_json" >> "$recent_alerts_jsonl"
+              page_json="$(api --method GET "repos/$REPO/dependabot/alerts" \
+                -f state="dismissed" \
+                -f sort="updated" \
+                -f direction="desc" \
+                -F per_page=100 \
+                -F page="$page")"
 
-            oldest_updated_at="$(jq -r '.[-1].updated_at // ""' <<<"$page_json")"
-            if [[ -z "$oldest_updated_at" || "$oldest_updated_at" < "$cutoff" ]]; then
-              echo "Reached alerts older than the lookback window on page $page."
-              break
-            fi
-          done
+              page_count="$(jq 'length' <<<"$page_json")"
+
+              if [ "$page_count" -eq 0 ]; then
+                echo "No more dismissed alerts returned."
+                break
+              fi
+
+              if [ "$scan_mode" = "ghsa_id" ]; then
+                jq -c --arg target_ghsa_id "$target_ghsa_id" '
+                  map(select(((.security_advisory.ghsa_id // "") | ascii_downcase) == $target_ghsa_id))
+                  | .[]
+                ' <<<"$page_json" >> "$recent_alerts_jsonl"
+              else
+                jq -c --arg cutoff "$cutoff" '
+                  map(select((.updated_at // "") >= $cutoff))
+                  | .[]
+                ' <<<"$page_json" >> "$recent_alerts_jsonl"
+
+                oldest_updated_at="$(jq -r '.[-1].updated_at // ""' <<<"$page_json")"
+                if [[ -z "$oldest_updated_at" || "$oldest_updated_at" < "$cutoff" ]]; then
+                  echo "Reached alerts older than the lookback window on page $page."
+                  break
+                fi
+              fi
+            done
+          fi
 
           recent_alert_count="$(wc -l < "$recent_alerts_jsonl" | tr -d ' ')"
           if [ "$recent_alert_count" -eq 0 ]; then
-            echo "No dismissed alerts found inside the lookback window."
+            if [ "$scan_mode" = "ghsa_id" ]; then
+              echo "No dismissed alerts matched GHSA $target_ghsa_id in the scanned pages."
+              append_summary_row "skipped" "-" "$target_ghsa_id" "no matching dismissed alerts found in scanned pages; increase max_pages to search further back"
+            else
+              echo "No dismissed alerts found inside the selected search scope."
+              append_summary_row "none" "-" "${target_ghsa_id:-n/a}" "no dismissed alerts found inside the selected search scope"
+            fi
+            emit_summary
             exit 0
           fi
 
@@ -202,10 +371,6 @@ jobs:
               | jq -r --arg pr_number "$pr_number" '.[] | [$pr_number, .filename] | @tsv' \
               >> "$open_vex_pr_files"
           done
-
-          dispatched_count=0
-          skipped_count=0
-          dry_run_count=0
 
           while IFS= read -r alert_json; do
             alert_number="$(jq -r '.number' <<<"$alert_json")"
@@ -245,6 +410,8 @@ jobs:
               skip_reason="incomplete_explicit_vex_metadata"
             elif [ "$vex_status" != "not_affected" ]; then
               skip_reason="unsupported_vex_status"
+            elif ! is_valid_vex_justification "$vex_justification"; then
+              skip_reason="invalid_vex_justification"
             elif [ -z "$ghsa_id" ]; then
               skip_reason="missing_ghsa_id"
             elif [ -z "$manifest_path" ]; then
@@ -269,15 +436,18 @@ jobs:
 
             if [ -n "$skip_reason" ]; then
               echo "Skipping alert #$alert_number (${ghsa_id:-unknown}): $skip_reason"
+              append_summary_row "skipped" "#$alert_number" "${ghsa_id:-n/a}" "$skip_reason"
               if [ "$skip_reason" = "missing_explicit_vex_metadata" ] || \
                  [ "$skip_reason" = "incomplete_explicit_vex_metadata" ] || \
                  [ "$skip_reason" = "tolerable_risk_requires_explicit_vex_metadata" ] || \
-                 [ "$skip_reason" = "unsupported_vex_status" ]; then
+                 [ "$skip_reason" = "unsupported_vex_status" ] || \
+                 [ "$skip_reason" = "invalid_vex_justification" ]; then
                 echo "Expected dismissal comment format:"
                 echo "VEX:"
                 echo "status: not_affected"
                 echo "justification: <openvex-justification>"
                 echo "impact: <maintainer-reviewed impact statement>"
+                echo "Allowed justifications for not_affected: $supported_vex_justifications"
               fi
               skipped_count=$((skipped_count + 1))
               continue
@@ -325,6 +495,7 @@ jobs:
             if [ "$dry_run" = "true" ]; then
               echo "Dry run: would dispatch $WORKFLOW_FILE for alert #$alert_number ($ghsa_id)"
               jq . "$payload_file"
+              append_summary_row "dry_run" "#$alert_number" "${ghsa_id:-n/a}" "would dispatch $WORKFLOW_FILE"
               dry_run_count=$((dry_run_count + 1))
               continue
             fi
@@ -332,6 +503,7 @@ jobs:
             echo "Dispatching $WORKFLOW_FILE for alert #$alert_number ($ghsa_id)"
             api --method POST "repos/$REPO/actions/workflows/$WORKFLOW_FILE/dispatches" \
               --input "$payload_file"
+            append_summary_row "dispatched" "#$alert_number" "${ghsa_id:-n/a}" "$WORKFLOW_FILE"
             dispatched_count=$((dispatched_count + 1))
           done < "$recent_alerts_jsonl"
 
@@ -339,3 +511,4 @@ jobs:
           echo "Alerts skipped: $skipped_count"
           echo "Dry-run dispatches: $dry_run_count"
           echo "Workflow dispatches created: $dispatched_count"
+          emit_summary
