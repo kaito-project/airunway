@@ -56,8 +56,8 @@ links:
   - name: Issues
     url: https://github.com/kaito-project/airunway/issues
 maintainers:
-  - name: Sertac Ozercan
-    email: sozercan@gmail.com
+  - name: sozercan
+    email: 852750+sozercan@users.noreply.github.com
 annotations:
   headlamp/plugin/archive-url: https://github.com/kaito-project/airunway/releases/download/headlamp-plugin-v0.1.0/airunway-headlamp-plugin-0.1.0.tar.gz
   headlamp/plugin/archive-checksum: ""
