@@ -6,6 +6,7 @@
 import type { AutoscalerDetectionResult, AutoscalerStatusInfo } from '@airunway/shared';
 import type { AIConfiguratorStatus, AIConfiguratorResult, AIConfiguratorConfig } from '@airunway/shared';
 import type { DeploymentStatus, PodStatus } from '@airunway/shared';
+import type { HfUserInfo, HfTokenExchangeResponse, HfSecretStatus } from '@airunway/shared';
 
 // ============================================================================
 // Autoscaler Fixtures
@@ -170,3 +171,159 @@ export const mockPodFailureReasons = [
     canAutoscalerHelp: true,
   },
 ];
+
+// ============================================================================
+// HuggingFace OAuth Fixtures
+// ============================================================================
+
+export const mockHfUser: HfUserInfo = {
+  id: 'user-123',
+  name: 'testuser',
+  fullname: 'Test User',
+  email: 'test@example.com',
+  avatarUrl: 'https://huggingface.co/avatars/testuser.png',
+};
+
+export const mockHfTokenExchange: HfTokenExchangeResponse = {
+  accessToken: 'hf_test_token_abc123',
+  tokenType: 'Bearer',
+  expiresIn: 3600,
+  scope: 'openid profile read-repos',
+  user: mockHfUser,
+};
+
+export const mockHfTokenValidation = {
+  valid: true as const,
+  user: mockHfUser,
+};
+
+export const mockHfTokenValidationInvalid = {
+  valid: false as const,
+  error: 'Invalid or expired token',
+};
+
+// ============================================================================
+// HuggingFace Secrets Fixtures
+// ============================================================================
+
+export const mockHfSecretStatusConfigured: HfSecretStatus = {
+  configured: true,
+  namespaces: [
+    { name: 'dynamo-system', exists: true },
+    { name: 'kuberay-system', exists: true },
+    { name: 'kaito-workspace', exists: true },
+    { name: 'default', exists: true },
+  ],
+  user: mockHfUser,
+};
+
+export const mockHfSecretStatusEmpty: HfSecretStatus = {
+  configured: false,
+  namespaces: [
+    { name: 'dynamo-system', exists: false },
+    { name: 'kuberay-system', exists: false },
+    { name: 'kaito-workspace', exists: false },
+    { name: 'default', exists: false },
+  ],
+};
+
+export const mockHfDistributeResult = {
+  success: true,
+  results: [
+    { namespace: 'dynamo-system', success: true },
+    { namespace: 'kuberay-system', success: true },
+    { namespace: 'kaito-workspace', success: true },
+    { namespace: 'default', success: true },
+  ],
+};
+
+export const mockHfDeleteResult = {
+  success: true,
+  results: [
+    { namespace: 'dynamo-system', success: true },
+    { namespace: 'kuberay-system', success: true },
+    { namespace: 'kaito-workspace', success: true },
+    { namespace: 'default', success: true },
+  ],
+};
+
+// ============================================================================
+// GPU & Installation Fixtures
+// ============================================================================
+
+export const mockGpuCapacity = {
+  totalGpus: 4,
+  allocatedGpus: 0,
+  availableGpus: 4,
+  maxContiguousAvailable: 4,
+  maxNodeGpuCapacity: 4,
+  gpuNodeCount: 1,
+  nodes: [],
+};
+
+export const mockGpuCapacityEmpty = {
+  totalGpus: 0,
+  allocatedGpus: 0,
+  availableGpus: 0,
+  maxContiguousAvailable: 0,
+  maxNodeGpuCapacity: 0,
+  gpuNodeCount: 0,
+  nodes: [],
+};
+
+export const mockDetailedGpuCapacity = {
+  totalGpus: 4,
+  allocatedGpus: 1,
+  availableGpus: 3,
+  nodes: [
+    {
+      name: 'gpu-node-1',
+      gpuType: 'nvidia.com/gpu',
+      totalGpus: 4,
+      allocatedGpus: 1,
+      availableGpus: 3,
+      labels: { 'apps': 'ai-model' },
+    },
+  ],
+};
+
+export const mockGpuOperatorStatus = {
+  installed: true,
+  healthy: true,
+  message: 'NVIDIA GPU Operator is running',
+  pods: [{ name: 'gpu-operator-abc123', status: 'Running', ready: true }],
+};
+
+export const mockHelmAvailable = {
+  available: true,
+  version: '3.14.0',
+};
+
+export const mockHelmUnavailable = {
+  available: false,
+  error: 'Helm CLI not found in PATH',
+};
+
+export const mockProviderInstallResult = {
+  success: true,
+  results: [
+    { step: 'repo-add-kaito', result: { success: true, stdout: 'repo added', stderr: '' } },
+    { step: 'repo-update', result: { success: true, stdout: 'updated', stderr: '' } },
+    { step: 'install-workspace', result: { success: true, stdout: 'installed', stderr: '' } },
+  ],
+};
+
+export const mockProviderUninstallResult = {
+  success: true,
+  stdout: 'release "workspace" uninstalled',
+  stderr: '',
+  exitCode: 0,
+};
+
+export const mockInferenceProviderConfigNotReady = {
+  ...mockInferenceProviderConfig,
+  status: {
+    ready: false,
+    version: '0.9.0',
+  },
+};
