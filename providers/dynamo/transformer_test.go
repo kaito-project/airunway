@@ -236,7 +236,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--connector", VLLMConnectorNone}
+	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -260,7 +260,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096", "--connector", VLLMConnectorNone}
+	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -686,14 +686,20 @@ func TestBuildPrefillWorkerWithSecret(t *testing.T) {
 	mc, _ := eps["mainContainer"].(map[string]interface{})
 	args, _ := mc["args"].([]interface{})
 	foundMode := false
+	foundKVTransfer := false
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypePrefill {
 			foundMode = true
-			break
+		}
+		if args[i] == "--kv-transfer-config" && args[i+1] == VLLMKVTransferConfig {
+			foundKVTransfer = true
 		}
 	}
 	if !foundMode {
 		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypePrefill, args)
+	}
+	if !foundKVTransfer {
+		t.Errorf("expected --kv-transfer-config %s in args: %v", VLLMKVTransferConfig, args)
 	}
 }
 
@@ -723,14 +729,20 @@ func TestBuildDecodeWorkerWithSecret(t *testing.T) {
 	mc, _ := eps["mainContainer"].(map[string]interface{})
 	args, _ := mc["args"].([]interface{})
 	foundMode := false
+	foundKVTransfer := false
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypeDecode {
 			foundMode = true
-			break
+		}
+		if args[i] == "--kv-transfer-config" && args[i+1] == VLLMKVTransferConfig {
+			foundKVTransfer = true
 		}
 	}
 	if !foundMode {
 		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypeDecode, args)
+	}
+	if !foundKVTransfer {
+		t.Errorf("expected --kv-transfer-config %s in args: %v", VLLMKVTransferConfig, args)
 	}
 }
 
@@ -751,7 +763,7 @@ func TestBuildEngineArgsWithCustomArgs(t *testing.T) {
 	}
 }
 
-func TestBuildEngineArgsDefaultsAggregatedVLLMConnectorToNone(t *testing.T) {
+func TestBuildEngineArgsAggregatedVLLMOmitsConnector(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test", "default")
 
@@ -760,14 +772,14 @@ func TestBuildEngineArgsDefaultsAggregatedVLLMConnectorToNone(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertArg(t, args, "--connector", VLLMConnectorNone)
+	assertNoArg(t, args, "--connector")
 }
 
-func TestBuildEngineArgsPreservesExplicitConnectorOverride(t *testing.T) {
+func TestBuildEngineArgsStripsConnectorFromVLLMArgs(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test", "default")
 	md.Spec.Engine.Args = map[string]string{
-		"connector": VLLMConnectorNIXL,
+		"connector": "nixl",
 	}
 
 	args, err := tr.buildEngineArgs(md)
@@ -775,17 +787,7 @@ func TestBuildEngineArgsPreservesExplicitConnectorOverride(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertArg(t, args, "--connector", VLLMConnectorNIXL)
-
-	connectorFlags := 0
-	for _, arg := range args {
-		if arg == "--connector" {
-			connectorFlags++
-		}
-	}
-	if connectorFlags != 1 {
-		t.Fatalf("expected exactly one --connector flag, got %d in %v", connectorFlags, args)
-	}
+	assertNoArg(t, args, "--connector")
 }
 
 func TestBuildEngineArgsDisaggregatedLeavesConnectorToRuntimeDefault(t *testing.T) {
@@ -1230,26 +1232,6 @@ func TestTransformAggregatedVLLMWorkersDoNotInjectNixlSideChannelHostByDefault(t
 	if env := findEnvVar(worker, "VLLM_NIXL_SIDE_CHANNEL_HOST"); env != nil {
 		t.Fatalf("did not expect VLLM_NIXL_SIDE_CHANNEL_HOST for aggregated vLLM worker, got %v", env)
 	}
-}
-
-func TestTransformAggregatedVLLMWorkersInjectNixlSideChannelHostWhenConnectorIsNixl(t *testing.T) {
-	tr := NewTransformer()
-	md := newTestMD("test-model", "default")
-	md.Spec.Engine.Args = map[string]string{
-		"connector": VLLMConnectorNIXL,
-	}
-
-	resources, err := tr.Transform(context.Background(), md)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	dgd := resources[0]
-	spec, _, _ := unstructured.NestedMap(dgd.Object, "spec")
-	services, _ := spec["services"].(map[string]interface{})
-	worker, _ := services["VllmWorker"].(map[string]interface{})
-
-	assertFieldRefEnvVar(t, worker, "VLLM_NIXL_SIDE_CHANNEL_HOST", "status.podIP")
 }
 
 func TestTransformDisaggregatedVLLMWorkersInjectNixlSideChannelHost(t *testing.T) {

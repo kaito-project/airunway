@@ -55,9 +55,9 @@ const (
 	SubComponentTypePrefill = "prefill"
 	SubComponentTypeDecode  = "decode"
 
-	// vLLM connector modes used by Dynamo.
-	VLLMConnectorNIXL = "nixl"
-	VLLMConnectorNone = "none"
+	// VLLMKVTransferConfig is the --kv-transfer-config value required by
+	// newer vLLM for NIXL-based disaggregated serving (replaces --connector).
+	VLLMKVTransferConfig = `{"kv_connector":"NixlConnector","kv_role":"kv_both"}`
 )
 
 // DynamoOverrides contains Dynamo-specific override configuration
@@ -367,6 +367,9 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 		return nil, err
 	}
 	args = append(args, "--disaggregation-mode", SubComponentTypePrefill)
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
+	}
 
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
@@ -429,6 +432,9 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 		return nil, err
 	}
 	args = append(args, "--disaggregation-mode", SubComponentTypeDecode)
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
+	}
 
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
@@ -531,15 +537,6 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 		}
 	}
 
-	// Aggregated vLLM deployments do not need a KV transfer connector, so make the
-	// default explicit instead of inheriting Dynamo's runtime default.
-	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
-		if _, hasConnectorOverride := md.Spec.Engine.Args["connector"]; !hasConnectorOverride &&
-			t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
-			args = append(args, "--connector", VLLMConnectorNone)
-		}
-	}
-
 	// Add custom engine args with key validation (sorted for deterministic output)
 	keys := make([]string, 0, len(md.Spec.Engine.Args))
 	for k := range md.Spec.Engine.Args {
@@ -547,6 +544,11 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
+		// "connector" is consumed internally (e.g. NIXL side-channel host
+		// injection) but must not be forwarded to vLLM which rejects the flag.
+		if key == "connector" && md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+			continue
+		}
 		if !isValidArgKey(key) {
 			return nil, fmt.Errorf("invalid engine arg key %q: must contain only alphanumeric characters, hyphens, and underscores", key)
 		}
@@ -566,22 +568,6 @@ func (t *Transformer) resolvedServingMode(md *airunwayv1alpha1.ModelDeployment) 
 		return md.Spec.Serving.Mode
 	}
 	return airunwayv1alpha1.ServingModeAggregated
-}
-
-func (t *Transformer) effectiveVLLMConnector(md *airunwayv1alpha1.ModelDeployment) string {
-	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM {
-		return ""
-	}
-
-	if connector, hasConnectorOverride := md.Spec.Engine.Args["connector"]; hasConnectorOverride {
-		return connector
-	}
-
-	if t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
-		return VLLMConnectorNone
-	}
-
-	return VLLMConnectorNIXL
 }
 
 // engineCommand returns the command slice for the given engine type
@@ -725,8 +711,10 @@ func hasEnvVar(md *airunwayv1alpha1.ModelDeployment, name string) bool {
 }
 
 // maybeInjectVLLMSideChannelHost ensures each NIXL-backed vLLM worker advertises its own pod IP.
+// Injection is gated on disaggregated vLLM serving, which always uses NIXL for KV-cache transfer.
 func (t *Transformer) maybeInjectVLLMSideChannelHost(service map[string]interface{}, md *airunwayv1alpha1.ModelDeployment) {
-	if !strings.EqualFold(t.effectiveVLLMConnector(md), VLLMConnectorNIXL) {
+	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM ||
+		t.resolvedServingMode(md) != airunwayv1alpha1.ServingModeDisaggregated {
 		return
 	}
 
