@@ -116,7 +116,7 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 					Chart:           "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz",
 					Namespace:       "dynamo-system",
 					CreateNamespace: true,
-					Values: runtime.RawExtension{
+					Values: &runtime.RawExtension{
 						Raw: []byte(dynamoPlatformValuesJSON),
 					},
 				},

@@ -486,8 +486,8 @@ class KubernetesService {
           runtimes.push({
             id: name,
             name: displayName,
-            installed: runtimeStatus.crdFound ?? runtimeStatus.installed,
-            healthy: runtimeStatus.operatorRunning ?? runtimeStatus.installed,
+            installed: runtimeStatus.installed,
+            healthy: runtimeStatus.operatorRunning,
             version: status.version,
             message: runtimeStatus.message,
           });

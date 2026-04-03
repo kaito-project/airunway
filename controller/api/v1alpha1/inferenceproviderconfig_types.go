@@ -75,7 +75,7 @@ type HelmChart struct {
 
 	// values is an arbitrary Helm values object that will be passed to the chart
 	// +optional
-	Values runtime.RawExtension `json:"values,omitempty"`
+	Values *runtime.RawExtension `json:"values,omitempty"`
 }
 
 // InstallationStep defines a step in the provider installation process
