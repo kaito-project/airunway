@@ -16,7 +16,8 @@ describe('OAuth → Secrets → Deploy Flow', () => {
   const restores: (() => void)[] = [];
 
   afterEach(() => {
-    restores.forEach((r) => r());
+    // Restore in LIFO order so nested mocks of the same method unwind correctly
+    restores.reverse().forEach((r) => r());
     restores.length = 0;
   });
 
@@ -111,7 +112,8 @@ describe('OAuth → Secrets → Deploy Flow', () => {
     // Restore fetch and service mocks before next steps that use different mocks.
     // Without this, the fetch mock from Step 5 would intercept requests in later steps
     // and the distributeHfSecret mock would leak into Step 7's getHfSecretStatus call.
-    restores.forEach((r) => r());
+    // Reverse for LIFO order so nested mocks of the same method unwind correctly.
+    restores.reverse().forEach((r) => r());
     restores.length = 0;
 
     // ---- Step 7: Verify secret status ----

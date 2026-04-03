@@ -16,6 +16,7 @@ import type {
   HelmStatus,
   GPUOperatorStatus,
   ClusterGpuCapacity,
+  DetailedClusterCapacity,
   PodFailureReason,
 } from '@airunway/shared';
 import type { HelmResult } from '../services/helm';
@@ -258,21 +259,20 @@ export const mockGpuCapacity: ClusterGpuCapacity & { maxNodeGpuCapacity: number;
   nodes: [],
 };
 
-// Note: The real getDetailedClusterGpuCapacity() returns DetailedClusterCapacity with
-// `nodePools: NodePoolInfo[]`. This fixture uses `nodes` to match what the test
-// currently asserts. Revisit if the test is updated to check the real response shape.
-export const mockDetailedGpuCapacity = {
+export const mockDetailedGpuCapacity: DetailedClusterCapacity = {
   totalGpus: 4,
   allocatedGpus: 1,
   availableGpus: 3,
-  nodes: [
+  maxContiguousAvailable: 3,
+  maxNodeGpuCapacity: 4,
+  gpuNodeCount: 1,
+  nodePools: [
     {
       name: 'gpu-node-1',
-      gpuType: 'nvidia.com/gpu',
-      totalGpus: 4,
-      allocatedGpus: 1,
+      gpuCount: 4,
+      nodeCount: 1,
       availableGpus: 3,
-      labels: { apps: 'ai-model' },
+      gpuModel: 'nvidia.com/gpu',
     },
   ],
 };

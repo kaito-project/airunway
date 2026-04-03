@@ -19,7 +19,8 @@ describe('Provider Installation Flow', () => {
   const restores: (() => void)[] = [];
 
   afterEach(() => {
-    restores.forEach((r) => r());
+    // Restore in LIFO order so nested mocks of the same method unwind correctly
+    restores.reverse().forEach((r) => r());
     restores.length = 0;
   });
 
@@ -226,8 +227,8 @@ describe('Provider Installation Flow', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.totalGpus).toBe(4);
-    expect(data.nodes).toHaveLength(1);
-    expect(data.nodes[0].name).toBe('gpu-node-1');
-    expect(data.nodes[0].availableGpus).toBe(3);
+    expect(data.nodePools).toHaveLength(1);
+    expect(data.nodePools[0].name).toBe('gpu-node-1');
+    expect(data.nodePools[0].availableGpus).toBe(3);
   });
 });
