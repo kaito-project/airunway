@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,8 +35,14 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for Dynamo
 	ProviderConfigName = "dynamo"
 
-	// ProviderVersion is the version of the Dynamo provider
-	ProviderVersion = "dynamo-provider:v0.1.0"
+	// ProviderVersion is the version of the AIRunway Dynamo provider controller.
+	ProviderVersion = "dynamo-provider:v0.2.0"
+
+	// DynamoPlatformChartVersion is the upstream Dynamo platform chart version.
+	DynamoPlatformChartVersion = "1.0.1"
+
+	// DynamoPlatformChartURL is the upstream Dynamo platform chart package.
+	DynamoPlatformChartURL = "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-" + DynamoPlatformChartVersion + ".tgz"
 
 	// ProviderDocumentation is the documentation URL for the Dynamo provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md"
@@ -102,27 +109,20 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 			},
 			HelmCharts: []airunwayv1alpha1.HelmChart{
 				{
-					Name:      "dynamo-crds",
-					Chart:     "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz",
-					Namespace: "default",
-				},
-				{
 					Name:            "dynamo-platform",
-					Chart:           "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz",
+					Chart:           DynamoPlatformChartURL,
 					Namespace:       "dynamo-system",
 					CreateNamespace: true,
+					Values: map[string]apiextensionsv1.JSON{
+						"global.grove.install": {Raw: []byte("true")},
+					},
 				},
 			},
 			Steps: []airunwayv1alpha1.InstallationStep{
 				{
-					Title:       "Install Dynamo CRDs",
-					Command:     "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz && helm install dynamo-crds dynamo-crds-0.7.1.tgz --namespace default",
-					Description: "Install the Dynamo Custom Resource Definitions v0.7.1.",
-				},
-				{
 					Title:       "Install Dynamo Platform",
-					Command:     "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz && helm install dynamo-platform dynamo-platform-0.7.1.tgz --namespace dynamo-system --create-namespace",
-					Description: "Install the Dynamo platform operator v0.7.1.",
+					Command:     "helm upgrade --install dynamo-platform " + DynamoPlatformChartURL + " --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
+					Description: "Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.",
 				},
 			},
 		},
@@ -176,8 +176,8 @@ func (m *ProviderConfigManager) UpdateStatus(ctx context.Context, ready bool) er
 	now := metav1.Now()
 	config.Status = airunwayv1alpha1.InferenceProviderConfigStatus{
 		Ready:              ready,
-		Version:           ProviderVersion,
-		LastHeartbeat:     &now,
+		Version:            ProviderVersion,
+		LastHeartbeat:      &now,
 		UpstreamCRDVersion: fmt.Sprintf("%s/%s", DynamoAPIGroup, DynamoAPIVersion),
 	}
 

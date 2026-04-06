@@ -39,6 +39,8 @@ type ProviderStatusResult struct {
 type DynamoState string
 
 const (
+	// DynamoStateInitializing indicates the deployment is initializing.
+	DynamoStateInitializing DynamoState = "initializing"
 	// DynamoStateDeploying indicates the deployment is in progress
 	DynamoStateDeploying DynamoState = "deploying"
 	// DynamoStateSuccessful indicates the deployment is successful
@@ -107,6 +109,8 @@ func (t *StatusTranslator) mapStateToPhase(state DynamoState) airunwayv1alpha1.D
 	switch state {
 	case DynamoStateSuccessful:
 		return airunwayv1alpha1.DeploymentPhaseRunning
+	case DynamoStateInitializing:
+		return airunwayv1alpha1.DeploymentPhaseDeploying
 	case DynamoStateDeploying:
 		return airunwayv1alpha1.DeploymentPhaseDeploying
 	case DynamoStateFailed:

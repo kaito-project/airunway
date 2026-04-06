@@ -7,6 +7,7 @@ import (
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -41,6 +42,29 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Fatalf("expected 4 selection rules, got %d", len(spec.SelectionRules))
 	}
 
+	if spec.Installation == nil {
+		t.Fatal("installation should not be nil")
+	}
+	if len(spec.Installation.HelmCharts) != 1 {
+		t.Fatalf("expected 1 helm chart, got %d", len(spec.Installation.HelmCharts))
+	}
+	if spec.Installation.HelmCharts[0].Chart != DynamoPlatformChartURL {
+		t.Errorf("expected platform chart URL %q, got %q", DynamoPlatformChartURL, spec.Installation.HelmCharts[0].Chart)
+	}
+	groveInstall, ok := spec.Installation.HelmCharts[0].Values["global.grove.install"]
+	if !ok {
+		t.Fatal("expected dynamo platform chart to enable Grove by default")
+	}
+	if string(groveInstall.Raw) != "true" {
+		t.Fatalf("expected global.grove.install=true, got %s", string(groveInstall.Raw))
+	}
+	if len(spec.Installation.Steps) != 1 {
+		t.Fatalf("expected 1 installation step, got %d", len(spec.Installation.Steps))
+	}
+	if spec.Installation.Steps[0].Command != "helm upgrade --install dynamo-platform "+DynamoPlatformChartURL+" --namespace dynamo-system --create-namespace --set-json global.grove.install=true" {
+		t.Fatalf("unexpected installation command: %s", spec.Installation.Steps[0].Command)
+	}
+
 	if spec.Documentation != ProviderDocumentation {
 		t.Errorf("expected documentation %s, got %s", ProviderDocumentation, spec.Documentation)
 	}
@@ -57,8 +81,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "dynamo" {
 		t.Errorf("expected provider config name 'dynamo', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "dynamo-provider:v0.1.0" {
-		t.Errorf("expected provider version 'dynamo-provider:v0.1.0', got %s", ProviderVersion)
+	if ProviderVersion != "dynamo-provider:v0.2.0" {
+		t.Errorf("expected provider version 'dynamo-provider:v0.2.0', got %s", ProviderVersion)
 	}
 }
 
@@ -106,6 +130,21 @@ func TestUpdateStatus(t *testing.T) {
 	err := mgr.UpdateStatus(context.Background(), true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated := &airunwayv1alpha1.InferenceProviderConfig{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: ProviderConfigName}, updated); err != nil {
+		t.Fatalf("failed to get updated provider config: %v", err)
+	}
+
+	if !updated.Status.Ready {
+		t.Fatal("expected provider status to be ready")
+	}
+	if updated.Status.Version != ProviderVersion {
+		t.Fatalf("expected provider status version %q, got %q", ProviderVersion, updated.Status.Version)
+	}
+	if updated.Status.LastHeartbeat == nil {
+		t.Fatal("expected provider status to include last heartbeat")
 	}
 }
 

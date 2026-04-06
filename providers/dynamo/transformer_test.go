@@ -204,25 +204,25 @@ func TestGetImage(t *testing.T) {
 	// Default vLLM image
 	md.Spec.Image = ""
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != defaultVLLMRuntimeImage {
 		t.Errorf("expected default vllm image, got %s", img)
 	}
 
 	// Default SGLang image
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeSGLang
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1" {
+	if img := tr.getImage(md); img != defaultSGLangRuntimeImage {
 		t.Errorf("expected default sglang image, got %s", img)
 	}
 
 	// Default TRT-LLM image
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeTRTLLM
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != defaultTRTLLMRuntimeImage {
 		t.Errorf("expected default trtllm image, got %s", img)
 	}
 
 	// Unknown engine → fallback
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineType("unknown")
-	if img := tr.getImage(md); img != "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1" {
+	if img := tr.getImage(md); img != defaultVLLMRuntimeImage {
 		t.Errorf("expected fallback to vllm image, got %s", img)
 	}
 }
@@ -236,7 +236,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--connector", VLLMConnectorNone}
+	expected := []string{"--model", "meta-llama/Llama-2-7b-chat-hf"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -249,7 +249,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--context-length", "4096"}
+	expected = []string{"--model-path", "meta-llama/Llama-2-7b-chat-hf", "--context-length", "4096"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -260,7 +260,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096", "--connector", VLLMConnectorNone}
+	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf", "--max-model-len", "4096"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -272,7 +272,7 @@ func TestBuildEngineArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected = []string{"--model", "meta-llama/Llama-2-7b-chat-hf"}
+	expected = []string{"--model-path", "meta-llama/Llama-2-7b-chat-hf"}
 	if !sliceEqual(args, expected) {
 		t.Errorf("unexpected args: %v, expected %v", args, expected)
 	}
@@ -360,6 +360,26 @@ func sliceEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func containerEnvValue(container map[string]interface{}, name string) (string, bool) {
+	envList, ok := container["env"].([]interface{})
+	if !ok {
+		return "", false
+	}
+
+	for _, entry := range envList {
+		envMap, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if envMap["name"] == name {
+			value, ok := envMap["value"].(string)
+			return value, ok
+		}
+	}
+
+	return "", false
 }
 
 func TestBuildResourceLimits(t *testing.T) {
@@ -470,8 +490,13 @@ func TestBuildFrontendService(t *testing.T) {
 	if frontend["replicas"] != int64(DefaultFrontendReplicas) {
 		t.Errorf("expected default replicas, got %v", frontend["replicas"])
 	}
-	if frontend["router-mode"] != DefaultRouterMode {
-		t.Errorf("expected default router mode, got %v", frontend["router-mode"])
+	if _, ok := frontend["router-mode"]; ok {
+		t.Errorf("did not expect legacy router-mode field, got %v", frontend["router-mode"])
+	}
+	eps, _ := frontend["extraPodSpec"].(map[string]interface{})
+	mc, _ := eps["mainContainer"].(map[string]interface{})
+	if routerMode, ok := containerEnvValue(mc, "DYN_ROUTER_MODE"); !ok || routerMode != DefaultRouterMode {
+		t.Errorf("expected DYN_ROUTER_MODE=%q, got %q (found=%v)", DefaultRouterMode, routerMode, ok)
 	}
 
 	// With overrides
@@ -489,8 +514,10 @@ func TestBuildFrontendService(t *testing.T) {
 	if frontend["replicas"] != int64(5) {
 		t.Errorf("expected replicas 5, got %v", frontend["replicas"])
 	}
-	if frontend["router-mode"] != "kv" {
-		t.Errorf("expected router-mode 'kv', got %v", frontend["router-mode"])
+	eps, _ = frontend["extraPodSpec"].(map[string]interface{})
+	mc, _ = eps["mainContainer"].(map[string]interface{})
+	if routerMode, ok := containerEnvValue(mc, "DYN_ROUTER_MODE"); !ok || routerMode != "kv" {
+		t.Errorf("expected DYN_ROUTER_MODE=%q, got %q (found=%v)", "kv", routerMode, ok)
 	}
 }
 
@@ -654,19 +681,25 @@ func TestBuildPrefillWorkerWithSecret(t *testing.T) {
 	if worker["envFromSecret"] != "hf-secret" {
 		t.Errorf("expected envFromSecret, got %v", worker["envFromSecret"])
 	}
-	// Check --is-prefill-worker flag in args
+	// Check explicit disaggregation mode in args
 	eps, _ := worker["extraPodSpec"].(map[string]interface{})
 	mc, _ := eps["mainContainer"].(map[string]interface{})
 	args, _ := mc["args"].([]interface{})
-	found := false
-	for _, a := range args {
-		if a == "--is-prefill-worker" {
-			found = true
-			break
+	foundMode := false
+	foundKVTransfer := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypePrefill {
+			foundMode = true
+		}
+		if args[i] == "--kv-transfer-config" && args[i+1] == VLLMKVTransferConfig {
+			foundKVTransfer = true
 		}
 	}
-	if !found {
-		t.Errorf("expected --is-prefill-worker in args: %v", args)
+	if !foundMode {
+		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypePrefill, args)
+	}
+	if !foundKVTransfer {
+		t.Errorf("expected --kv-transfer-config %s in args: %v", VLLMKVTransferConfig, args)
 	}
 }
 
@@ -692,6 +725,25 @@ func TestBuildDecodeWorkerWithSecret(t *testing.T) {
 	if worker["replicas"] != int64(2) {
 		t.Errorf("expected replicas 2")
 	}
+	eps, _ := worker["extraPodSpec"].(map[string]interface{})
+	mc, _ := eps["mainContainer"].(map[string]interface{})
+	args, _ := mc["args"].([]interface{})
+	foundMode := false
+	foundKVTransfer := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--disaggregation-mode" && args[i+1] == SubComponentTypeDecode {
+			foundMode = true
+		}
+		if args[i] == "--kv-transfer-config" && args[i+1] == VLLMKVTransferConfig {
+			foundKVTransfer = true
+		}
+	}
+	if !foundMode {
+		t.Errorf("expected --disaggregation-mode %s in args: %v", SubComponentTypeDecode, args)
+	}
+	if !foundKVTransfer {
+		t.Errorf("expected --kv-transfer-config %s in args: %v", VLLMKVTransferConfig, args)
+	}
 }
 
 func TestBuildEngineArgsWithCustomArgs(t *testing.T) {
@@ -711,7 +763,7 @@ func TestBuildEngineArgsWithCustomArgs(t *testing.T) {
 	}
 }
 
-func TestBuildEngineArgsDefaultsAggregatedVLLMConnectorToNone(t *testing.T) {
+func TestBuildEngineArgsAggregatedVLLMOmitsConnector(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test", "default")
 
@@ -720,14 +772,14 @@ func TestBuildEngineArgsDefaultsAggregatedVLLMConnectorToNone(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertArg(t, args, "--connector", VLLMConnectorNone)
+	assertNoArg(t, args, "--connector")
 }
 
-func TestBuildEngineArgsPreservesExplicitConnectorOverride(t *testing.T) {
+func TestBuildEngineArgsStripsConnectorFromVLLMArgs(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test", "default")
 	md.Spec.Engine.Args = map[string]string{
-		"connector": VLLMConnectorNIXL,
+		"connector": "nixl",
 	}
 
 	args, err := tr.buildEngineArgs(md)
@@ -735,17 +787,7 @@ func TestBuildEngineArgsPreservesExplicitConnectorOverride(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertArg(t, args, "--connector", VLLMConnectorNIXL)
-
-	connectorFlags := 0
-	for _, arg := range args {
-		if arg == "--connector" {
-			connectorFlags++
-		}
-	}
-	if connectorFlags != 1 {
-		t.Fatalf("expected exactly one --connector flag, got %d in %v", connectorFlags, args)
-	}
+	assertNoArg(t, args, "--connector")
 }
 
 func TestBuildEngineArgsDisaggregatedLeavesConnectorToRuntimeDefault(t *testing.T) {
@@ -1020,6 +1062,26 @@ func TestTransformTRTLLMEngine(t *testing.T) {
 	if spec["backendFramework"] != "trtllm" {
 		t.Errorf("expected backendFramework 'trtllm', got %v", spec["backendFramework"])
 	}
+
+	services, _ := spec["services"].(map[string]interface{})
+	worker, _ := services["VllmWorker"].(map[string]interface{})
+	eps, _ := worker["extraPodSpec"].(map[string]interface{})
+	mc, _ := eps["mainContainer"].(map[string]interface{})
+	cmdSlice, _ := mc["command"].([]interface{})
+	if len(cmdSlice) < 3 {
+		t.Fatal("expected engine command with at least 3 elements")
+	}
+	if cmdSlice[2] != "dynamo.trtllm" {
+		t.Errorf("expected trtllm runner in command, got %v", cmdSlice)
+	}
+
+	argsSlice, _ := mc["args"].([]interface{})
+	if len(argsSlice) < 2 {
+		t.Fatal("expected engine args with at least 2 elements")
+	}
+	if argsSlice[0] != "--model-path" || argsSlice[1] != "meta-llama/Llama-2-7b-chat-hf" {
+		t.Errorf("expected TRT-LLM args to start with --model-path and model ID, got %v", argsSlice)
+	}
 }
 
 func TestTransformWithCustomScalingReplicas(t *testing.T) {
@@ -1170,26 +1232,6 @@ func TestTransformAggregatedVLLMWorkersDoNotInjectNixlSideChannelHostByDefault(t
 	if env := findEnvVar(worker, "VLLM_NIXL_SIDE_CHANNEL_HOST"); env != nil {
 		t.Fatalf("did not expect VLLM_NIXL_SIDE_CHANNEL_HOST for aggregated vLLM worker, got %v", env)
 	}
-}
-
-func TestTransformAggregatedVLLMWorkersInjectNixlSideChannelHostWhenConnectorIsNixl(t *testing.T) {
-	tr := NewTransformer()
-	md := newTestMD("test-model", "default")
-	md.Spec.Engine.Args = map[string]string{
-		"connector": VLLMConnectorNIXL,
-	}
-
-	resources, err := tr.Transform(context.Background(), md)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	dgd := resources[0]
-	spec, _, _ := unstructured.NestedMap(dgd.Object, "spec")
-	services, _ := spec["services"].(map[string]interface{})
-	worker, _ := services["VllmWorker"].(map[string]interface{})
-
-	assertFieldRefEnvVar(t, worker, "VLLM_NIXL_SIDE_CHANNEL_HOST", "status.podIP")
 }
 
 func TestTransformDisaggregatedVLLMWorkersInjectNixlSideChannelHost(t *testing.T) {

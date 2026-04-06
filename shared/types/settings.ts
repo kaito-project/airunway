@@ -33,6 +33,7 @@ export interface HelmChart {
   version?: string;
   namespace: string;
   createNamespace?: boolean;
+  values?: Record<string, unknown>;
 }
 
 export interface ProviderDetails extends ProviderInfo {

@@ -80,28 +80,25 @@ spec:
     - condition: "spec.serving.mode == 'disaggregated'"
       priority: 100
   installation:
-    description: "NVIDIA Dynamo for GPU-accelerated inference"
+    description: "NVIDIA Dynamo for high-performance GPU inference"
     defaultNamespace: dynamo-system
     helmRepos:
-      - name: nvidia-dynamo
+      - name: nvidia-ai-dynamo
         url: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
     helmCharts:
-      - name: dynamo-crds
-        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz
-        version: "0.7.1"
-        namespace: default
       - name: dynamo-platform
-        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz
-        version: "0.7.1"
+        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz
         namespace: dynamo-system
         createNamespace: true
+        values:
+          global.grove.install: true
     steps:
-      - title: Install Dynamo CRDs
-        command: "helm install dynamo-crds ..."
-        description: Install the Dynamo custom resource definitions
+      - title: Install Dynamo Platform
+        command: "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true"
+        description: Install the Dynamo platform operator with bundled Grove enabled by default and bundled CRDs
 status:
   ready: true
-  version: "0.7.1"
+  version: "dynamo-provider:v0.2.0"
 ```
 
 ## See also

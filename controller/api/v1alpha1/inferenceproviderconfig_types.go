@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -71,6 +72,10 @@ type HelmChart struct {
 	// createNamespace indicates whether to create the namespace if it doesn't exist
 	// +optional
 	CreateNamespace bool `json:"createNamespace,omitempty"`
+
+	// values are Helm values passed via --set-json using dot-delimited keys
+	// +optional
+	Values map[string]apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
 // InstallationStep defines a step in the provider installation process

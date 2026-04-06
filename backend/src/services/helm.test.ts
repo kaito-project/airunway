@@ -260,6 +260,14 @@ describe('HelmService - Command Building Logic', () => {
 });
 
 describe('HelmService - getInstallCommands Logic', () => {
+  function valuesToSetJsonArgs(values: Record<string, unknown>): string[] {
+    const args: string[] = [];
+    for (const [key, value] of Object.entries(values)) {
+      args.push('--set-json', `${key}=${JSON.stringify(value)}`);
+    }
+    return args;
+  }
+
   function getInstallCommands(repos: HelmRepo[], charts: HelmChart[]): string[] {
     const commands: string[] = [];
 
@@ -278,6 +286,9 @@ describe('HelmService - getInstallCommands Logic', () => {
         if (chart.createNamespace) {
           cmd += ' --create-namespace';
         }
+        if (chart.values) {
+          cmd += ` ${valuesToSetJsonArgs(chart.values).join(' ')}`;
+        }
         commands.push(cmd);
       } else {
         let cmd = `helm install ${chart.name} ${chart.chart}`;
@@ -287,6 +298,9 @@ describe('HelmService - getInstallCommands Logic', () => {
         }
         if (chart.version) {
           cmd += ` --version ${chart.version}`;
+        }
+        if (chart.values) {
+          cmd += ` ${valuesToSetJsonArgs(chart.values).join(' ')}`;
         }
         commands.push(cmd);
       }
@@ -315,6 +329,24 @@ describe('HelmService - getInstallCommands Logic', () => {
     const commands = getInstallCommands(repos, charts);
     expect(commands[0]).toContain('helm install my-app repo/chart');
     expect(commands[0]).toContain('--namespace default');
+  });
+
+  test('includes values in generated install commands', () => {
+    const repos: HelmRepo[] = [];
+    const charts: HelmChart[] = [
+      {
+        name: 'dynamo-platform',
+        chart: 'https://example.com/dynamo-platform.tgz',
+        namespace: 'dynamo-system',
+        createNamespace: true,
+        values: {
+          'global.grove.install': true,
+        },
+      },
+    ];
+
+    const commands = getInstallCommands(repos, charts);
+    expect(commands[0]).toContain('--set-json global.grove.install=true');
   });
 
   test('generates commands for GPU Operator', () => {
