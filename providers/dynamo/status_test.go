@@ -86,6 +86,21 @@ func TestTranslateStatusDeploying(t *testing.T) {
 	}
 }
 
+func TestTranslateStatusInitializing(t *testing.T) {
+	st := NewStatusTranslator()
+	dgd := newDGDWithStatus(map[string]interface{}{
+		"state": "initializing",
+	})
+
+	result, err := st.TranslateStatus(dgd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Phase != airunwayv1alpha1.DeploymentPhaseDeploying {
+		t.Errorf("expected Deploying phase, got %s", result.Phase)
+	}
+}
+
 func TestTranslateStatusFailed(t *testing.T) {
 	st := NewStatusTranslator()
 	dgd := newDGDWithStatus(map[string]interface{}{
@@ -313,6 +328,7 @@ func TestMapStateToPhase(t *testing.T) {
 		expected airunwayv1alpha1.DeploymentPhase
 	}{
 		{DynamoStateSuccessful, airunwayv1alpha1.DeploymentPhaseRunning},
+		{DynamoStateInitializing, airunwayv1alpha1.DeploymentPhaseDeploying},
 		{DynamoStateDeploying, airunwayv1alpha1.DeploymentPhaseDeploying},
 		{DynamoStateFailed, airunwayv1alpha1.DeploymentPhaseFailed},
 		{DynamoStatePending, airunwayv1alpha1.DeploymentPhasePending},

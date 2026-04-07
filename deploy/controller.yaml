@@ -129,6 +129,12 @@ spec:
                           description: namespace is the Kubernetes namespace to install
                             into
                           type: string
+                        values:
+                          additionalProperties:
+                            x-kubernetes-preserve-unknown-fields: true
+                          description: values are Helm values passed via --set-json
+                            using dot-delimited keys
+                          type: object
                         version:
                           description: version is the chart version to install
                           type: string
@@ -978,6 +984,10 @@ spec:
                   endpoint:
                     description: endpoint is the unified gateway endpoint URL
                     type: string
+                  gatewayNamespace:
+                    description: gatewayNamespace is the namespace of the Gateway
+                      resource used for routing.
+                    type: string
                   modelName:
                     description: modelName is the model name to use in API requests
                     type: string
@@ -1285,6 +1295,8 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - gateway.networking.k8s.io

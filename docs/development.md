@@ -255,12 +255,12 @@ cd controller && go test -v ./...
 
 | AI Runway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
 |------------------------|------------|----------------|-----------------|------------------|
-| v0.1.x                 | 1.26-1.30  | v0.3.x         | v0.1.x          | v1.1.x           |
+| v0.1.x                 | 1.26-1.30  | v0.3.x         | v1.0.x          | v1.1.x           |
 
 | Provider | Minimum Version | CRD API Version | Notes |
 |----------|-----------------|-----------------|-------|
 | KAITO    | v0.3.0          | kaito.sh/v1beta1 | Requires GPU operator for GPU workloads |
-| Dynamo   | v0.1.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator |
+| Dynamo   | v1.0.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator; CRDs are bundled in the platform chart |
 | KubeRay  | v1.1.0          | ray.io/v1       | Optional: KubeRay autoscaler for scaling |
 
 ### Finalizer Handling
@@ -497,15 +497,14 @@ kubectl create secret generic hf-token-secret \
 ### Install NVIDIA Dynamo (via Helm)
 ```bash
 export NAMESPACE=dynamo-system
-export RELEASE_VERSION=0.7.1
+export RELEASE_VERSION=1.0.1
 
-# Install CRDs
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-${RELEASE_VERSION}.tgz
-helm install dynamo-crds dynamo-crds-${RELEASE_VERSION}.tgz --namespace default
-
-# Install Platform
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz
-helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz --namespace ${NAMESPACE} --create-namespace
+# Dynamo v1.0.1 bundles its CRDs in the platform chart
+helm upgrade --install dynamo-platform \
+  https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz \
+  --namespace ${NAMESPACE} \
+  --create-namespace \
+  --set-json global.grove.install=true
 ```
 
 ## Adding a New Provider

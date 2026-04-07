@@ -3,9 +3,23 @@
  * Provides mock data for K8s resources used across route tests.
  */
 
-import type { AutoscalerDetectionResult, AutoscalerStatusInfo } from '@airunway/shared';
-import type { AIConfiguratorStatus, AIConfiguratorResult, AIConfiguratorConfig } from '@airunway/shared';
-import type { DeploymentStatus, PodStatus } from '@airunway/shared';
+import type {
+  AutoscalerDetectionResult,
+  AutoscalerStatusInfo,
+  AIConfiguratorStatus,
+  AIConfiguratorResult,
+  AIConfiguratorConfig,
+  DeploymentStatus,
+  PodStatus,
+  HfUserInfo,
+  HfSecretStatus,
+  HelmStatus,
+  GPUOperatorStatus,
+  ClusterGpuCapacity,
+  DetailedClusterCapacity,
+  PodFailureReason,
+} from '@airunway/shared';
+import type { HelmResult } from '../services/helm';
 
 // ============================================================================
 // Autoscaler Fixtures
@@ -80,7 +94,7 @@ export const aiConfiguratorSuccessResult: AIConfiguratorResult = {
 
 export const mockPod: PodStatus = {
   name: 'test-deploy-abc123',
-  phase: 'Running' as const,
+  phase: 'Running',
   ready: true,
   restarts: 0,
   age: '2h',
@@ -89,7 +103,7 @@ export const mockPod: PodStatus = {
 
 export const mockPendingPod: PodStatus = {
   name: 'test-deploy-pending-xyz',
-  phase: 'Pending' as const,
+  phase: 'Pending',
   ready: false,
   restarts: 0,
   age: '5m',
@@ -161,12 +175,148 @@ export const mockInferenceProviderConfig = {
 // Pod Failure Reasons Fixtures
 // ============================================================================
 
-export const mockPodFailureReasons = [
+export const mockPodFailureReasons: PodFailureReason[] = [
   {
     reason: 'Insufficient nvidia.com/gpu',
     message: 'No GPU resources available',
     isResourceConstraint: true,
-    resourceType: 'gpu' as const,
+    resourceType: 'gpu',
     canAutoscalerHelp: true,
   },
 ];
+
+// ============================================================================
+// HuggingFace OAuth Fixtures
+// ============================================================================
+
+export const mockHfUser: HfUserInfo = {
+  id: 'user-123',
+  name: 'testuser',
+  fullname: 'Test User',
+  email: 'test@example.com',
+  avatarUrl: 'https://huggingface.co/avatars/testuser.png',
+};
+
+// ============================================================================
+// HuggingFace Secrets Fixtures
+// ============================================================================
+
+export const mockHfSecretStatusConfigured: HfSecretStatus = {
+  configured: true,
+  namespaces: [
+    { name: 'dynamo-system', exists: true },
+    { name: 'kuberay-system', exists: true },
+    { name: 'kaito-workspace', exists: true },
+    { name: 'default', exists: true },
+  ],
+  user: mockHfUser,
+};
+
+export const mockHfSecretStatusEmpty: HfSecretStatus = {
+  configured: false,
+  namespaces: [
+    { name: 'dynamo-system', exists: false },
+    { name: 'kuberay-system', exists: false },
+    { name: 'kaito-workspace', exists: false },
+    { name: 'default', exists: false },
+  ],
+};
+
+export const mockHfDistributeResult = {
+  success: true,
+  results: [
+    { namespace: 'dynamo-system', success: true },
+    { namespace: 'kuberay-system', success: true },
+    { namespace: 'kaito-workspace', success: true },
+    { namespace: 'default', success: true },
+  ],
+};
+
+export const mockHfDeleteResult = {
+  success: true,
+  results: [
+    { namespace: 'dynamo-system', success: true, deleted: true },
+    { namespace: 'kuberay-system', success: true, deleted: true },
+    { namespace: 'kaito-workspace', success: true, deleted: true },
+    { namespace: 'default', success: true, deleted: true },
+  ],
+};
+
+// ============================================================================
+// GPU & Installation Fixtures
+// ============================================================================
+
+// Note: getClusterGpuCapacity() returns maxNodeGpuCapacity and gpuNodeCount at runtime
+// even though the shared ClusterGpuCapacity type omits them. These fields are used in the
+// frontend, so we include them here to match the actual API response shape.
+export const mockGpuCapacity: ClusterGpuCapacity & { maxNodeGpuCapacity: number; gpuNodeCount: number } = {
+  totalGpus: 4,
+  allocatedGpus: 0,
+  availableGpus: 4,
+  maxContiguousAvailable: 4,
+  maxNodeGpuCapacity: 4,
+  gpuNodeCount: 1,
+  nodes: [],
+};
+
+export const mockDetailedGpuCapacity: DetailedClusterCapacity = {
+  totalGpus: 4,
+  allocatedGpus: 1,
+  availableGpus: 3,
+  maxContiguousAvailable: 3,
+  maxNodeGpuCapacity: 4,
+  gpuNodeCount: 1,
+  nodePools: [
+    {
+      name: 'gpu-node-1',
+      gpuCount: 4,
+      nodeCount: 1,
+      availableGpus: 3,
+      gpuModel: 'nvidia.com/gpu',
+    },
+  ],
+};
+
+export const mockGpuOperatorStatus: Omit<GPUOperatorStatus, 'helmCommands'> = {
+  installed: true,
+  crdFound: true,
+  operatorRunning: true,
+  gpusAvailable: true,
+  totalGPUs: 4,
+  gpuNodes: ['gpu-node-1'],
+  message: 'GPUs enabled: 4 GPU(s) on 1 node(s)',
+};
+
+export const mockHelmAvailable: HelmStatus = {
+  available: true,
+  version: '3.14.0',
+};
+
+export const mockHelmUnavailable: HelmStatus = {
+  available: false,
+  error: 'Helm CLI not found in PATH',
+};
+
+export const mockProviderInstallResult = {
+  success: true,
+  results: [
+    { step: 'repo-add-kaito', result: { success: true, stdout: 'repo added', stderr: '' } },
+    { step: 'repo-update', result: { success: true, stdout: 'updated', stderr: '' } },
+    { step: 'install-workspace', result: { success: true, stdout: 'installed', stderr: '' } },
+  ],
+};
+
+export const mockProviderUninstallResult: HelmResult = {
+  success: true,
+  stdout: 'release "workspace" uninstalled',
+  stderr: '',
+  exitCode: 0,
+};
+
+export const mockInferenceProviderConfigNotReady = {
+  ...mockInferenceProviderConfig,
+  status: {
+    ready: false,
+    // No version — provider is not yet installed/ready
+  },
+};

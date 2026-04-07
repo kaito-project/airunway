@@ -64,6 +64,36 @@ describe('Installation Provider Routes', () => {
       expect(data.steps).toBeDefined();
     });
 
+    test('includes helm values in generated commands when present', async () => {
+      const configWithValues = {
+        ...mockInferenceProviderConfig,
+        spec: {
+          ...mockInferenceProviderConfig.spec,
+          installation: {
+            ...mockInferenceProviderConfig.spec.installation,
+            helmCharts: [
+              {
+                ...mockInferenceProviderConfig.spec.installation.helmCharts[0],
+                values: {
+                  'global.grove.install': true,
+                },
+              },
+            ],
+          },
+        },
+      };
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithValues),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/commands');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.commands.some((command: string) => command.includes('--set-json global.grove.install=true'))).toBe(true);
+    });
+
     test('returns 404 for unknown provider', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => null),

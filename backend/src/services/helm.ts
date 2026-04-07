@@ -38,6 +38,13 @@ function valuesToSetJsonArgs(values: Record<string, unknown>): string[] {
   return args;
 }
 
+function appendValuesToCommand(cmd: string, values?: Record<string, unknown>): string {
+  if (!values) {
+    return cmd;
+  }
+  return `${cmd} ${valuesToSetJsonArgs(values).join(' ')}`;
+}
+
 /**
  * NVIDIA GPU Operator Helm configuration
  */
@@ -623,6 +630,7 @@ class HelmService {
         if (chart.createNamespace) {
           cmd += ' --create-namespace';
         }
+        cmd = appendValuesToCommand(cmd, chart.values);
         commands.push(cmd);
       } else {
         let cmd = `helm install ${chart.name} ${chart.chart}`;
@@ -633,6 +641,7 @@ class HelmService {
         if (chart.version) {
           cmd += ` --version ${chart.version}`;
         }
+        cmd = appendValuesToCommand(cmd, chart.values);
         commands.push(cmd);
       }
     }

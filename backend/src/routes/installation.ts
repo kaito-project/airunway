@@ -31,6 +31,7 @@ function extractProviderDetails(config: any) {
       version: c.version,
       namespace: c.namespace,
       createNamespace: c.createNamespace,
+      values: c.values,
     })),
     installationSteps: (installation.steps || []).map((s: any) => ({
       title: s.title,
