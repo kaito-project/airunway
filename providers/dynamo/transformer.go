@@ -40,7 +40,7 @@ const (
 	defaultVLLMRuntimeImage   = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:" + DynamoRuntimeVersion
 	defaultSGLangRuntimeImage = "nvcr.io/nvidia/ai-dynamo/sglang-runtime:" + DynamoRuntimeVersion
 	defaultTRTLLMRuntimeImage = "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:" + DynamoRuntimeVersion
-	defaultFrontendImage      = "nvcr.io/nvidia/ai-dynamo/frontend:" + DynamoRuntimeVersion
+	defaultFrontendImage      = "nvcr.io/nvidia/ai-dynamo/dynamo-frontend:" + DynamoRuntimeVersion
 
 	// Default component settings
 	DefaultFrontendReplicas = 1
