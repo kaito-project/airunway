@@ -225,27 +225,13 @@ func (v *ModelDeploymentCustomValidator) validateSpec(obj *airunwayv1alpha1.Mode
 		// Validation of engine type value is handled by the Enum marker on EngineType
 	}
 
-	// Validate GPU requirements for certain engines (only when engine is specified)
-	gpuCount := int32(0)
-	if spec.Resources != nil && spec.Resources.GPU != nil {
-		gpuCount = spec.Resources.GPU.Count
-	}
+	// NOTE: GPU requirements for specific engines are validated by the controller
+	// using per-engine capabilities from InferenceProviderConfig (not hardcoded here).
+	// The webhook does not have access to InferenceProviderConfig resources.
 
 	servingMode := airunwayv1alpha1.ServingModeAggregated
 	if spec.Serving != nil && spec.Serving.Mode != "" {
 		servingMode = spec.Serving.Mode
-	}
-
-	switch spec.Engine.Type {
-	case airunwayv1alpha1.EngineTypeVLLM, airunwayv1alpha1.EngineTypeSGLang, airunwayv1alpha1.EngineTypeTRTLLM:
-		// These engines require GPU (unless in disaggregated mode with component-level GPUs)
-		if servingMode == airunwayv1alpha1.ServingModeAggregated && gpuCount == 0 {
-			allErrs = append(allErrs, field.Invalid(
-				specPath.Child("resources", "gpu", "count"),
-				gpuCount,
-				fmt.Sprintf("%s engine requires GPU (set resources.gpu.count > 0)", spec.Engine.Type),
-			))
-		}
 	}
 
 	// Validate disaggregated mode configuration
