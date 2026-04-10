@@ -487,10 +487,17 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
     spec.image = config.imageRef;
   }
 
-  if (config.provider || config.providerOverrides) {
+  // Merge routerMode into providerOverrides when set to a non-default value.
+  const effectiveOverrides: Record<string, unknown> = {
+    ...config.providerOverrides,
+    ...(config.routerMode && config.routerMode !== 'none' && { routerMode: config.routerMode }),
+  };
+  const hasOverrides = Object.keys(effectiveOverrides).length > 0;
+
+  if (config.provider || hasOverrides) {
     spec.provider = {
       ...(config.provider && { name: config.provider }),
-      ...(config.providerOverrides && { overrides: config.providerOverrides }),
+      ...(hasOverrides && { overrides: effectiveOverrides }),
     };
   }
 

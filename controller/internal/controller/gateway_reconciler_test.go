@@ -211,7 +211,12 @@ func TestGateway_HTTPRouteCreation(t *testing.T) {
 		GatewayNamespace: "gateway-ns",
 	}
 
-	err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B", md.Name, md.Namespace)
+	err := r.reconcileHTTPRoute(ctx, md, gwConfig, "meta-llama/Llama-3-8B", httpRouteBackendTarget{
+		group:     "inference.networking.k8s.io",
+		kind:      "InferencePool",
+		name:      md.Name,
+		namespace: md.Namespace,
+	})
 	if err != nil {
 		t.Fatalf("reconcileHTTPRoute failed: %v", err)
 	}
@@ -794,6 +799,8 @@ func TestGateway_ResolveProviderCapabilities_ProviderWithNoGatewayCapabilities(t
 func TestGateway_ProviderManagedInferencePool_Found(t *testing.T) {
 	scheme := newTestScheme()
 
+	md := newModelDeployment("llama-70b", "default")
+
 	pool := &inferencev1.InferencePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "default-llama-70b-pool",
@@ -801,9 +808,9 @@ func TestGateway_ProviderManagedInferencePool_Found(t *testing.T) {
 		},
 	}
 
-	r := newTestReconciler(scheme, nil, pool)
+	r := newTestReconciler(scheme, nil, md, pool)
 
-	err := r.reconcileProviderManagedInferencePool(context.Background(), "default", "default-llama-70b-pool", "dynamo-system")
+	err := r.reconcileProviderManagedInferencePool(context.Background(), md, "default-llama-70b-pool", "dynamo-system", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -811,9 +818,11 @@ func TestGateway_ProviderManagedInferencePool_Found(t *testing.T) {
 
 func TestGateway_ProviderManagedInferencePool_NotFound(t *testing.T) {
 	scheme := newTestScheme()
-	r := newTestReconciler(scheme, nil)
 
-	err := r.reconcileProviderManagedInferencePool(context.Background(), "default", "default-llama-70b-pool", "dynamo-system")
+	md := newModelDeployment("llama-70b", "default")
+	r := newTestReconciler(scheme, nil, md)
+
+	err := r.reconcileProviderManagedInferencePool(context.Background(), md, "default-llama-70b-pool", "dynamo-system", "default")
 	if err == nil {
 		t.Fatal("expected error when InferencePool does not exist")
 	}

@@ -265,8 +265,6 @@ spec:
   capabilities:
     engines: [vllm, sglang, trtllm]
     gateway:
-      managesInferencePool: true                    # Provider creates its own InferencePool
-      managesEPP: true                              # Provider creates its own EPP deployment
       inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pattern for the pool name
       inferencePoolNamespace: "dynamo-system"        # Namespace where the pool is created
 ```

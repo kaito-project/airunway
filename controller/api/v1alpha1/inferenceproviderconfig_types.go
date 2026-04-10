@@ -52,9 +52,29 @@ type GatewayCapabilities struct {
 	InferencePoolNamePattern string `json:"inferencePoolNamePattern,omitempty"`
 
 	// inferencePoolNamespace is the namespace where the provider creates its InferencePool.
-	// When set, the controller creates a ReferenceGrant for cross-namespace HTTPRoute routing.
+	// Supports {name} and {namespace} placeholders (resolved from the ModelDeployment).
+	// When the resolved namespace differs from the ModelDeployment namespace, the
+	// controller creates a ReferenceGrant for cross-namespace HTTPRoute routing.
 	// +optional
 	InferencePoolNamespace string `json:"inferencePoolNamespace,omitempty"`
+
+	// httpRouteBackendService, when non-empty, causes the controller to create an
+	// HTTPRoute with a core Service backendRef instead of a GAIE InferencePool
+	// backendRef. Supports {name} and {namespace} placeholders. The Service is
+	// assumed to live in the same namespace as the ModelDeployment unless the
+	// provider creates it elsewhere (in which case a ReferenceGrant is emitted).
+	//
+	// Used for providers whose InferencePool/EPP model is incompatible with
+	// direct-to-pod routing on the pool's target port. In that case the provider
+	// exposes a shared Service (e.g. its own frontend) that terminates the
+	// request and performs its own routing internally.
+	// +optional
+	HTTPRouteBackendService string `json:"httpRouteBackendService,omitempty"`
+
+	// httpRouteBackendServicePort is the port on the Service referenced by
+	// httpRouteBackendService.
+	// +optional
+	HTTPRouteBackendServicePort int32 `json:"httpRouteBackendServicePort,omitempty"`
 }
 
 // HelmRepo defines a Helm repository needed for installation
