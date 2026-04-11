@@ -19,8 +19,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -135,8 +133,3 @@ func listWorkspaceController(ctx context.Context, direct client.Client) (*appsv1
 	}
 	return &list.Items[0], true, nil
 }
-
-// Ensure unstructured/schema types are referenced so goimports is stable even
-// before later tasks add their uses.
-var _ = unstructured.Unstructured{}
-var _ schema.GroupVersionKind
