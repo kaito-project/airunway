@@ -14,9 +14,26 @@ import type {
   NodePoolCostEstimate,
 } from '../types';
 
+export interface NodePoolCostsResponse {
+  success: boolean;
+  nodePoolCosts: NodePoolCostEstimate[];
+  pricingSource: 'realtime-with-fallback' | 'static';
+  cacheStats: {
+    size: number;
+    ttlMs: number;
+    maxEntries: number;
+  };
+}
+
 export interface CostsApi {
   /** Estimate deployment cost based on GPU configuration */
   estimate: (input: CostEstimateRequest) => Promise<CostEstimateResponse>;
+  /** Get cost estimates for all node pools in the cluster */
+  getNodePoolCosts: (
+    gpuCount?: number,
+    replicas?: number,
+    computeType?: 'gpu' | 'cpu',
+  ) => Promise<NodePoolCostsResponse>;
 }
 
 export function createCostsApi(request: RequestFn): CostsApi {
@@ -26,5 +43,9 @@ export function createCostsApi(request: RequestFn): CostsApi {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    getNodePoolCosts: (gpuCount = 1, replicas = 1, computeType = 'gpu') =>
+      request<NodePoolCostsResponse>(
+        `/costs/node-pools?gpuCount=${gpuCount}&replicas=${replicas}&computeType=${computeType}`,
+      ),
   };
 }
