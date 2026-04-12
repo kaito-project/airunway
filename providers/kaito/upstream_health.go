@@ -19,6 +19,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -74,7 +75,32 @@ const (
 //  4. Any unexpected API error returns Reason=ProbeFailed
 func probeUpstreamController(ctx context.Context, direct client.Client) UpstreamHealth {
 	_ = log.FromContext(ctx)
-	// Stub — replaced incrementally in Tasks 2–5.
+	// Step 1: Detect CRD presence by querying the REST mapper for the Workspace kind.
+	workspaceGVK := schema.GroupVersionKind{
+		Group:   "kaito.sh",
+		Version: "v1beta1",
+		Kind:    "Workspace",
+	}
+
+	// Try to get the REST mapping for Workspace. If the CRD is not installed,
+	// the REST mapper will not have a mapping and will return a NoKindMatchError.
+	_, err := direct.RESTMapper().RESTMapping(workspaceGVK.GroupKind())
+	if isNoKindMatch(err) {
+		return UpstreamHealth{
+			Healthy: false,
+			Reason:  ReasonCRDMissing,
+			Message: crdMissingUserMessage,
+		}
+	}
+	if err != nil {
+		return UpstreamHealth{
+			Healthy: false,
+			Reason:  ReasonProbeFailed,
+			Message: fmt.Sprintf("check workspace crd: %v", err),
+		}
+	}
+
+	// Steps 2-3 implemented in later tasks.
 	return UpstreamHealth{
 		Healthy: false,
 		Reason:  ReasonProbeFailed,
