@@ -94,6 +94,7 @@ class KubernetesService {
   private customObjectsApi: k8s.CustomObjectsApi;
   private coreV1Api: k8s.CoreV1Api;
   private apiExtensionsApi: k8s.ApiextensionsV1Api;
+  private storageV1Api: k8s.StorageV1Api;
   private defaultNamespace: string;
 
   constructor() {
@@ -101,6 +102,7 @@ class KubernetesService {
     this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
     this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
     this.apiExtensionsApi = this.kc.makeApiClient(k8s.ApiextensionsV1Api);
+    this.storageV1Api = this.kc.makeApiClient(k8s.StorageV1Api);
     this.defaultNamespace = process.env.DEFAULT_NAMESPACE || 'airunway-system';
   }
 
@@ -609,6 +611,27 @@ class KubernetesService {
       return (response as any).body || response;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Get a StorageClass by name from the cluster.
+   * Returns null if the StorageClass is not found (404).
+   * Throws on other errors.
+   */
+  async getStorageClass(name: string): Promise<any | null> {
+    try {
+      const response = await withRetry(
+        () => this.storageV1Api.readStorageClass(name),
+        { operationName: `getStorageClass:${name}`, maxRetries: 1 }
+      );
+      return (response as any).body || response;
+    } catch (error: any) {
+      const statusCode = error?.statusCode || error?.response?.statusCode;
+      if (statusCode === 404) {
+        return null;
+      }
+      throw error;
     }
   }
 
