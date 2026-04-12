@@ -13,7 +13,6 @@ export interface GatewayApi {
   /** Get gateway readiness and endpoint URL */
   getStatus: () => Promise<GatewayInfo>;
 
-  /** List all models accessible through the gateway */
   getModels: () => Promise<{ models: GatewayModelInfo[] }>;
 }
 

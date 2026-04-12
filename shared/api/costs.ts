@@ -36,13 +36,11 @@ export interface CostsNormalizeGpuResponse {
 export interface CostsApi {
   /** Estimate deployment cost based on GPU configuration */
   estimate: (input: CostEstimateRequest) => Promise<CostEstimateResponse>;
-  /** Get cost estimates for all node pools in the cluster */
   getNodePoolCosts: (
     gpuCount?: number,
     replicas?: number,
     computeType?: 'gpu' | 'cpu',
   ) => Promise<NodePoolCostsResponse>;
-  /** Get list of supported GPU models with specifications */
   getGpuModels: () => Promise<GpuModelsResponse>;
   /** Normalize a GPU model name to our pricing key */
   normalizeGpu: (label: string) => Promise<CostsNormalizeGpuResponse>;

@@ -131,6 +131,20 @@ describe('createCostsApi', () => {
       expect(request).toHaveBeenCalledWith('/costs/normalize-gpu?label=a100');
       expect(result.gpuInfo?.memoryGb).toBe(80);
     });
+
+    it('URL-encodes slashes in GPU labels', async () => {
+      const mockResponse: CostsNormalizeGpuResponse = {
+        originalLabel: 'NVIDIA A100/80GB',
+        normalizedModel: 'A100-80GB',
+        gpuInfo: null,
+      };
+      const request = mockRequest(mockResponse);
+
+      const api = createCostsApi(request);
+      await api.normalizeGpu('NVIDIA A100/80GB');
+
+      expect(request).toHaveBeenCalledWith('/costs/normalize-gpu?label=NVIDIA%20A100%2F80GB');
+    });
   });
 
   describe('error propagation', () => {
