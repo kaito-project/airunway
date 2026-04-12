@@ -2,9 +2,8 @@
  * Costs API
  *
  * Deployment cost estimation across cloud providers and node pools.
- * Response shapes for `getNodePoolCosts`, `getGpuModels`, and `normalizeGpu`
- * are inlined because they are endpoint-specific wrappers that don't need
- * their own type module — matching the pattern in health.ts.
+ * Response shapes are inlined because they are endpoint-specific and
+ * don't need their own type module.
  */
 
 import type { RequestFn } from './client';
@@ -36,13 +35,11 @@ export interface GpuModelsResponse {
 }
 
 export interface CostsNormalizeGpuResponse {
-  success: boolean;
   originalLabel: string;
   normalizedModel: string;
-  pricing: {
+  gpuInfo: {
     memoryGb: number;
     generation: string;
-    hourlyRate: { aws?: number; azure?: number; gcp?: number };
   } | null;
 }
 

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { createCostsApi, type NodePoolCostsResponse, type GpuModelsResponse, type CostsNormalizeGpuResponse } from './costs';
+import {
+  createCostsApi,
+  type NodePoolCostsResponse,
+  type GpuModelsResponse,
+  type CostsNormalizeGpuResponse,
+} from './costs';
 import { mockRequest } from './test-helpers';
 import type { CostEstimateRequest, CostEstimateResponse } from '../types';
 
@@ -99,10 +104,9 @@ describe('createCostsApi', () => {
   describe('normalizeGpu', () => {
     it('URL-encodes the label and calls /costs/normalize-gpu', async () => {
       const mockResponse: CostsNormalizeGpuResponse = {
-        success: true,
         originalLabel: 'NVIDIA A100 80GB',
         normalizedModel: 'A100-80GB',
-        pricing: null,
+        gpuInfo: null,
       };
       const request = mockRequest(mockResponse);
 
@@ -114,15 +118,13 @@ describe('createCostsApi', () => {
       expect(result).toEqual(mockResponse);
     });
 
-    it('returns a pricing object when the backend has a match', async () => {
+    it('returns a gpuInfo object when the backend has a match', async () => {
       const mockResponse: CostsNormalizeGpuResponse = {
-        success: true,
         originalLabel: 'a100',
         normalizedModel: 'A100',
-        pricing: {
+        gpuInfo: {
           memoryGb: 80,
           generation: 'ampere',
-          hourlyRate: { aws: 3.0, azure: 3.2, gcp: 2.9 },
         },
       };
       const request = mockRequest(mockResponse);
@@ -131,7 +133,7 @@ describe('createCostsApi', () => {
       const result = await api.normalizeGpu('a100');
 
       expect(request).toHaveBeenCalledWith('/costs/normalize-gpu?label=a100');
-      expect(result.pricing?.hourlyRate.aws).toBe(3.0);
+      expect(result.gpuInfo?.memoryGb).toBe(80);
     });
   });
 });
