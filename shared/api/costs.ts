@@ -11,27 +11,17 @@ import type {
   CostEstimateRequest,
   CostEstimateResponse,
   NodePoolCostEstimate,
+  GpuModelSummary,
 } from '../types';
 
 export interface NodePoolCostsResponse {
-  success: boolean;
   nodePoolCosts: NodePoolCostEstimate[];
   pricingSource: 'realtime-with-fallback' | 'static';
-  cacheStats: {
-    size: number;
-    ttlMs: number;
-    maxEntries: number;
-  };
 }
 
 export interface GpuModelsResponse {
-  success: boolean;
-  models: Array<{
-    model: string;
-    memoryGb: number;
-    generation: string;
-  }>;
-  note: string;
+  models: GpuModelSummary[];
+  note?: string;
 }
 
 export interface CostsNormalizeGpuResponse {

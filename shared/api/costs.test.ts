@@ -51,10 +51,8 @@ describe('createCostsApi', () => {
   describe('getNodePoolCosts', () => {
     it('builds the query string with provided gpuCount/replicas/computeType', async () => {
       const mockResponse: NodePoolCostsResponse = {
-        success: true,
         nodePoolCosts: [],
         pricingSource: 'static',
-        cacheStats: { size: 0, ttlMs: 60_000, maxEntries: 100 },
       };
       const request = mockRequest(mockResponse);
 
@@ -67,10 +65,8 @@ describe('createCostsApi', () => {
 
     it('uses default values (gpuCount=1, replicas=1, computeType=gpu) when called with no args', async () => {
       const mockResponse: NodePoolCostsResponse = {
-        success: true,
         nodePoolCosts: [],
         pricingSource: 'realtime-with-fallback',
-        cacheStats: { size: 0, ttlMs: 60_000, maxEntries: 100 },
       };
       const request = mockRequest(mockResponse);
 
@@ -84,7 +80,6 @@ describe('createCostsApi', () => {
   describe('getGpuModels', () => {
     it('calls request with /costs/gpu-models and returns the resolved value', async () => {
       const mockResponse: GpuModelsResponse = {
-        success: true,
         models: [
           { model: 'A100', memoryGb: 80, generation: 'ampere' },
           { model: 'H100', memoryGb: 80, generation: 'hopper' },
