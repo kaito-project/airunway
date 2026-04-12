@@ -5,7 +5,8 @@ import {
   type GpuModelsResponse,
   type CostsNormalizeGpuResponse,
 } from './costs';
-import { mockRequest } from './test-helpers';
+import { mockRequest, mockRequestError } from './test-helpers';
+import { ApiError } from './client';
 import type { CostEstimateRequest, CostEstimateResponse } from '../types';
 
 describe('createCostsApi', () => {
@@ -129,6 +130,32 @@ describe('createCostsApi', () => {
 
       expect(request).toHaveBeenCalledWith('/costs/normalize-gpu?label=a100');
       expect(result.gpuInfo?.memoryGb).toBe(80);
+    });
+  });
+
+  describe('error propagation', () => {
+    it('rejects with ApiError when estimate request fails', async () => {
+      const request = mockRequestError(400, 'Bad Request');
+      const api = createCostsApi(request);
+      await expect(api.estimate({ gpuType: 'A100', gpuCount: 1, replicas: 1 })).rejects.toThrow(ApiError);
+    });
+
+    it('rejects with ApiError when getNodePoolCosts request fails', async () => {
+      const request = mockRequestError(503, 'Service Unavailable');
+      const api = createCostsApi(request);
+      await expect(api.getNodePoolCosts()).rejects.toThrow(ApiError);
+    });
+
+    it('rejects with ApiError when getGpuModels request fails', async () => {
+      const request = mockRequestError(500, 'Internal Server Error');
+      const api = createCostsApi(request);
+      await expect(api.getGpuModels()).rejects.toThrow(ApiError);
+    });
+
+    it('rejects with ApiError when normalizeGpu request fails', async () => {
+      const request = mockRequestError(404, 'Not Found');
+      const api = createCostsApi(request);
+      await expect(api.normalizeGpu('unknown-gpu')).rejects.toThrow(ApiError);
     });
   });
 });

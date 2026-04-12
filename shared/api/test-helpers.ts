@@ -8,13 +8,18 @@
 
 import { vi, type Mock } from 'vitest';
 import type { RequestFn } from './client';
+import { ApiError } from './client';
+
+// The `as unknown as` cast bridges vitest's Mock type to our generic RequestFn signature.
+export function mockRequest(response: unknown): RequestFn & Mock {
+  return vi.fn().mockResolvedValue(response) as unknown as RequestFn & Mock;
+}
 
 /**
- * Create a mocked RequestFn that resolves to the given value on every call.
+ * Create a mocked RequestFn that rejects with an ApiError.
  *
- * Returns a `vi.fn()` typed as both `RequestFn` (so it satisfies the factory
- * signatures) and `Mock` (so tests can use `.toHaveBeenCalledWith` etc.).
+ * Use this to test how API methods propagate errors from the request layer.
  */
-export function mockRequest<T>(response: T): RequestFn & Mock {
-  return vi.fn().mockResolvedValue(response) as unknown as RequestFn & Mock;
+export function mockRequestError(statusCode: number, message: string): RequestFn & Mock {
+  return vi.fn().mockRejectedValue(new ApiError(statusCode, message)) as unknown as RequestFn & Mock;
 }

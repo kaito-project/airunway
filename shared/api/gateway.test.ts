@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGatewayApi } from './gateway';
-import { mockRequest } from './test-helpers';
+import { mockRequest, mockRequestError } from './test-helpers';
+import { ApiError } from './client';
 import type { GatewayInfo, GatewayModelInfo } from '../types';
 
 describe('createGatewayApi', () => {
@@ -36,6 +37,20 @@ describe('createGatewayApi', () => {
       expect(request).toHaveBeenCalledTimes(1);
       expect(request).toHaveBeenCalledWith('/gateway/models');
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('error propagation', () => {
+    it('rejects with ApiError when getStatus request fails', async () => {
+      const request = mockRequestError(503, 'Service Unavailable');
+      const api = createGatewayApi(request);
+      await expect(api.getStatus()).rejects.toThrow(ApiError);
+    });
+
+    it('rejects with ApiError when getModels request fails', async () => {
+      const request = mockRequestError(500, 'Internal Server Error');
+      const api = createGatewayApi(request);
+      await expect(api.getModels()).rejects.toThrow(ApiError);
     });
   });
 });
