@@ -116,7 +116,7 @@ func main() {
 	}
 
 	// Set up the ProviderConfigManager for self-registration and heartbeat
-	configManager := kaito.NewProviderConfigManager(mgr.GetClient())
+	configManager := kaito.NewProviderConfigManager(mgr.GetClient(), mgr.GetClient())
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		setupLog.Info("registering KAITO provider config")
 		if err := configManager.Register(ctx); err != nil {
