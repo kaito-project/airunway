@@ -35,8 +35,14 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for Dynamo
 	ProviderConfigName = "dynamo"
 
-	// ProviderVersion is the version of the Dynamo provider
-	ProviderVersion = "dynamo-provider:v0.1.0"
+	// ProviderVersion is the version of the AIRunway Dynamo provider controller.
+	ProviderVersion = "dynamo-provider:v0.2.0"
+
+	// DynamoPlatformChartVersion is the upstream Dynamo platform chart version.
+	DynamoPlatformChartVersion = "1.0.1"
+
+	// DynamoPlatformChartURL is the upstream Dynamo platform chart package.
+	DynamoPlatformChartURL = "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-" + DynamoPlatformChartVersion + ".tgz"
 
 	// ProviderDocumentation is the documentation URL for the Dynamo provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md"
@@ -44,9 +50,7 @@ const (
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
 
-	dynamoPlatformImageOverrideValue = `{"controllerManager":{"kubeRbacProxy":{"image":{"repository":"quay.io/brancz/kube-rbac-proxy","tag":"v0.15.0"}}}}`
-	dynamoPlatformValuesJSON         = `{"dynamo-operator":` + dynamoPlatformImageOverrideValue + `}`
-	dynamoPlatformSetJSONArg         = `dynamo-operator=` + dynamoPlatformImageOverrideValue
+	dynamoPlatformValuesJSON = `{"global.grove.install":true}`
 )
 
 // ProviderConfigManager handles registration and heartbeat for the Dynamo provider
@@ -107,13 +111,8 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 			},
 			HelmCharts: []airunwayv1alpha1.HelmChart{
 				{
-					Name:      "dynamo-crds",
-					Chart:     "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz",
-					Namespace: "default",
-				},
-				{
 					Name:            "dynamo-platform",
-					Chart:           "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz",
+					Chart:           DynamoPlatformChartURL,
 					Namespace:       "dynamo-system",
 					CreateNamespace: true,
 					Values: &runtime.RawExtension{
@@ -123,14 +122,9 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 			},
 			Steps: []airunwayv1alpha1.InstallationStep{
 				{
-					Title:       "Install Dynamo CRDs",
-					Command:     "helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz && helm install dynamo-crds dynamo-crds-0.7.1.tgz --namespace default",
-					Description: "Install the Dynamo Custom Resource Definitions v0.7.1.",
-				},
-				{
 					Title:       "Install Dynamo Platform",
-					Command:     fmt.Sprintf("helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz && helm install dynamo-platform dynamo-platform-0.7.1.tgz --namespace dynamo-system --create-namespace --set-json '%s'", dynamoPlatformSetJSONArg),
-					Description: "Install the Dynamo platform operator v0.7.1.",
+					Command:     "helm upgrade --install dynamo-platform " + DynamoPlatformChartURL + " --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
+					Description: "Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.",
 				},
 			},
 		},

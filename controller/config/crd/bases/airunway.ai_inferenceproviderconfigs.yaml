@@ -122,7 +122,7 @@ spec:
                           type: string
                         values:
                           description: values is an arbitrary Helm values object that
-                            will be passed to the chart
+                            will be passed via --set-json
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
                         version:

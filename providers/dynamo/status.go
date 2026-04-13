@@ -39,6 +39,8 @@ type ProviderStatusResult struct {
 type DynamoState string
 
 const (
+	// DynamoStateInitializing indicates the deployment is initializing.
+	DynamoStateInitializing DynamoState = "initializing"
 	// DynamoStateDeploying indicates the deployment is in progress
 	DynamoStateDeploying DynamoState = "deploying"
 	// DynamoStateSuccessful indicates the deployment is successful
@@ -107,6 +109,8 @@ func (t *StatusTranslator) mapStateToPhase(state DynamoState) airunwayv1alpha1.D
 	switch state {
 	case DynamoStateSuccessful:
 		return airunwayv1alpha1.DeploymentPhaseRunning
+	case DynamoStateInitializing:
+		return airunwayv1alpha1.DeploymentPhaseDeploying
 	case DynamoStateDeploying:
 		return airunwayv1alpha1.DeploymentPhaseDeploying
 	case DynamoStateFailed:
@@ -134,11 +138,18 @@ func (t *StatusTranslator) extractReplicas(status map[string]interface{}) *airun
 				if desired, ok := svc["replicas"].(int64); ok {
 					totalDesired += int32(desired)
 				}
-				if ready, ok := svc["readyReplicas"].(int64); ok {
+				ready, hasReady := svc["readyReplicas"].(int64)
+				available, hasAvailable := svc["availableReplicas"].(int64)
+				if hasReady {
 					totalReady += int32(ready)
+				} else if hasAvailable {
+					// VllmWorker (PodCliqueScalingGroup) reports availableReplicas but not readyReplicas
+					totalReady += int32(available)
 				}
-				if available, ok := svc["availableReplicas"].(int64); ok {
+				if hasAvailable {
 					totalAvailable += int32(available)
+				} else if hasReady {
+					totalAvailable += int32(ready)
 				}
 			}
 		}

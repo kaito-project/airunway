@@ -35,6 +35,11 @@ const (
 	DynamoAPIVersion = "v1alpha1"
 	// DynamoGraphDeploymentKind is the kind for DynamoGraphDeployment
 	DynamoGraphDeploymentKind = "DynamoGraphDeployment"
+	// DynamoRuntimeVersion is the default upstream runtime tag used for Dynamo engines.
+	DynamoRuntimeVersion      = "1.0.1"
+	defaultVLLMRuntimeImage   = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:" + DynamoRuntimeVersion
+	defaultSGLangRuntimeImage = "nvcr.io/nvidia/ai-dynamo/sglang-runtime:" + DynamoRuntimeVersion
+	defaultTRTLLMRuntimeImage = "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:" + DynamoRuntimeVersion
 
 	// Default component settings
 	DefaultFrontendReplicas = 1
@@ -50,9 +55,9 @@ const (
 	SubComponentTypePrefill = "prefill"
 	SubComponentTypeDecode  = "decode"
 
-	// vLLM connector modes used by Dynamo.
-	VLLMConnectorNIXL = "nixl"
-	VLLMConnectorNone = "none"
+	// VLLMKVTransferConfig is the --kv-transfer-config value required by
+	// newer vLLM for NIXL-based disaggregated serving (replaces --connector).
+	VLLMKVTransferConfig = `{"kv_connector":"NixlConnector","kv_role":"kv_both"}`
 )
 
 // DynamoOverrides contains Dynamo-specific override configuration
@@ -255,7 +260,6 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 		"componentType":   ComponentTypeFrontend,
 		"dynamoNamespace": md.Name,
 		"replicas":        replicas,
-		"router-mode":     routerMode,
 		"resources": map[string]interface{}{
 			"requests": map[string]interface{}{
 				"cpu":    cpu,
@@ -268,6 +272,12 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 			},
 			"mainContainer": map[string]interface{}{
 				"image": t.getImage(md),
+				"env": []interface{}{
+					map[string]interface{}{
+						"name":  "DYN_ROUTER_MODE",
+						"value": routerMode,
+					},
+				},
 			},
 		},
 	}
@@ -351,12 +361,15 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 		"requests": requests,
 	}
 
-	// Build engine arguments with prefill flag
+	// Dynamo 1.0.x uses an explicit disaggregation mode for worker roles.
 	args, err := t.buildEngineArgs(md)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, "--is-prefill-worker")
+	args = append(args, "--disaggregation-mode", SubComponentTypePrefill)
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
+	}
 
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
@@ -413,10 +426,14 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 		"requests": requests,
 	}
 
-	// Build engine arguments (decode workers don't need special flags)
+	// Dynamo 1.0.x uses an explicit disaggregation mode for worker roles.
 	args, err := t.buildEngineArgs(md)
 	if err != nil {
 		return nil, err
+	}
+	args = append(args, "--disaggregation-mode", SubComponentTypeDecode)
+	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
 	}
 
 	worker := map[string]interface{}{
@@ -488,8 +505,13 @@ func (t *Transformer) buildResourceLimits(spec *airunwayv1alpha1.ResourceSpec) m
 func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]string, error) {
 	var args []string
 
-	// Add model
-	args = append(args, "--model", md.Spec.Model.ID)
+	// SGLang and TRT-LLM expect --model-path while vLLM continues to use --model.
+	modelArg := "--model"
+	switch md.ResolvedEngineType() {
+	case airunwayv1alpha1.EngineTypeSGLang, airunwayv1alpha1.EngineTypeTRTLLM:
+		modelArg = "--model-path"
+	}
+	args = append(args, modelArg, md.Spec.Model.ID)
 
 	// Add served name if specified
 	if md.Spec.Model.ServedName != "" {
@@ -515,15 +537,6 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 		}
 	}
 
-	// Aggregated vLLM deployments do not need a KV transfer connector, so make the
-	// default explicit instead of inheriting Dynamo's runtime default.
-	if md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
-		if _, hasConnectorOverride := md.Spec.Engine.Args["connector"]; !hasConnectorOverride &&
-			t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
-			args = append(args, "--connector", VLLMConnectorNone)
-		}
-	}
-
 	// Add custom engine args with key validation (sorted for deterministic output)
 	keys := make([]string, 0, len(md.Spec.Engine.Args))
 	for k := range md.Spec.Engine.Args {
@@ -531,6 +544,11 @@ func (t *Transformer) buildEngineArgs(md *airunwayv1alpha1.ModelDeployment) ([]s
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
+		// "connector" is consumed internally (e.g. NIXL side-channel host
+		// injection) but must not be forwarded to vLLM which rejects the flag.
+		if key == "connector" && md.ResolvedEngineType() == airunwayv1alpha1.EngineTypeVLLM {
+			continue
+		}
 		if !isValidArgKey(key) {
 			return nil, fmt.Errorf("invalid engine arg key %q: must contain only alphanumeric characters, hyphens, and underscores", key)
 		}
@@ -550,22 +568,6 @@ func (t *Transformer) resolvedServingMode(md *airunwayv1alpha1.ModelDeployment) 
 		return md.Spec.Serving.Mode
 	}
 	return airunwayv1alpha1.ServingModeAggregated
-}
-
-func (t *Transformer) effectiveVLLMConnector(md *airunwayv1alpha1.ModelDeployment) string {
-	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM {
-		return ""
-	}
-
-	if connector, hasConnectorOverride := md.Spec.Engine.Args["connector"]; hasConnectorOverride {
-		return connector
-	}
-
-	if t.resolvedServingMode(md) == airunwayv1alpha1.ServingModeAggregated {
-		return VLLMConnectorNone
-	}
-
-	return VLLMConnectorNIXL
 }
 
 // engineCommand returns the command slice for the given engine type
@@ -611,9 +613,9 @@ func toInterfaceSlice(ss []string) []interface{} {
 
 // defaultImages contains the default container images for each engine type
 var defaultImages = map[airunwayv1alpha1.EngineType]string{
-	airunwayv1alpha1.EngineTypeVLLM:   "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1",
-	airunwayv1alpha1.EngineTypeSGLang: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1",
-	airunwayv1alpha1.EngineTypeTRTLLM: "nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1",
+	airunwayv1alpha1.EngineTypeVLLM:   defaultVLLMRuntimeImage,
+	airunwayv1alpha1.EngineTypeSGLang: defaultSGLangRuntimeImage,
+	airunwayv1alpha1.EngineTypeTRTLLM: defaultTRTLLMRuntimeImage,
 }
 
 // getImage returns the container image to use
@@ -629,7 +631,7 @@ func (t *Transformer) getImage(md *airunwayv1alpha1.ModelDeployment) string {
 	}
 
 	// Fallback to vLLM default
-	return "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+	return defaultVLLMRuntimeImage
 }
 
 // buildPVCs creates the pvcs list for DynamoGraphDeployment from StorageSpec volumes.
@@ -709,8 +711,10 @@ func hasEnvVar(md *airunwayv1alpha1.ModelDeployment, name string) bool {
 }
 
 // maybeInjectVLLMSideChannelHost ensures each NIXL-backed vLLM worker advertises its own pod IP.
+// Injection is gated on disaggregated vLLM serving, which always uses NIXL for KV-cache transfer.
 func (t *Transformer) maybeInjectVLLMSideChannelHost(service map[string]interface{}, md *airunwayv1alpha1.ModelDeployment) {
-	if !strings.EqualFold(t.effectiveVLLMConnector(md), VLLMConnectorNIXL) {
+	if md.ResolvedEngineType() != airunwayv1alpha1.EngineTypeVLLM ||
+		t.resolvedServingMode(md) != airunwayv1alpha1.ServingModeDisaggregated {
 		return
 	}
 

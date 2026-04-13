@@ -59,6 +59,13 @@ function valuesToSetJsonCommandArgs(values: Record<string, unknown>): string[] {
   return args;
 }
 
+function appendValuesToCommand(cmd: string, values?: Record<string, unknown>): string {
+  if (!values) {
+    return cmd;
+  }
+  return `${cmd} ${valuesToSetJsonCommandArgs(values).join(' ')}`;
+}
+
 /**
  * NVIDIA GPU Operator Helm configuration
  */
@@ -396,9 +403,7 @@ class HelmService {
     if (includeVersion && chart.version) {
       cmd += ` --version ${chart.version}`;
     }
-    if (chart.values) {
-      cmd += ` ${valuesToSetJsonCommandArgs(chart.values).join(' ')}`;
-    }
+    cmd = appendValuesToCommand(cmd, chart.values);
     if (chart.skipCrds) {
       cmd += ' --skip-crds';
     }
@@ -884,7 +889,7 @@ class HelmService {
 
       if (chart.fetchUrl) {
         // Use fetch + install for charts with fetchUrl
-        let cmd = `helm fetch ${chart.fetchUrl} && ${this.buildInstallCommand(chart, chart.chart, false)}`;
+        const cmd = `helm fetch ${chart.fetchUrl} && ${this.buildInstallCommand(chart, chart.chart, false)}`;
         commands.push(cmd);
       } else {
         commands.push(this.buildInstallCommand(chart));

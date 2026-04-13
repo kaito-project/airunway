@@ -288,6 +288,24 @@ describe('HelmService - getInstallCommands Logic', () => {
     expect(commands[0]).toContain('--namespace default');
   });
 
+  test('includes simple values in generated install commands', () => {
+    const repos: HelmRepo[] = [];
+    const charts: HelmChart[] = [
+      {
+        name: 'dynamo-platform',
+        chart: 'https://example.com/dynamo-platform.tgz',
+        namespace: 'dynamo-system',
+        createNamespace: true,
+        values: {
+          'global.grove.install': true,
+        },
+      },
+    ];
+
+    const commands = getInstallCommands(repos, charts);
+    expect(commands[0]).toContain('global.grove.install=true');
+  });
+
   test('generates commands for GPU Operator', () => {
     const commands = getInstallCommands([GPU_OPERATOR_REPO], [GPU_OPERATOR_CHART]);
 

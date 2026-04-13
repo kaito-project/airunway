@@ -30,9 +30,37 @@ spec:
   gateway:
     enabled: true                # Optional: defaults to true when Gateway detected
     modelName: ""                # Optional: override model name for routing
+  model:
+    storage:
+      volumes:
+        - name: model-cache      # DNS label, unique per deployment
+          purpose: modelCache    # modelCache, compilationCache, or custom
+          # Option A: reference a pre-existing PVC
+          claimName: pvc-claim
+          # readOnly: false         # optional, default false
+          # Option B: let the controller create a PVC (omit claimName, set size)
+          # size: 100Gi
+          # storageClassName: azurelustre-static   # omit to use cluster default
+          # accessMode: ReadWriteMany              # default when size is set
+          mountPath: /model-cache  # required when purpose is custom; defaults for cache purposes
 ```
 
 > **Note:** If `gateway.enabled` is explicitly set to `true` but the Gateway API Inference Extension CRDs are not installed, the controller sets a `GatewayReady=False` condition with reason `CRDsNotAvailable`. This surfaces as a status warning on the `ModelDeployment`.
+
+### spec.model.storage.volumes[]
+
+Each entry is a `StorageVolume`. Maximum 8 volumes per deployment.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Unique volume identifier. DNS label format (`[a-z0-9-]`, max 63 chars). |
+| `purpose` | string | no | `modelCache`, `compilationCache`, or `custom` (default). Controls mount path defaults and engine behavior. Only one volume of each cache purpose is allowed. |
+| `claimName` | string | conditional | Name of a pre-existing PVC in the same namespace. Required when `size` is not set. When `size` is set and `claimName` is empty, defaults to `<deployment-name>-<volume-name>`. |
+| `mountPath` | string | conditional | Absolute path inside the container. Required when `purpose` is `custom`. Defaults: `/model-cache` for `modelCache`, `/compilation-cache` for `compilationCache`. |
+| `readOnly` | bool | no | Mount the volume read-only. Default: `false`. |
+| `size` | string | no | Requested storage size (e.g. `100Gi`). When set, the controller creates a PVC automatically. When omitted, `claimName` must reference a pre-existing PVC. |
+| `storageClassName` | string | no | StorageClass for controller-created PVCs. Omit to use the cluster default. Set to `""` to disable dynamic provisioning. Only used when `size` is set. |
+| `accessMode` | string | no | PVC access mode for controller-created PVCs. One of `ReadWriteOnce`, `ReadWriteMany`, `ReadOnlyMany`, `ReadWriteOncePod`. Default: `ReadWriteMany`. Only used when `size` is set. |
 
 ## InferenceProviderConfig
 Cluster-scoped resource for provider registration. Each provider controller self-registers its `InferenceProviderConfig` at startup, declaring capabilities, selection rules, and installation info:
@@ -52,28 +80,25 @@ spec:
     - condition: "spec.serving.mode == 'disaggregated'"
       priority: 100
   installation:
-    description: "NVIDIA Dynamo for GPU-accelerated inference"
+    description: "NVIDIA Dynamo for high-performance GPU inference"
     defaultNamespace: dynamo-system
     helmRepos:
-      - name: nvidia-dynamo
+      - name: nvidia-ai-dynamo
         url: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
     helmCharts:
-      - name: dynamo-crds
-        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.7.1.tgz
-        version: "0.7.1"
-        namespace: default
       - name: dynamo-platform
-        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz
-        version: "0.7.1"
+        chart: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz
         namespace: dynamo-system
         createNamespace: true
+        values:
+          global.grove.install: true
     steps:
-      - title: Install Dynamo CRDs
-        command: "helm install dynamo-crds ..."
-        description: Install the Dynamo custom resource definitions
+      - title: Install Dynamo Platform
+        command: "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true"
+        description: Install the Dynamo platform operator with bundled Grove enabled by default and bundled CRDs
 status:
   ready: true
-  version: "0.7.1"
+  version: "dynamo-provider:v0.2.0"
 ```
 
 ## See also

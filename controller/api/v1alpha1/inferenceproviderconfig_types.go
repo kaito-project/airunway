@@ -73,7 +73,7 @@ type HelmChart struct {
 	// +optional
 	CreateNamespace bool `json:"createNamespace,omitempty"`
 
-	// values is an arbitrary Helm values object that will be passed to the chart
+	// values is an arbitrary Helm values object that will be passed via --set-json
 	// +optional
 	Values *runtime.RawExtension `json:"values,omitempty"`
 }

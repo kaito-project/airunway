@@ -2,12 +2,13 @@ package dynamo
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -46,33 +47,37 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Errorf("expected documentation %s, got %s", ProviderDocumentation, spec.Documentation)
 	}
 
-	if len(spec.Installation.HelmCharts) != 2 {
-		t.Fatalf("expected 2 installation charts, got %d", len(spec.Installation.HelmCharts))
+	if spec.Installation == nil {
+		t.Fatal("installation should not be nil")
 	}
 
-	platformChart := spec.Installation.HelmCharts[1]
-	if len(platformChart.Values.Raw) == 0 {
-		t.Fatal("expected dynamo platform chart to include helm values override")
+	if len(spec.Installation.HelmCharts) != 1 {
+		t.Fatalf("expected 1 helm chart, got %d", len(spec.Installation.HelmCharts))
 	}
 
-	valuesJSON := string(platformChart.Values.Raw)
-	if !strings.Contains(valuesJSON, `"repository":"quay.io/brancz/kube-rbac-proxy"`) {
-		t.Fatalf("expected values override to point kube-rbac-proxy at quay.io, got %s", valuesJSON)
+	platformChart := spec.Installation.HelmCharts[0]
+	if platformChart.Chart != DynamoPlatformChartURL {
+		t.Errorf("expected platform chart URL %q, got %q", DynamoPlatformChartURL, platformChart.Chart)
 	}
-	if !strings.Contains(valuesJSON, `"tag":"v0.15.0"`) {
-		t.Fatalf("expected values override to pin kube-rbac-proxy tag, got %s", valuesJSON)
-	}
-
-	if len(spec.Installation.Steps) != 2 {
-		t.Fatalf("expected 2 installation steps, got %d", len(spec.Installation.Steps))
+	if platformChart.Values == nil || len(platformChart.Values.Raw) == 0 {
+		t.Fatal("expected dynamo platform chart to include helm values")
 	}
 
-	installCommand := spec.Installation.Steps[1].Command
-	if !strings.Contains(installCommand, "--set-json") {
-		t.Fatalf("expected dynamo platform install command to include --set-json, got %s", installCommand)
+	var values map[string]bool
+	if err := json.Unmarshal(platformChart.Values.Raw, &values); err != nil {
+		t.Fatalf("failed to decode helm values: %v", err)
 	}
-	if !strings.Contains(installCommand, "quay.io/brancz/kube-rbac-proxy") {
-		t.Fatalf("expected dynamo platform install command to include kube-rbac-proxy override, got %s", installCommand)
+	if !values["global.grove.install"] {
+		t.Fatalf("expected global.grove.install=true, got %s", string(platformChart.Values.Raw))
+	}
+
+	if len(spec.Installation.Steps) != 1 {
+		t.Fatalf("expected 1 installation step, got %d", len(spec.Installation.Steps))
+	}
+
+	installCommand := spec.Installation.Steps[0].Command
+	if installCommand != "helm upgrade --install dynamo-platform "+DynamoPlatformChartURL+" --namespace dynamo-system --create-namespace --set-json global.grove.install=true" {
+		t.Fatalf("unexpected installation command: %s", installCommand)
 	}
 }
 
@@ -87,8 +92,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "dynamo" {
 		t.Errorf("expected provider config name 'dynamo', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "dynamo-provider:v0.1.0" {
-		t.Errorf("expected provider version 'dynamo-provider:v0.1.0', got %s", ProviderVersion)
+	if ProviderVersion != "dynamo-provider:v0.2.0" {
+		t.Errorf("expected provider version 'dynamo-provider:v0.2.0', got %s", ProviderVersion)
 	}
 }
 
@@ -136,6 +141,21 @@ func TestUpdateStatus(t *testing.T) {
 	err := mgr.UpdateStatus(context.Background(), true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated := &airunwayv1alpha1.InferenceProviderConfig{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: ProviderConfigName}, updated); err != nil {
+		t.Fatalf("failed to get updated provider config: %v", err)
+	}
+
+	if !updated.Status.Ready {
+		t.Fatal("expected provider status to be ready")
+	}
+	if updated.Status.Version != ProviderVersion {
+		t.Fatalf("expected provider status version %q, got %q", ProviderVersion, updated.Status.Version)
+	}
+	if updated.Status.LastHeartbeat == nil {
+		t.Fatal("expected provider status to include last heartbeat")
 	}
 }
 

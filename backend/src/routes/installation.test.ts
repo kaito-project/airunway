@@ -14,13 +14,43 @@ describe('Installation Provider Routes', () => {
         ...mockInferenceProviderConfig.spec,
         installation: {
           ...mockInferenceProviderConfig.spec.installation,
+          description: 'NVIDIA Dynamo for high-performance GPU inference',
+          defaultNamespace: 'dynamo-system',
           helmRepos: [],
           helmCharts: [
             {
               name: 'dynamo-platform',
-              chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz',
+              chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz',
               namespace: 'dynamo-system',
               createNamespace: true,
+              values: {
+                'global.grove.install': true,
+              },
+            },
+          ],
+          steps: [
+            {
+              title: 'Install Dynamo Platform',
+              command: 'helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true',
+              description: 'Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.',
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  function createDynamoProviderConfigWithNestedValues() {
+    const config = createDynamoProviderConfig();
+    return {
+      ...config,
+      spec: {
+        ...config.spec,
+        installation: {
+          ...config.spec.installation,
+          helmCharts: [
+            {
+              ...config.spec.installation.helmCharts[0],
               values: {
                 'dynamo-operator': {
                   controllerManager: {
@@ -60,10 +90,10 @@ describe('Installation Provider Routes', () => {
         mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
           kaitoStatusChecks += 1;
           return {
-            installed: false,
+            installed: true,
             crdFound: true,
             operatorRunning: false,
-            message: 'KAITO workspace CRD found but no running pods were detected in kaito-workspace',
+            message: 'KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace',
           };
         }),
       );
@@ -75,11 +105,11 @@ describe('Installation Provider Routes', () => {
       expect(data.providerId).toBe('kaito');
       expect(data.providerName).toBe('Kaito');
       expect(kaitoStatusChecks).toBe(1);
-      expect(data.installed).toBe(false);
+      expect(data.installed).toBe(true);
       expect(data.crdFound).toBe(true);
       expect(data.operatorRunning).toBe(false);
       expect(data.version).toBe('0.9.0');
-      expect(data.message).toBe('KAITO workspace CRD found but no running pods were detected in kaito-workspace');
+      expect(data.message).toBe('KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace');
       expect(data.installationSteps).toBeDefined();
       expect(data.helmCommands).toBeDefined();
       expect(data.helmCommands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
@@ -134,8 +164,7 @@ describe('Installation Provider Routes', () => {
       expect(data.version).toBe('1.2.3');
       expect(data.message).toBe('Dynamo CRD not found');
       expect(data.helmCommands).toHaveLength(1);
-      expect(data.helmCommands[0]).toContain("--set-json 'dynamo-operator=");
-      expect(data.helmCommands[0]).toContain('"repository":"quay.io/brancz/kube-rbac-proxy"');
+      expect(data.helmCommands[0]).toContain('global.grove.install=true');
     });
 
     test('returns 404 for unknown provider', async () => {
@@ -173,7 +202,7 @@ describe('Installation Provider Routes', () => {
 
     test('preserves chart values in generated commands for non-KAITO providers', async () => {
       restores.push(
-        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => createDynamoProviderConfig()),
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => createDynamoProviderConfigWithNestedValues()),
       );
 
       const res = await app.request('/api/installation/providers/dynamo/commands');
@@ -185,6 +214,36 @@ describe('Installation Provider Routes', () => {
       expect(data.commands).toHaveLength(1);
       expect(data.commands[0]).toContain("--set-json 'dynamo-operator=");
       expect(data.commands[0]).toContain('"tag":"v0.15.0"');
+    });
+
+    test('includes helm values in generated commands when present', async () => {
+      const configWithValues = {
+        ...mockInferenceProviderConfig,
+        spec: {
+          ...mockInferenceProviderConfig.spec,
+          installation: {
+            ...mockInferenceProviderConfig.spec.installation,
+            helmCharts: [
+              {
+                ...mockInferenceProviderConfig.spec.installation.helmCharts[0],
+                values: {
+                  'global.grove.install': true,
+                },
+              },
+            ],
+          },
+        },
+      };
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithValues),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/commands');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.commands.some((command: string) => command.includes('global.grove.install=true'))).toBe(true);
     });
 
     test('returns 404 for unknown provider', async () => {
@@ -268,10 +327,10 @@ describe('Installation Provider Routes', () => {
       expect(res.status).toBe(200);
 
       expect(installCharts).toHaveLength(1);
-      expect(installCharts[0].chart).toBe('https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.7.1.tgz');
+      expect(installCharts[0].chart).toBe('https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz');
       expect(installCharts[0].preInstallMissingCrds).toBeUndefined();
       expect(installCharts[0].skipCrds).toBeUndefined();
-      expect(installCharts[0].values?.['dynamo-operator']?.controllerManager?.kubeRbacProxy?.image?.repository).toBe('quay.io/brancz/kube-rbac-proxy');
+      expect(installCharts[0].values?.['global.grove.install']).toBe(true);
     });
   });
 

@@ -111,7 +111,7 @@ describe('KubernetesService - Runtime Status', () => {
     expect(dynamo?.message).toBe('Dynamo CRD not found');
   });
 
-  test('requires ready KAITO operator pods before reporting the operator as running', async () => {
+  test('keeps KAITO installed when the CRD exists but no ready operator pod is found', async () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
     );
@@ -129,7 +129,7 @@ describe('KubernetesService - Runtime Status', () => {
 
     const status = await kubernetesService.checkKaitoInstallationStatus();
 
-    expect(status.installed).toBe(false);
+    expect(status.installed).toBe(true);
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(false);
     expect(status.message).toBe('KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace');
@@ -181,6 +181,30 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(true);
     expect(status.message).toBe('Dynamo CRD found and Dynamo operator pods are ready');
+  });
+
+  test('keeps Dynamo installed when the CRD exists but no ready operator pod is found', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'dynamographdeployments.nvidia.com'),
+    );
+    mockOperatorPods('dynamo-system', dynamoOperatorSelector, [
+      {
+        metadata: { name: 'dynamo-operator-abc123' },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: false, restartCount: 1 },
+          ],
+        },
+      },
+    ]);
+
+    const status = await kubernetesService.checkDynamoInstallationStatus();
+
+    expect(status.installed).toBe(true);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(false);
+    expect(status.message).toBe('Dynamo CRD found but no ready Dynamo operator pods were detected in dynamo-system');
   });
 
   test('reports KubeRay as installed when a ready operator pod is found', async () => {

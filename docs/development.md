@@ -60,6 +60,54 @@ make controller-deploy CONTROLLER_IMG=<YOUR IMAGE>
 cd controller && make manifests generate
 ```
 
+## Dependabot VEX Automation
+
+The repository includes an agentic VEX flow for dismissed Dependabot alerts:
+
+- `.github/workflows/vex-dispatch-dismissed-alerts.yml` scans dismissed alerts and dispatches supported cases.
+- `.github/workflows/vex-generator.md` is the editable source workflow.
+- `.github/workflows/vex-generator.lock.yml` is the compiled workflow that GitHub Actions actually runs.
+
+After editing `.github/workflows/vex-generator.md`, always regenerate the compiled file:
+
+```bash
+gh extension install githubnext/gh-aw --pin v0.31.10
+gh aw compile
+./scripts/normalize-gh-aw-lockfiles.sh
+```
+
+CI checks for drift between the Markdown source and compiled lock file.
+
+### Maintainer Dismissal Comment Format
+
+The dispatcher only creates a VEX workflow run when the dismissal comment contains an explicit `VEX:` block:
+
+```text
+VEX:
+status: not_affected
+justification: vulnerable_code_not_present
+impact: vulnerable package is not shipped in the released product
+```
+
+`impact_statement:` is also accepted instead of `impact:`.
+
+Supported `justification` values for this repository are:
+
+- `component_not_present`
+- `vulnerable_code_not_present`
+- `vulnerable_code_not_in_execute_path`
+- `vulnerable_code_cannot_be_controlled_by_adversary`
+- `inline_mitigations_already_exist`
+
+### Manual Backfill
+
+Use the dispatcher workflow's `workflow_dispatch` inputs to backfill a specific case:
+
+- Set `alert_number` to fetch one known dismissed alert directly.
+- Set `ghsa_id` to scan dismissed alerts for one advisory across the configured pages.
+- Raise `max_pages` when backfilling an older `ghsa_id`.
+- Set `dry_run=true` first to confirm what would be dispatched before creating workflow runs.
+
 ## Building a Single Binary
 
 The project can be compiled to a standalone executable that includes both the backend API and embedded frontend assets:
@@ -207,12 +255,12 @@ cd controller && go test -v ./...
 
 | AI Runway Controller | Kubernetes | KAITO Operator | Dynamo Operator | KubeRay Operator |
 |------------------------|------------|----------------|-----------------|------------------|
-| v0.1.x                 | 1.26-1.30  | v0.3.x         | v0.1.x          | v1.1.x           |
+| v0.1.x                 | 1.26-1.30  | v0.3.x         | v1.0.x          | v1.1.x           |
 
 | Provider | Minimum Version | CRD API Version | Notes |
 |----------|-----------------|-----------------|-------|
 | KAITO    | v0.3.0          | kaito.sh/v1beta1 | Requires GPU operator for GPU workloads |
-| Dynamo   | v0.1.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator |
+| Dynamo   | v1.0.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator; CRDs are bundled in the platform chart |
 | KubeRay  | v1.1.0          | ray.io/v1       | Optional: KubeRay autoscaler for scaling |
 
 ### Finalizer Handling
@@ -449,15 +497,14 @@ kubectl create secret generic hf-token-secret \
 ### Install NVIDIA Dynamo (via Helm)
 ```bash
 export NAMESPACE=dynamo-system
-export RELEASE_VERSION=0.7.1
+export RELEASE_VERSION=1.0.1
 
-# Install CRDs
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-${RELEASE_VERSION}.tgz
-helm install dynamo-crds dynamo-crds-${RELEASE_VERSION}.tgz --namespace default
-
-# Install Platform
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz
-helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz --namespace ${NAMESPACE} --create-namespace
+# Dynamo v1.0.1 bundles its CRDs in the platform chart
+helm upgrade --install dynamo-platform \
+  https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz \
+  --namespace ${NAMESPACE} \
+  --create-namespace \
+  --set-json global.grove.install=true
 ```
 
 ## Adding a New Provider
