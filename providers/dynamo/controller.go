@@ -525,21 +525,27 @@ func dynamoProviderPredicate(obj client.Object) bool {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *DynamoProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&airunwayv1alpha1.ModelDeployment{}).
 		// Watch PVCs and Jobs owned by ModelDeployments (auto-reconcile on status changes)
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&batchv1.Job{}).
 		// Only watch ModelDeployments where provider.name == "dynamo"
-		WithEventFilter(predicate.NewPredicateFuncs(dynamoProviderPredicate)).
-		// Watch DynamoGraphDeployments owned by ModelDeployments
-		Watches(
+		WithEventFilter(predicate.NewPredicateFuncs(dynamoProviderPredicate))
+
+	// Only watch DynamoGraphDeployment resources if the CRD is installed.
+	// Without this check, the manager crashes at startup when
+	// the backend CRDs are not present (see #178).
+	mapper := mgr.GetRESTMapper()
+	if _, err := mapper.RESTMapping(schema.GroupKind{Group: DynamoAPIGroup, Kind: DynamoGraphDeploymentKind}, DynamoAPIVersion); err == nil {
+		logger := mgr.GetLogger()
+		logger.Info("DynamoGraphDeployment CRD detected, enabling event-driven watch")
+		builder = builder.Watches(
 			&unstructured.Unstructured{Object: map[string]interface{}{
 				"apiVersion": fmt.Sprintf("%s/%s", DynamoAPIGroup, DynamoAPIVersion),
 				"kind":       DynamoGraphDeploymentKind,
 			}},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				// Check owner references first
 				for _, ref := range obj.GetOwnerReferences() {
 					if ref.APIVersion == airunwayv1alpha1.GroupVersion.String() &&
 						ref.Kind == "ModelDeployment" {
@@ -553,7 +559,6 @@ func (r *DynamoProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 						}
 					}
 				}
-				// Fall back to label-based lookup
 				labels := obj.GetLabels()
 				if labels[airunwayv1alpha1.LabelManagedBy] == "airunway" {
 					if deployment := labels[airunwayv1alpha1.LabelModelDeployment]; deployment != "" {
@@ -569,7 +574,10 @@ func (r *DynamoProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 				return nil
 			}),
-		).
+		)
+	}
+
+	return builder.
 		Named("dynamo-provider").
 		Complete(r)
 }

@@ -406,7 +406,7 @@ func (r *KubeRayProviderReconciler) setCondition(md *airunwayv1alpha1.ModelDeplo
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *KubeRayProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&airunwayv1alpha1.ModelDeployment{}).
 		// Only watch ModelDeployments where provider.name == "kuberay"
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
@@ -424,15 +424,21 @@ func (r *KubeRayProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			// Process if we have our finalizer (for deletion handling)
 			return controllerutil.ContainsFinalizer(md, FinalizerName)
-		})).
-		// Watch RayServices owned by ModelDeployments
-		Watches(
+		}))
+
+	// Only watch RayService resources if the CRD is installed.
+	// Without this check, the manager crashes at startup when
+	// the backend CRDs are not present (see #178).
+	mapper := mgr.GetRESTMapper()
+	if _, err := mapper.RESTMapping(schema.GroupKind{Group: RayAPIGroup, Kind: RayServiceKind}, RayAPIVersion); err == nil {
+		logger := mgr.GetLogger()
+		logger.Info("RayService CRD detected, enabling event-driven watch")
+		builder = builder.Watches(
 			&unstructured.Unstructured{Object: map[string]interface{}{
 				"apiVersion": fmt.Sprintf("%s/%s", RayAPIGroup, RayAPIVersion),
 				"kind":       RayServiceKind,
 			}},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				// Get owner references
 				for _, ref := range obj.GetOwnerReferences() {
 					if ref.APIVersion == airunwayv1alpha1.GroupVersion.String() &&
 						ref.Kind == "ModelDeployment" {
@@ -448,7 +454,10 @@ func (r *KubeRayProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 				return nil
 			}),
-		).
+		)
+	}
+
+	return builder.
 		Named("kuberay-provider").
 		Complete(r)
 }

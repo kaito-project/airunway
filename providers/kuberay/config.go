@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -147,13 +148,17 @@ func (m *ProviderConfigManager) Register(ctx context.Context) error {
 	}
 
 	// Update status — retry briefly after create to allow cache to sync
+	ready := m.checkBackendCRDInstalled()
 	var statusErr error
 	for i := 0; i < 5; i++ {
-		statusErr = m.UpdateStatus(ctx, true)
+		statusErr = m.UpdateStatus(ctx, ready)
 		if statusErr == nil {
 			break
 		}
 		time.Sleep(time.Duration(i+1) * 200 * time.Millisecond)
+	}
+	if !ready {
+		logger.Info("Backend CRD not installed, provider registered as not ready", "group", RayAPIGroup, "kind", RayServiceKind)
 	}
 	return statusErr
 }
@@ -180,6 +185,16 @@ func (m *ProviderConfigManager) UpdateStatus(ctx context.Context, ready bool) er
 	return nil
 }
 
+// checkBackendCRDInstalled checks if the upstream RayService CRD is installed
+func (m *ProviderConfigManager) checkBackendCRDInstalled() bool {
+	mapper := m.client.RESTMapper()
+	_, err := mapper.RESTMapping(schema.GroupKind{
+		Group: RayAPIGroup,
+		Kind:  RayServiceKind,
+	}, RayAPIVersion)
+	return err == nil
+}
+
 // StartHeartbeat starts a goroutine that periodically updates the provider heartbeat
 func (m *ProviderConfigManager) StartHeartbeat(ctx context.Context) {
 	logger := log.FromContext(ctx)
@@ -194,7 +209,11 @@ func (m *ProviderConfigManager) StartHeartbeat(ctx context.Context) {
 				logger.Info("Stopping heartbeat goroutine")
 				return
 			case <-ticker.C:
-				if err := m.UpdateStatus(ctx, true); err != nil {
+				ready := m.checkBackendCRDInstalled()
+				if !ready {
+					logger.Info("Backend CRD not installed, reporting not ready", "group", RayAPIGroup, "kind", RayServiceKind)
+				}
+				if err := m.UpdateStatus(ctx, ready); err != nil {
 					logger.Error(err, "Failed to update heartbeat")
 				}
 			}

@@ -24,6 +24,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -162,8 +163,22 @@ func (m *ProviderConfigManager) Register(ctx context.Context) error {
 		}
 	}
 
-	// Update status
-	return m.UpdateStatus(ctx, true)
+	// Update status — check if backend CRD is installed
+	ready := m.checkBackendCRDInstalled()
+	if !ready {
+		logger.Info("Backend CRD not installed, provider registered as not ready", "group", DynamoAPIGroup, "kind", DynamoGraphDeploymentKind)
+	}
+	return m.UpdateStatus(ctx, ready)
+}
+
+// checkBackendCRDInstalled checks if the upstream DynamoGraphDeployment CRD is installed
+func (m *ProviderConfigManager) checkBackendCRDInstalled() bool {
+	mapper := m.client.RESTMapper()
+	_, err := mapper.RESTMapping(schema.GroupKind{
+		Group: DynamoAPIGroup,
+		Kind:  DynamoGraphDeploymentKind,
+	}, DynamoAPIVersion)
+	return err == nil
 }
 
 // UpdateStatus updates the status of the InferenceProviderConfig
@@ -202,7 +217,11 @@ func (m *ProviderConfigManager) StartHeartbeat(ctx context.Context) {
 				logger.Info("Stopping heartbeat goroutine")
 				return
 			case <-ticker.C:
-				if err := m.UpdateStatus(ctx, true); err != nil {
+				ready := m.checkBackendCRDInstalled()
+				if !ready {
+					logger.Info("Backend CRD not installed, reporting not ready", "group", DynamoAPIGroup, "kind", DynamoGraphDeploymentKind)
+				}
+				if err := m.UpdateStatus(ctx, ready); err != nil {
 					logger.Error(err, "Failed to update heartbeat")
 				}
 			}
