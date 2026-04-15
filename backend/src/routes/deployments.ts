@@ -467,6 +467,18 @@ const deployments = new Hono()
       primaryResource: { kind: 'ModelDeployment', apiVersion: 'airunway.ai/v1alpha1' },
     });
   })
+  // List PVCs in a namespace (for storage volume selection)
+  // Must be defined before /:name to avoid being caught by the wildcard
+  .get('/pvcs', zValidator('query', z.object({ namespace: namespaceSchema })), async (c) => {
+    const { namespace } = c.req.valid('query');
+    try {
+      const pvcs = await kubernetesService.listPVCs(namespace);
+      return c.json({ pvcs });
+    } catch (error) {
+      logger.error({ error, namespace }, 'Failed to list PVCs');
+      return c.json({ pvcs: [] });
+    }
+  })
   .get(
     '/:name',
     zValidator('param', deploymentParamsSchema),

@@ -1704,6 +1704,26 @@ class KubernetesService {
     }
     return await response.text();
   }
+
+  /**
+   * List PersistentVolumeClaims in a namespace
+   */
+  async listPVCs(namespace: string): Promise<{ name: string; status: string; storageClass: string; capacity: string }[]> {
+    try {
+      const response = await withRetry(
+        () => this.coreV1Api.listNamespacedPersistentVolumeClaim(namespace),
+        { operationName: 'listPVCs', maxRetries: 1 }
+      );
+      return (response.body.items || []).map((pvc) => ({
+        name: pvc.metadata?.name || '',
+        status: pvc.status?.phase || 'Unknown',
+        storageClass: pvc.spec?.storageClassName || '',
+        capacity: pvc.status?.capacity?.['storage'] || pvc.spec?.resources?.requests?.['storage'] || '',
+      }));
+    } catch {
+      return [];
+    }
+  }
 }
 
 export const kubernetesService = new KubernetesService();
