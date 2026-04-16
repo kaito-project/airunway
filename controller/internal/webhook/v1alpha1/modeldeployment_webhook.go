@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -38,7 +39,7 @@ var modeldeploymentlog = logf.Log.WithName("modeldeployment-resource")
 // SetupModelDeploymentWebhookWithManager registers the webhook for ModelDeployment in the manager.
 func SetupModelDeploymentWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &airunwayv1alpha1.ModelDeployment{}).
-		WithValidator(&ModelDeploymentCustomValidator{}).
+		WithValidator(&ModelDeploymentCustomValidator{Reader: mgr.GetClient()}).
 		WithDefaulter(&ModelDeploymentCustomDefaulter{}).
 		Complete()
 }
@@ -149,10 +150,14 @@ func (d *ModelDeploymentCustomDefaulter) Default(_ context.Context, obj *airunwa
 
 // ModelDeploymentCustomValidator struct is responsible for validating the ModelDeployment resource
 // when it is created, updated, or deleted.
-type ModelDeploymentCustomValidator struct{}
+type ModelDeploymentCustomValidator struct {
+	// Reader is used to look up InferenceProviderConfig resources for
+	// provider compatibility validation at admission time.
+	Reader client.Reader
+}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type ModelDeployment.
-func (v *ModelDeploymentCustomValidator) ValidateCreate(_ context.Context, obj *airunwayv1alpha1.ModelDeployment) (admission.Warnings, error) {
+func (v *ModelDeploymentCustomValidator) ValidateCreate(ctx context.Context, obj *airunwayv1alpha1.ModelDeployment) (admission.Warnings, error) {
 	modeldeploymentlog.Info("Validation for ModelDeployment upon creation", "name", obj.GetName())
 
 	var warnings admission.Warnings
@@ -168,7 +173,7 @@ func (v *ModelDeploymentCustomValidator) ValidateCreate(_ context.Context, obj *
 	}
 
 	// Validate the spec
-	allErrs = append(allErrs, v.validateSpec(obj)...)
+	allErrs = append(allErrs, v.validateSpec(ctx, obj)...)
 
 	// Check for warnings
 	warnings = append(warnings, v.checkWarnings(obj)...)
@@ -180,14 +185,14 @@ func (v *ModelDeploymentCustomValidator) ValidateCreate(_ context.Context, obj *
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type ModelDeployment.
-func (v *ModelDeploymentCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj *airunwayv1alpha1.ModelDeployment) (admission.Warnings, error) {
+func (v *ModelDeploymentCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *airunwayv1alpha1.ModelDeployment) (admission.Warnings, error) {
 	modeldeploymentlog.Info("Validation for ModelDeployment upon update", "name", newObj.GetName())
 
 	var warnings admission.Warnings
 	var allErrs field.ErrorList
 
 	// Validate the spec
-	allErrs = append(allErrs, v.validateSpec(newObj)...)
+	allErrs = append(allErrs, v.validateSpec(ctx, newObj)...)
 
 	// Validate immutable fields (identity fields that trigger delete+recreate)
 	allErrs = append(allErrs, v.validateImmutableFields(oldObj, newObj)...)
@@ -210,7 +215,7 @@ func (v *ModelDeploymentCustomValidator) ValidateDelete(_ context.Context, obj *
 }
 
 // validateSpec validates the ModelDeployment spec
-func (v *ModelDeploymentCustomValidator) validateSpec(obj *airunwayv1alpha1.ModelDeployment) field.ErrorList {
+func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *airunwayv1alpha1.ModelDeployment) field.ErrorList {
 	var allErrs field.ErrorList
 	spec := &obj.Spec
 	specPath := field.NewPath("spec")
@@ -230,13 +235,39 @@ func (v *ModelDeploymentCustomValidator) validateSpec(obj *airunwayv1alpha1.Mode
 		// Validation of engine type value is handled by the Enum marker on EngineType
 	}
 
-	// NOTE: GPU requirements for specific engines are validated by the controller
-	// using per-engine capabilities from InferenceProviderConfig (not hardcoded here).
-	// The webhook does not have access to InferenceProviderConfig resources.
-
+	// Resolve serving mode for validation checks below
 	servingMode := airunwayv1alpha1.ServingModeAggregated
 	if spec.Serving != nil && spec.Serving.Mode != "" {
 		servingMode = spec.Serving.Mode
+	}
+
+	// Validate provider compatibility when both provider and engine are specified.
+	// Uses the Reader to look up InferenceProviderConfig for the named provider.
+	if spec.Provider != nil && spec.Provider.Name != "" && spec.Engine.Type != "" && v.Reader != nil {
+		var providerConfig airunwayv1alpha1.InferenceProviderConfig
+		err := v.Reader.Get(ctx, client.ObjectKey{Name: spec.Provider.Name}, &providerConfig)
+		if err == nil && providerConfig.Spec.Capabilities != nil {
+			caps := providerConfig.Spec.Capabilities
+			engineType := spec.Engine.Type
+
+			// Check engine support
+			engineCap := caps.GetEngineCapability(engineType)
+			if engineCap == nil {
+				allErrs = append(allErrs, field.Invalid(
+					specPath.Child("engine", "type"),
+					string(engineType),
+					fmt.Sprintf("provider %s does not support engine %s", spec.Provider.Name, engineType),
+				))
+			} else if !caps.SupportsServingMode(engineType, servingMode) {
+				allErrs = append(allErrs, field.Invalid(
+					specPath.Child("serving", "mode"),
+					string(servingMode),
+					fmt.Sprintf("provider %s does not support %s mode for engine %s", spec.Provider.Name, servingMode, engineType),
+				))
+			}
+		}
+		// If Get fails (CRD not installed, provider not found, etc.), skip —
+		// the controller will catch it during reconciliation.
 	}
 
 	// Validate disaggregated mode configuration
