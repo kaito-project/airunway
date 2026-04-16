@@ -87,7 +87,7 @@ interface DeploymentFormProps {
 
 // Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
 type TraditionalEngine = 'vllm' | 'sglang' | 'trtllm'
-type RouterMode = 'none' | 'kv' | 'round-robin'
+type RouterMode = 'default' | 'kv' | 'round-robin'
 type DeploymentMode = 'aggregated' | 'disaggregated'
 type RuntimeId = 'dynamo' | 'kuberay' | 'kaito' | 'llmd'
 type KaitoComputeType = 'cpu' | 'gpu'

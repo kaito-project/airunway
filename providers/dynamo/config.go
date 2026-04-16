@@ -133,7 +133,7 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 				{
 					Title:       "Install Dynamo Platform",
 					Command:     "helm upgrade --install dynamo-platform " + DynamoPlatformChartURL + " --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
-					Description: "Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.",
+					Description: "Install the Dynamo platform operator v1.1.0-dev.1 with bundled Grove enabled by default. This chart includes the required CRDs.",
 				},
 			},
 		},

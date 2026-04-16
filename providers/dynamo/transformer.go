@@ -62,49 +62,6 @@ const (
 	// VLLMKVTransferConfig is the --kv-transfer-config value required by
 	// newer vLLM for NIXL-based disaggregated serving (replaces --connector).
 	VLLMKVTransferConfig = `{"kv_connector":"NixlConnector","kv_role":"kv_both"}`
-
-	// workerReadinessScript is a Python script used by the EPP init container
-	// to wait for at least one worker pod to become Ready before starting the
-	// EPP. This prevents the Dynamo FFI create_routers crash that occurs when
-	// no workers are discoverable yet (error code 3).
-	//
-	// The script polls the Kubernetes API via the pod's mounted service account
-	// token. LABEL_SELECTOR and POD_NAMESPACE are injected as env vars by the
-	// transformer so the script itself is deployment-agnostic. Python is used
-	// because the dynamo-frontend image does not ship curl or wget.
-	workerReadinessScript = `
-import json, os, ssl, time, urllib.request, urllib.parse, sys
-
-sa      = "/var/run/secrets/kubernetes.io/serviceaccount"
-token   = open(f"{sa}/token").read()
-ns      = os.environ["POD_NAMESPACE"]
-sel     = os.environ["LABEL_SELECTOR"]
-api     = "https://kubernetes.default.svc"
-url     = f"{api}/api/v1/namespaces/{ns}/pods?labelSelector={urllib.parse.quote(sel)}"
-headers = {"Authorization": f"Bearer {token}"}
-ctx     = ssl.create_default_context(cafile=f"{sa}/ca.crt")
-timeout_s, interval = 600, 5
-elapsed = 0
-
-print(f"Waiting for a worker pod matching selector '{sel}' in namespace '{ns}' to become Ready ...")
-sys.stdout.flush()
-while elapsed < timeout_s:
-    try:
-        req  = urllib.request.Request(url, headers=headers)
-        resp = json.loads(urllib.request.urlopen(req, context=ctx, timeout=10).read())
-        for pod in resp.get("items", []):
-            for c in pod.get("status", {}).get("conditions", []):
-                if c.get("type") == "Ready" and c.get("status") == "True":
-                    print(f"Worker pod(s) ready after {elapsed}s - starting EPP")
-                    sys.exit(0)
-    except Exception as e:
-        print(f"Poll error (will retry): {e}", file=sys.stderr)
-    time.sleep(interval)
-    elapsed += interval
-
-print(f"ERROR: timed out after {timeout_s}s waiting for workers")
-sys.exit(1)
-`
 )
 
 // DynamoOverrides contains Dynamo-specific override configuration
@@ -255,7 +212,7 @@ func (t *Transformer) buildServices(md *airunwayv1alpha1.ModelDeployment, overri
 	if gatewayEnabled {
 		// GAIE path: Gateway → EPP → worker frontendSidecar. No standalone
 		// Frontend — each worker's sidecar handles requests locally.
-		services["Epp"] = t.buildEPP(md, overrides, servingMode)
+		services["Epp"] = t.buildEPP(overrides, servingMode)
 	} else {
 		// Non-GAIE path: standalone Frontend service handles routing.
 		// No EPP or frontendSidecars needed.
@@ -354,9 +311,9 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 // The plugin set and env vars are mode-aware. Both modes set DYN_KV_CACHE_BLOCK_SIZE,
 // DYN_MODEL_NAME, and DYN_ENFORCE_DISAGG on the EPP container. The Dynamo KV scorer
 // FFI reads these at init time and create_routers fails ("code 5") without them on
-// Dynamo runtime 1.0.1. The shape mirrors the canonical examples in
+// Dynamo runtime 1.1.0-dev.1. The shape mirrors the canonical examples in
 // ai-dynamo/dynamo/examples/backends/vllm/deploy/gaie/{agg,disagg}.yaml.
-func (t *Transformer) buildEPP(md *airunwayv1alpha1.ModelDeployment, overrides *DynamoOverrides, servingMode airunwayv1alpha1.ServingMode) map[string]interface{} {
+func (t *Transformer) buildEPP(overrides *DynamoOverrides, servingMode airunwayv1alpha1.ServingMode) map[string]interface{} {
 	// Determine replicas
 	replicas := int64(DefaultEppReplicas)
 	if overrides.Epp != nil && overrides.Epp.Replicas != nil {
@@ -376,7 +333,7 @@ func (t *Transformer) buildEPP(md *airunwayv1alpha1.ModelDeployment, overrides *
 	// In aggregated mode, set decode_fallback=true to avoid "create_routers failed" errors.
 	// In disaggregated mode, set it to false to catch missing prefill workers.
 	decodeFallback := "true"
-	// DYN_ENFORCE_DISAGG is a no-op on 1.0.1 (the binding doesn't read it) but
+	// DYN_ENFORCE_DISAGG is a no-op on 1.1.0-dev.1 (the binding doesn't read it) but
 	// is the equivalent knob on Dynamo main with inverted semantics. We set
 	// both so this code is forward-compatible with a future runtime bump.
 	enforceDisagg := "false"
@@ -398,56 +355,13 @@ func (t *Transformer) buildEPP(md *airunwayv1alpha1.ModelDeployment, overrides *
 
 	plugins, schedulingProfiles := t.buildEPPPluginsAndProfiles(isDisagg)
 
-	// Build an init container that waits for at least one worker pod to
-	// become Ready before the EPP starts. The Dynamo FFI create_routers
-	// call fails (code 3) when no workers are discoverable, so we gate
-	// EPP startup on worker readiness to avoid CrashLoopBackOff.
-	labelSelector := fmt.Sprintf(
-		"nvidia.com/dynamo-component-type=%s,nvidia.com/dynamo-graph-deployment-name=%s",
-		ComponentTypeWorker, md.Name,
-	)
-	initContainer := map[string]interface{}{
-		"name":  "wait-for-workers",
-		"image": eppImage,
-		"command": []interface{}{
-			"python3", "-c", workerReadinessScript,
-		},
-		"env": []interface{}{
-			map[string]interface{}{
-				"name": "POD_NAMESPACE",
-				"valueFrom": map[string]interface{}{
-					"fieldRef": map[string]interface{}{
-						"fieldPath": "metadata.namespace",
-					},
-				},
-			},
-			map[string]interface{}{
-				"name":  "LABEL_SELECTOR",
-				"value": labelSelector,
-			},
-		},
-	}
-
 	epp := map[string]interface{}{
 		"componentType": ComponentTypeEpp,
 		"replicas":      replicas,
 		"extraPodSpec": map[string]interface{}{
-			"initContainers": []interface{}{initContainer},
 			"mainContainer": map[string]interface{}{
 				"image": eppImage,
 				"env":   env,
-				// Override the entrypoint to disable TLS on the ext_proc gRPC
-				// server. The operator sets args (--pool-name, etc.) separately,
-				// and Kubernetes concatenates command + args at runtime.
-				//
-				// --model-server-metrics-port tells the EPP to scrape vLLM
-				// prometheus metrics (gpu_cache_usage_perc, num_requests_waiting,
-				// etc.) from port 9090 on each worker instead of the
-				// InferencePool targetPort (8000, which serves the Dynamo
-				// sidecar-frontend, not vLLM metrics). Without this the EPP
-				// sees all-zero metrics and cannot make informed routing
-				// decisions. 9090 matches the worker's "system" container port.
-				"command": []interface{}{"/epp", "--model-server-metrics-port=9090"},
 			},
 		},
 		"eppConfig": map[string]interface{}{
