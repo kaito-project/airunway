@@ -1242,5 +1242,32 @@ var _ = Describe("ModelDeployment Webhook", func() {
 			_, err := validator.ValidateCreate(ctx, obj)
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("Should reject vllm with gpu.count=0 on dynamo (no CPU support)", func() {
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "dynamo"}
+			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 0}}
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("requires GPU"))
+		})
+
+		It("Should reject vllm with no resources on dynamo (no CPU support)", func() {
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "dynamo"}
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("requires GPU"))
+		})
+
+		It("Should accept llamacpp with no GPU on kaito (has CPU support)", func() {
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeLlamaCpp
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "kaito"}
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 })

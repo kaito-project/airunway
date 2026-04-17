@@ -258,12 +258,28 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 					string(engineType),
 					fmt.Sprintf("provider %s does not support engine %s", spec.Provider.Name, engineType),
 				))
-			} else if !caps.SupportsServingMode(engineType, servingMode) {
-				allErrs = append(allErrs, field.Invalid(
-					specPath.Child("serving", "mode"),
-					string(servingMode),
-					fmt.Sprintf("provider %s does not support %s mode for engine %s", spec.Provider.Name, servingMode, engineType),
-				))
+			} else {
+				// Check serving mode support
+				if !caps.SupportsServingMode(engineType, servingMode) {
+					allErrs = append(allErrs, field.Invalid(
+						specPath.Child("serving", "mode"),
+						string(servingMode),
+						fmt.Sprintf("provider %s does not support %s mode for engine %s", spec.Provider.Name, servingMode, engineType),
+					))
+				}
+
+				// Check GPU requirement: in aggregated mode with no GPU, the engine must support CPU
+				gpuCount := int32(0)
+				if spec.Resources != nil && spec.Resources.GPU != nil {
+					gpuCount = spec.Resources.GPU.Count
+				}
+				if servingMode == airunwayv1alpha1.ServingModeAggregated && gpuCount == 0 && !engineCap.CPUSupport {
+					allErrs = append(allErrs, field.Invalid(
+						specPath.Child("resources", "gpu", "count"),
+						gpuCount,
+						fmt.Sprintf("%s engine on provider %s requires GPU (set resources.gpu.count > 0)", engineType, spec.Provider.Name),
+					))
+				}
 			}
 		}
 		// If Get fails (CRD not installed, provider not found, etc.), skip —
