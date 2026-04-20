@@ -22,7 +22,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'bunx --bun vite preview --port 4173',
+    command: 'bun run build && bunx --bun vite preview --port 4173',
     port: 4173,
     reuseExistingServer: !process.env.CI,
   },
