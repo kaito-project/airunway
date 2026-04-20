@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -43,18 +44,25 @@ const (
 
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
+
+	rayServiceResource = "rayservices"
 )
 
 // ProviderConfigManager handles registration and heartbeat for the KubeRay provider
 type ProviderConfigManager struct {
-	client client.Client
+	client          client.Client
+	discoveryClient discovery.DiscoveryInterface
 }
 
 // NewProviderConfigManager creates a new provider config manager
-func NewProviderConfigManager(c client.Client) *ProviderConfigManager {
-	return &ProviderConfigManager{
+func NewProviderConfigManager(c client.Client, discoveryClients ...discovery.DiscoveryInterface) *ProviderConfigManager {
+	manager := &ProviderConfigManager{
 		client: c,
 	}
+	if len(discoveryClients) > 0 {
+		manager.discoveryClient = discoveryClients[0]
+	}
+	return manager
 }
 
 // GetProviderConfigSpec returns the InferenceProviderConfigSpec for KubeRay
@@ -187,12 +195,34 @@ func (m *ProviderConfigManager) UpdateStatus(ctx context.Context, ready bool) er
 
 // checkBackendCRDInstalled checks if the upstream RayService CRD is installed
 func (m *ProviderConfigManager) checkBackendCRDInstalled() bool {
+	if m.discoveryClient != nil {
+		return hasAPIResource(m.discoveryClient, RayAPIGroup, RayAPIVersion, rayServiceResource)
+	}
+
 	mapper := m.client.RESTMapper()
+	if mapper == nil {
+		return false
+	}
 	_, err := mapper.RESTMapping(schema.GroupKind{
 		Group: RayAPIGroup,
 		Kind:  RayServiceKind,
 	}, RayAPIVersion)
 	return err == nil
+}
+
+func hasAPIResource(discoveryClient discovery.DiscoveryInterface, group, version, resource string) bool {
+	resources, err := discoveryClient.ServerResourcesForGroupVersion(fmt.Sprintf("%s/%s", group, version))
+	if err != nil {
+		return false
+	}
+
+	for _, apiResource := range resources.APIResources {
+		if apiResource.Name == resource {
+			return true
+		}
+	}
+
+	return false
 }
 
 // StartHeartbeat starts a goroutine that periodically updates the provider heartbeat
