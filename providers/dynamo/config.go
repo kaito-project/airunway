@@ -24,7 +24,9 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -49,18 +51,25 @@ const (
 
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
+
+	dynamoGraphDeploymentResource = "dynamographdeployments"
 )
 
 // ProviderConfigManager handles registration and heartbeat for the Dynamo provider
 type ProviderConfigManager struct {
-	client client.Client
+	client          client.Client
+	discoveryClient discovery.DiscoveryInterface
 }
 
 // NewProviderConfigManager creates a new provider config manager
-func NewProviderConfigManager(c client.Client) *ProviderConfigManager {
-	return &ProviderConfigManager{
+func NewProviderConfigManager(c client.Client, discoveryClients ...discovery.DiscoveryInterface) *ProviderConfigManager {
+	manager := &ProviderConfigManager{
 		client: c,
 	}
+	if len(discoveryClients) > 0 {
+		manager.discoveryClient = discoveryClients[0]
+	}
+	return manager
 }
 
 // GetProviderConfigSpec returns the InferenceProviderConfigSpec for Dynamo
@@ -173,8 +182,44 @@ func (m *ProviderConfigManager) Register(ctx context.Context) error {
 		}
 	}
 
-	// Update status
-	return m.UpdateStatus(ctx, true)
+	// Update status — check if backend CRD is installed
+	ready := m.checkBackendCRDInstalled()
+	if !ready {
+		logger.Info("Backend CRD not installed, provider registered as not ready", "group", DynamoAPIGroup, "kind", DynamoGraphDeploymentKind)
+	}
+	return m.UpdateStatus(ctx, ready)
+}
+
+// checkBackendCRDInstalled checks if the upstream DynamoGraphDeployment CRD is installed
+func (m *ProviderConfigManager) checkBackendCRDInstalled() bool {
+	if m.discoveryClient != nil {
+		return hasAPIResource(m.discoveryClient, DynamoAPIGroup, DynamoAPIVersion, dynamoGraphDeploymentResource)
+	}
+
+	mapper := m.client.RESTMapper()
+	if mapper == nil {
+		return false
+	}
+	_, err := mapper.RESTMapping(schema.GroupKind{
+		Group: DynamoAPIGroup,
+		Kind:  DynamoGraphDeploymentKind,
+	}, DynamoAPIVersion)
+	return err == nil
+}
+
+func hasAPIResource(discoveryClient discovery.DiscoveryInterface, group, version, resource string) bool {
+	resources, err := discoveryClient.ServerResourcesForGroupVersion(fmt.Sprintf("%s/%s", group, version))
+	if err != nil {
+		return false
+	}
+
+	for _, apiResource := range resources.APIResources {
+		if apiResource.Name == resource {
+			return true
+		}
+	}
+
+	return false
 }
 
 // UpdateStatus updates the status of the InferenceProviderConfig
@@ -213,7 +258,11 @@ func (m *ProviderConfigManager) StartHeartbeat(ctx context.Context) {
 				logger.Info("Stopping heartbeat goroutine")
 				return
 			case <-ticker.C:
-				if err := m.UpdateStatus(ctx, true); err != nil {
+				ready := m.checkBackendCRDInstalled()
+				if !ready {
+					logger.Info("Backend CRD not installed, reporting not ready", "group", DynamoAPIGroup, "kind", DynamoGraphDeploymentKind)
+				}
+				if err := m.UpdateStatus(ctx, ready); err != nil {
 					logger.Error(err, "Failed to update heartbeat")
 				}
 			}
