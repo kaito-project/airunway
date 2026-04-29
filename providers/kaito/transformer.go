@@ -207,14 +207,6 @@ func (t *Transformer) buildLlamaCppTemplate(md *airunwayv1alpha1.ModelDeployment
 		container["env"] = envVars
 	}
 
-	// Add security context defaults
-	container["securityContext"] = map[string]interface{}{
-		"allowPrivilegeEscalation": false,
-		"capabilities": map[string]interface{}{
-			"drop": []interface{}{"ALL"},
-		},
-	}
-
 	template := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"labels": map[string]interface{}{
