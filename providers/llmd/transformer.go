@@ -330,6 +330,14 @@ func (t *Transformer) buildContainer(md *airunwayv1alpha1.ModelDeployment, image
 		container["env"] = envVars
 	}
 
+	// Security context defaults
+	container["securityContext"] = map[string]interface{}{
+		"allowPrivilegeEscalation": false,
+		"capabilities": map[string]interface{}{
+			"drop": []interface{}{"ALL"},
+		},
+	}
+
 	return container, nil
 }
 
