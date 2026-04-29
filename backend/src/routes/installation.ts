@@ -49,7 +49,7 @@ function extractProviderDetails(config: any) {
       version: c.version,
       namespace: c.namespace,
       createNamespace: c.createNamespace,
-      values: c.values,
+      values: c.values && typeof c.values === 'object' ? c.values : undefined,
     })),
     installationSteps: (installation.steps || []).map((s: any) => ({
       title: s.title,
@@ -57,6 +57,18 @@ function extractProviderDetails(config: any) {
       description: s.description,
     })),
   };
+}
+
+function normalizeInstallCharts(providerId: string, charts: ReturnType<typeof extractProviderDetails>['helmCharts']) {
+  if (providerId !== 'kaito') {
+    return charts;
+  }
+
+  return charts.map((chart) => (
+    chart.chart === 'kaito/workspace'
+      ? { ...chart, preInstallMissingCrds: true, skipCrds: true }
+      : chart
+  ));
 }
 
 const installation = new Hono()
@@ -138,20 +150,24 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
     const status = config.status || {};
+    const installationStatus = await kubernetesService.checkProviderInstallationStatus(
+      providerId,
+      status,
+      provider.name,
+    );
 
     return c.json({
       providerId: provider.id,
       providerName: provider.name,
-      installed: status.ready === true,
-      crdFound: true,
-      operatorRunning: status.ready === true,
+      installed: installationStatus.installed,
+      crdFound: installationStatus.crdFound,
+      operatorRunning: installationStatus.operatorRunning,
       version: status.version,
-      message: status.ready
-        ? `${provider.name} is installed and running`
-        : `${provider.name} is registered but not ready`,
+      message: installationStatus.message,
       installationSteps: provider.installationSteps,
-      helmCommands: helmService.getInstallCommands(provider.helmRepos, provider.helmCharts),
+      helmCommands: helmService.getInstallCommands(provider.helmRepos, charts),
     });
   })
   .get('/providers/:providerId/commands', async (c) => {
@@ -163,11 +179,12 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
 
     return c.json({
       providerId: provider.id,
       providerName: provider.name,
-      commands: helmService.getInstallCommands(provider.helmRepos, provider.helmCharts),
+      commands: helmService.getInstallCommands(provider.helmRepos, charts),
       steps: provider.installationSteps,
     });
   })
@@ -189,9 +206,10 @@ const installation = new Hono()
     }
 
     logger.info({ providerId }, `Starting installation of ${provider.name}`);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
     const result = await helmService.installProvider(
       provider.helmRepos,
-      provider.helmCharts,
+      charts,
       (data, stream) => { logger.debug({ stream, providerId }, data.trim()); }
     );
 

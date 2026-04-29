@@ -14,6 +14,16 @@ const MODEL_DEPLOYMENT_CRD = {
   kind: 'ModelDeployment',
 };
 
+const KAITO_WORKSPACE_CRD = 'workspaces.kaito.sh';
+const KAITO_NAMESPACE = 'kaito-workspace';
+const KAITO_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace';
+const DYNAMO_CRD = 'dynamographdeployments.nvidia.com';
+const DYNAMO_NAMESPACE = 'dynamo-system';
+const DYNAMO_OPERATOR_POD_SELECTOR = 'control-plane=controller-manager,app.kubernetes.io/name=dynamo-operator,app.kubernetes.io/instance=dynamo-platform';
+const KUBERAY_CRD = 'rayservices.ray.io';
+const KUBERAY_NAMESPACE = 'ray-system';
+const KUBERAY_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=kuberay-operator,app.kubernetes.io/instance=kuberay-operator';
+
 /**
  * GPU availability information from cluster nodes
  */
@@ -71,6 +81,36 @@ export interface InstallationStatus {
   message?: string;
 }
 
+interface RuntimeInstallationProbe {
+  providerName: string;
+  crdDisplayName?: string;
+  crdName: string;
+  operatorNamespace: string;
+  operatorPodSelector: string;
+}
+
+const RUNTIME_INSTALLATION_PROBES: Record<string, RuntimeInstallationProbe> = {
+  kaito: {
+    providerName: 'KAITO',
+    crdDisplayName: 'KAITO workspace CRD',
+    crdName: KAITO_WORKSPACE_CRD,
+    operatorNamespace: KAITO_NAMESPACE,
+    operatorPodSelector: KAITO_OPERATOR_POD_SELECTOR,
+  },
+  dynamo: {
+    providerName: 'Dynamo',
+    crdName: DYNAMO_CRD,
+    operatorNamespace: DYNAMO_NAMESPACE,
+    operatorPodSelector: DYNAMO_OPERATOR_POD_SELECTOR,
+  },
+  kuberay: {
+    providerName: 'KubeRay',
+    crdName: KUBERAY_CRD,
+    operatorNamespace: KUBERAY_NAMESPACE,
+    operatorPodSelector: KUBERAY_OPERATOR_POD_SELECTOR,
+  },
+};
+
 export function toPodStatus(pod: k8s.V1Pod): PodStatus {
   const initStatuses = pod.status?.initContainerStatuses || [];
   const containerStatuses = pod.status?.containerStatuses || [];
@@ -87,6 +127,13 @@ export function toPodStatus(pod: k8s.V1Pod): PodStatus {
     reason: waitingState?.reason || terminatedState?.reason || pod.status?.reason,
     message: waitingState?.message || terminatedState?.message || pod.status?.message,
   };
+}
+
+function isRunningAndReadyPod(pod: k8s.V1Pod): boolean {
+  const containerStatuses = pod.status?.containerStatuses || [];
+  return pod.status?.phase === 'Running'
+    && containerStatuses.length > 0
+    && containerStatuses.every((status) => status.ready);
 }
 
 class KubernetesService {
@@ -567,14 +614,15 @@ class KubernetesService {
           const name = item.metadata?.name || 'unknown';
           const status = item.status || {};
           const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+          const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName);
 
           runtimes.push({
             id: name,
             name: displayName,
-            installed: true,
-            healthy: status.ready === true,
+            installed: runtimeStatus.installed,
+            healthy: runtimeStatus.operatorRunning,
             version: status.version,
-            message: status.ready ? 'Provider ready' : 'Provider not ready',
+            message: runtimeStatus.message,
           });
         }
       } catch (error: any) {
@@ -732,6 +780,100 @@ class KubernetesService {
       gpuNodes: gpuAvailability.gpuNodes,
       message,
     };
+  }
+
+  /**
+   * Check whether the KAITO workspace operator is installed and running.
+   */
+  async checkKaitoInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('kaito');
+  }
+
+  async checkDynamoInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('dynamo');
+  }
+
+  async checkKubeRayInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('kuberay');
+  }
+
+  async checkProviderInstallationStatus(
+    providerId: string,
+    status?: { ready?: boolean },
+    providerName?: string,
+  ): Promise<InstallationStatus> {
+    switch (providerId) {
+      case 'kaito':
+        return this.checkKaitoInstallationStatus();
+      case 'dynamo':
+        return this.checkDynamoInstallationStatus();
+      case 'kuberay':
+        return this.checkKubeRayInstallationStatus();
+      default: {
+        const installed = status?.ready === true;
+        const displayName = providerName || providerId.charAt(0).toUpperCase() + providerId.slice(1);
+        return {
+          installed,
+          crdFound: installed,
+          operatorRunning: installed,
+          message: installed
+            ? `${displayName} is installed and running`
+            : `${displayName} is registered but not ready`,
+        };
+      }
+    }
+  }
+
+  private async checkOperatorBackedInstallationStatus(providerId: keyof typeof RUNTIME_INSTALLATION_PROBES): Promise<InstallationStatus> {
+    const probe = RUNTIME_INSTALLATION_PROBES[providerId];
+    const crdDisplayName = probe.crdDisplayName || `${probe.providerName} CRD`;
+    const crdFound = await this.checkCRDExists(probe.crdName);
+    const operatorRunning = await this.hasReadyOperatorPod(
+      probe.operatorNamespace,
+      probe.operatorPodSelector,
+      `check${probe.providerName.replace(/[^a-zA-Z0-9]/g, '')}OperatorPods`
+    );
+    const installed = crdFound;
+
+    let message: string;
+    if (crdFound && operatorRunning) {
+      message = `${crdDisplayName} found and ${probe.providerName} operator pods are ready`;
+    } else if (crdFound) {
+      message = `${crdDisplayName} found but no ready ${probe.providerName} operator pods were detected in ${probe.operatorNamespace}`;
+    } else {
+      message = `${crdDisplayName} not found`;
+    }
+
+    return {
+      installed,
+      crdFound,
+      operatorRunning,
+      message,
+    };
+  }
+
+  private async hasReadyOperatorPod(
+    namespace: string,
+    labelSelector: string,
+    operationName: string,
+  ): Promise<boolean> {
+    try {
+      const pods = await withRetry(
+        () => this.coreV1Api.listNamespacedPod(
+          namespace,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          labelSelector
+        ),
+        { operationName, maxRetries: 1 }
+      );
+      return pods.body.items.some((pod) => isRunningAndReadyPod(pod));
+    } catch {
+      // Namespace might not exist yet
+      return false;
+    }
   }
 
   /**
