@@ -60,7 +60,7 @@ describe('KubernetesService - Runtime Status', () => {
     expect(kaito).toBeDefined();
     expect(kaito?.installed).toBe(false);
     expect(kaito?.healthy).toBe(false);
-    expect(kaito?.version).toBe('0.9.0');
+    expect(kaito?.version).toBe('0.10.0');
     expect(kaito?.message).toBe('KAITO workspace CRD not found');
   });
 

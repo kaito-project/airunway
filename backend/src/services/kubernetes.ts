@@ -613,10 +613,7 @@ class KubernetesService {
         for (const item of items) {
           const name = item.metadata?.name || 'unknown';
           const status = item.status || {};
-          const installation = item.spec?.installation || {};
-          const displayName = installation.description
-            ? name.charAt(0).toUpperCase() + name.slice(1)
-            : name.charAt(0).toUpperCase() + name.slice(1);
+          const displayName = name.charAt(0).toUpperCase() + name.slice(1);
           const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName);
 
           runtimes.push({

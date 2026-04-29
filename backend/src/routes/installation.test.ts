@@ -6,69 +6,79 @@ import { mockServiceMethod } from '../test/helpers';
 import { mockInferenceProviderConfig } from '../test/fixtures';
 
 describe('Installation Provider Routes', () => {
+  function createDynamoInstallation(values: Record<string, unknown>) {
+    return {
+      description: 'NVIDIA Dynamo for high-performance GPU inference',
+      defaultNamespace: 'dynamo-system',
+      helmRepos: [],
+      helmCharts: [
+        {
+          name: 'dynamo-platform',
+          chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz',
+          namespace: 'dynamo-system',
+          createNamespace: true,
+          values,
+        },
+      ],
+      steps: [
+        {
+          title: 'Install Dynamo Platform',
+          command: 'helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true',
+          description: 'Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.',
+        },
+      ],
+    };
+  }
+
   function createDynamoProviderConfig() {
     return {
       ...mockInferenceProviderConfig,
-      metadata: { ...mockInferenceProviderConfig.metadata, name: 'dynamo' },
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'dynamo',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/installation': JSON.stringify(createDynamoInstallation({
+            'global.grove.install': true,
+          })),
+          'airunway.ai/documentation': 'https://github.com/ai-dynamo/dynamo',
+        },
+      },
       spec: {
         ...mockInferenceProviderConfig.spec,
-        installation: {
-          ...mockInferenceProviderConfig.spec.installation,
-          description: 'NVIDIA Dynamo for high-performance GPU inference',
-          defaultNamespace: 'dynamo-system',
-          helmRepos: [],
-          helmCharts: [
-            {
-              name: 'dynamo-platform',
-              chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz',
-              namespace: 'dynamo-system',
-              createNamespace: true,
-              values: {
-                'global.grove.install': true,
-              },
-            },
-          ],
-          steps: [
-            {
-              title: 'Install Dynamo Platform',
-              command: 'helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true',
-              description: 'Install the Dynamo platform operator v1.0.1 with bundled Grove enabled by default. This chart includes the required CRDs.',
-            },
-          ],
-        },
       },
     };
   }
 
   function createDynamoProviderConfigWithNestedValues() {
-    const config = createDynamoProviderConfig();
     return {
-      ...config,
-      spec: {
-        ...config.spec,
-        installation: {
-          ...config.spec.installation,
-          helmCharts: [
-            {
-              ...config.spec.installation.helmCharts[0],
-              values: {
-                'dynamo-operator': {
-                  controllerManager: {
-                    kubeRbacProxy: {
-                      image: {
-                        repository: 'quay.io/brancz/kube-rbac-proxy',
-                        tag: 'v0.15.0',
-                      },
-                    },
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'dynamo',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/installation': JSON.stringify(createDynamoInstallation({
+            'dynamo-operator': {
+              controllerManager: {
+                kubeRbacProxy: {
+                  image: {
+                    repository: 'quay.io/brancz/kube-rbac-proxy',
+                    tag: 'v0.15.0',
                   },
                 },
               },
             },
-          ],
+          })),
+          'airunway.ai/documentation': 'https://github.com/ai-dynamo/dynamo',
         },
+      },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
       },
     };
   }
+
 
   const restores: Array<() => void> = [];
 
@@ -108,7 +118,7 @@ describe('Installation Provider Routes', () => {
       expect(data.installed).toBe(true);
       expect(data.crdFound).toBe(true);
       expect(data.operatorRunning).toBe(false);
-      expect(data.version).toBe('0.9.0');
+      expect(data.version).toBe('0.10.0');
       expect(data.message).toBe('KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace');
       expect(data.installationSteps).toBeDefined();
       expect(data.helmCommands).toBeDefined();
@@ -217,20 +227,24 @@ describe('Installation Provider Routes', () => {
     });
 
     test('includes helm values in generated commands when present', async () => {
+      const baseInstallation = JSON.parse(mockInferenceProviderConfig.metadata.annotations['airunway.ai/installation']);
       const configWithValues = {
         ...mockInferenceProviderConfig,
-        spec: {
-          ...mockInferenceProviderConfig.spec,
-          installation: {
-            ...mockInferenceProviderConfig.spec.installation,
-            helmCharts: [
-              {
-                ...mockInferenceProviderConfig.spec.installation.helmCharts[0],
-                values: {
-                  'global.grove.install': true,
+        metadata: {
+          ...mockInferenceProviderConfig.metadata,
+          annotations: {
+            ...mockInferenceProviderConfig.metadata.annotations,
+            'airunway.ai/installation': JSON.stringify({
+              ...baseInstallation,
+              helmCharts: [
+                {
+                  ...baseInstallation.helmCharts[0],
+                  values: {
+                    'global.grove.install': true,
+                  },
                 },
-              },
-            ],
+              ],
+            }),
           },
         },
       };
