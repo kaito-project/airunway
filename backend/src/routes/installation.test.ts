@@ -469,6 +469,33 @@ describe('Installation Provider Routes', () => {
       expect(installCharts[0].preInstallMissingCrds).toBeUndefined();
       expect(installCharts[0].skipCrds).toBeUndefined();
     });
+
+    test('returns clear installer RBAC guidance when provider install is forbidden', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => mockInferenceProviderConfig),
+        mockServiceMethod(helmService, 'checkHelmAvailable', async () => ({ available: true, version: '3.14.0' })),
+        mockServiceMethod(helmService, 'installProvider', async () => ({
+          success: false,
+          results: [{
+            step: 'install-kaito-workspace',
+            result: {
+              success: false,
+              stdout: '',
+              stderr: 'customresourcedefinitions.apiextensions.k8s.io is forbidden: cannot create resource "customresourcedefinitions"',
+              exitCode: 1,
+            },
+          }],
+        })),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/install', { method: 'POST' });
+      expect(res.status).toBe(403);
+
+      const data = await res.json();
+      expect(data.error.message).toContain('Automatic installation requires elevated installer permissions');
+      expect(data.error.message).toContain('optional dashboard installer permissions manifest');
+    });
+
   });
 
   // ==========================================================================

@@ -55,14 +55,23 @@ function extractProviderDetails(config: any) {
       name: r.name,
       url: r.url,
     })),
-    helmCharts: (installation.helmCharts || []).map((c: any): ProviderHelmChartDetails => ({
-      name: c.name,
-      chart: c.chart,
-      version: c.version,
-      namespace: c.namespace,
-      createNamespace: c.createNamespace,
-      values: c.values && typeof c.values === 'object' && !Array.isArray(c.values) ? c.values as Record<string, unknown> : undefined,
-    })),
+    helmCharts: (installation.helmCharts || []).map((c: any): ProviderHelmChartDetails => {
+      const values = c.values && typeof c.values === 'object' && !Array.isArray(c.values)
+        ? c.values as Record<string, unknown>
+        : undefined;
+      if (c.values !== undefined && values === undefined) {
+        logger.warn({ provider: name, chart: c.name }, 'Ignoring malformed Helm chart values in provider installation metadata');
+      }
+
+      return {
+        name: c.name,
+        chart: c.chart,
+        version: c.version,
+        namespace: c.namespace,
+        createNamespace: c.createNamespace,
+        values,
+      };
+    }),
     installationSteps: (installation.steps || []).map((s: any) => ({
       title: s.title,
       command: s.command,
@@ -89,6 +98,24 @@ function normalizeInstallCharts(providerId: string, charts: ProviderHelmChartDet
         }
       : chart
   ));
+}
+
+const INSTALLER_PERMISSION_GUIDANCE = 'Automatic installation requires elevated installer permissions. Ask an admin to apply the optional dashboard installer permissions manifest (deploy/dashboard-installer-rbac.yaml) or run the commands manually.';
+
+function isInstallerPermissionError(output?: string): boolean {
+  if (!output) return false;
+  return /\bforbidden\b|cannot (?:create|update|patch|delete|get|list|watch)|is forbidden|attempting to grant RBAC permissions not currently held|requires.*(?:permission|privilege)|\b(?:bind|escalate)\b/i.test(output);
+}
+
+function installationFailureStatus(output?: string): 403 | 500 {
+  return isInstallerPermissionError(output) ? 403 : 500;
+}
+
+function installationFailureMessage(prefix: string, output?: string): string {
+  const detail = output?.trim() || 'Unknown error';
+  return isInstallerPermissionError(detail)
+    ? `${prefix}: ${INSTALLER_PERMISSION_GUIDANCE} Details: ${detail}`
+    : `${prefix}: ${detail}`;
 }
 
 const installation = new Hono()
@@ -152,8 +179,9 @@ const installation = new Hono()
       });
     } else {
       const failedStep = result.results.find((r) => !r.result.success);
-      throw new HTTPException(500, {
-        message: `Installation failed at step "${failedStep?.step}": ${failedStep?.result.stderr}`,
+      const output = failedStep?.result.stderr || failedStep?.result.stdout;
+      throw new HTTPException(installationFailureStatus(output), {
+        message: installationFailureMessage(`Installation failed at step "${failedStep?.step}"`, output),
       });
     }
   })
@@ -256,8 +284,9 @@ const installation = new Hono()
       });
     } else {
       const failedStep = result.results.find((r) => !r.result.success);
-      throw new HTTPException(500, {
-        message: `Installation failed at step "${failedStep?.step}": ${failedStep?.result.stderr}`,
+      const output = failedStep?.result.stderr || failedStep?.result.stdout;
+      throw new HTTPException(installationFailureStatus(output), {
+        message: installationFailureMessage(`Installation failed at step "${failedStep?.step}"`, output),
       });
     }
   })
@@ -292,11 +321,13 @@ const installation = new Hono()
     }
 
     const allSuccess = results.every(r => r.success);
+    const failedResult = results.find(r => !r.success);
+    const failedOutput = failedResult?.error || failedResult?.output;
     return c.json({
       success: allSuccess,
       message: allSuccess
         ? `${provider.name} uninstalled successfully`
-        : `${provider.name} uninstall completed with errors`,
+        : installationFailureMessage(`${provider.name} uninstall failed`, failedOutput),
       results,
     });
   })
@@ -347,8 +378,9 @@ const installation = new Hono()
     });
 
     if (!gwResult.success) {
-      throw new HTTPException(500, {
-        message: `Failed to install Gateway API CRDs: ${gwResult.stderr}`,
+      const output = gwResult.stderr || gwResult.stdout;
+      throw new HTTPException(installationFailureStatus(output), {
+        message: installationFailureMessage('Failed to install Gateway API CRDs', output),
       });
     }
 
@@ -365,8 +397,9 @@ const installation = new Hono()
     });
 
     if (!gaieResult.success) {
-      throw new HTTPException(500, {
-        message: `Failed to install Inference Extension CRDs: ${gaieResult.stderr}`,
+      const output = gaieResult.stderr || gaieResult.stdout;
+      throw new HTTPException(installationFailureStatus(output), {
+        message: installationFailureMessage('Failed to install Inference Extension CRDs', output),
       });
     }
 

@@ -365,6 +365,9 @@ bun run build:backend   # Compile TypeScript
 bun run compile         # Build single binary executable
 ```
 
+The backend pins TypeScript to `5.3.3` to keep Bun/import-meta compilation behavior stable.
+Do not widen that version without validating `bun run build:backend` and `bun run compile`.
+
 #### Backend Testing
 
 ```bash

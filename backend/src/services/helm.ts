@@ -48,6 +48,7 @@ function valuesToSetJsonArgs(values: Record<string, unknown>): string[] {
   return args;
 }
 
+// POSIX single-quote escaping: foo'bar -> 'foo'"'"'bar'.
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -434,7 +435,7 @@ class HelmService {
       this.buildPullChartCommand(chart, `"${chartDirRef}"`),
       `${chartPathVar}=$(find "${chartDirRef}" -mindepth 1 -maxdepth 1 -type d -print -quit)`,
       `test -n "${chartPathRef}"`,
-      `find "${chartPathRef}" -type f -path "*/crds/*.yaml" -print -o -type f -path "*/crds/*.yml" -print | sort | while IFS= read -r crd; do if [ -z "$(kubectl get -f "$crd" --ignore-not-found -o name)" ]; then kubectl apply --server-side --force-conflicts -f "$crd"; fi; done`,
+      `find "${chartPathRef}" -type f -path "*/crds/*.yaml" -print -o -type f -path "*/crds/*.yml" -print | sort | while IFS= read -r crd; do missing=0; for crd_name in $(kubectl create --dry-run=client -f "$crd" -o name); do if [ -z "$(kubectl get "$crd_name" --ignore-not-found -o name)" ]; then missing=1; fi; done; if [ "$missing" = "1" ]; then kubectl apply --server-side --force-conflicts -f "$crd"; fi; done`,
       this.buildInstallCommand(chart, `"${chartPathRef}"`, false),
       `rm -rf "${chartDirRef}"`,
     ].join(' && ');

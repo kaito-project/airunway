@@ -101,8 +101,6 @@ spec:
                       type: string
                     type: array
                 type: object
-
-
               selectionRules:
                 description: |-
                   selectionRules defines rules for auto-selecting this provider

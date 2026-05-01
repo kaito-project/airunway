@@ -23,16 +23,18 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
-  function mockOperatorPods(namespace: string, selector: string, items: any[]) {
+  function mockOperatorPods(namespace: string, selector: string, items: any[], allNamespaceItems: any[] = []) {
     const service = kubernetesService as any;
-    const original = service.coreV1Api.listNamespacedPod;
+    const originalNamespaced = service.coreV1Api.listNamespacedPod;
+    const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
     service.coreV1Api.listNamespacedPod = async (...args: any[]) => {
       expect(args[0]).toBe(namespace);
-      expect(args[5]).toBe(selector);
-      return { body: { items } };
+      return { body: { items: args[5] === selector ? items : [] } };
     };
+    service.coreV1Api.listPodForAllNamespaces = async () => ({ body: { items: allNamespaceItems } });
     restores.push(() => {
-      service.coreV1Api.listNamespacedPod = original;
+      service.coreV1Api.listNamespacedPod = originalNamespaced;
+      service.coreV1Api.listPodForAllNamespaces = originalAllNamespaces;
     });
   }
 
@@ -132,7 +134,7 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.installed).toBe(false);
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(false);
-    expect(status.message).toBe('KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace');
+    expect(status.message).toBe('KAITO workspace CRD found but no ready KAITO operator pods were detected in kaito-workspace or matching known provider labels');
   });
 
   test('reports KAITO as installed when a ready operator pod is found', async () => {
@@ -204,7 +206,7 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.installed).toBe(false);
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(false);
-    expect(status.message).toBe('Dynamo CRD found but no ready Dynamo operator pods were detected in dynamo-system');
+    expect(status.message).toBe('Dynamo CRD found but no ready Dynamo operator pods were detected in dynamo-system or matching known provider labels');
   });
 
 
@@ -229,7 +231,55 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.installed).toBe(false);
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(false);
-    expect(status.message).toBe('KubeRay CRD found but no ready KubeRay operator pods were detected in ray-system');
+    expect(status.message).toBe('KubeRay CRD found but no ready KubeRay operator pods were detected in ray-system or matching known provider labels');
+  });
+
+
+  test('finds KubeRay operator pods installed in a custom namespace with standard labels', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'rayservices.ray.io'),
+    );
+    mockOperatorPods('ray-system', kuberayOperatorSelector, [], [
+      {
+        metadata: { namespace: 'ray-ops', name: 'kuberay-operator-ready' },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: true, restartCount: 0 },
+          ],
+        },
+      },
+    ]);
+
+    const status = await kubernetesService.checkKubeRayInstallationStatus();
+
+    expect(status.installed).toBe(true);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(true);
+    expect(status.message).toBe('KubeRay CRD found and KubeRay operator pods are ready in ray-ops');
+  });
+
+  test('surfaces operator pod probe errors instead of reporting pods as simply not ready', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
+    );
+    const service = kubernetesService as any;
+    const originalNamespaced = service.coreV1Api.listNamespacedPod;
+    const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
+    const forbidden = { statusCode: 403, body: { message: 'pods is forbidden' } };
+    service.coreV1Api.listNamespacedPod = async () => { throw forbidden; };
+    service.coreV1Api.listPodForAllNamespaces = async () => { throw forbidden; };
+    restores.push(() => {
+      service.coreV1Api.listNamespacedPod = originalNamespaced;
+      service.coreV1Api.listPodForAllNamespaces = originalAllNamespaces;
+    });
+
+    const status = await kubernetesService.checkKaitoInstallationStatus();
+
+    expect(status.installed).toBe(false);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(false);
+    expect(status.message).toBe('KAITO workspace CRD found but KAITO operator pods could not be checked: pods is forbidden');
   });
 
   test('reports KubeRay as installed when a ready operator pod is found', async () => {

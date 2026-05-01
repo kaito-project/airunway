@@ -396,7 +396,8 @@ describe('HelmService - getInstallCommands Logic', () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]).toContain('KAITO_WORKSPACE_CHART_DIR=$(mktemp -d)');
     expect(commands[0]).toContain('helm pull kaito/workspace --untar --untardir "$KAITO_WORKSPACE_CHART_DIR" --version 0.9.0');
-    expect(commands[0]).toContain('kubectl get -f "$crd" --ignore-not-found -o name');
+    expect(commands[0]).toContain('kubectl create --dry-run=client -f "$crd" -o name');
+    expect(commands[0]).toContain('kubectl get "$crd_name" --ignore-not-found -o name');
     expect(commands[0]).toContain('kubectl apply --server-side --force-conflicts -f "$crd"');
     expect(commands[0]).toContain('helm install kaito-workspace "$KAITO_WORKSPACE_CHART_PATH"');
     expect(commands[0]).toContain('--skip-crds');
