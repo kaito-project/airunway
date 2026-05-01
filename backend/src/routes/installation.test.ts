@@ -79,6 +79,47 @@ describe('Installation Provider Routes', () => {
     };
   }
 
+  function createKubeRayProviderConfig() {
+    return {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'kuberay',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/installation': JSON.stringify({
+            description: 'Ray Serve via KubeRay',
+            defaultNamespace: 'ray-system',
+            helmRepos: [],
+            helmCharts: [
+              {
+                name: 'kuberay-operator',
+                chart: 'kuberay/kuberay-operator',
+                version: '1.3.0',
+                namespace: 'ray-system',
+                createNamespace: true,
+              },
+            ],
+            steps: [],
+          }),
+          'airunway.ai/documentation': 'https://github.com/ray-project/kuberay',
+        },
+      },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
+      },
+    };
+  }
+
+  const configWithoutInstallation = {
+    ...mockInferenceProviderConfig,
+    metadata: {
+      ...mockInferenceProviderConfig.metadata,
+      annotations: {
+        'airunway.ai/documentation': mockInferenceProviderConfig.metadata.annotations['airunway.ai/documentation'],
+      },
+    },
+  };
 
   const restores: Array<() => void> = [];
 
@@ -123,7 +164,7 @@ describe('Installation Provider Routes', () => {
       expect(data.installationSteps).toBeDefined();
       expect(data.helmCommands).toBeDefined();
       expect(data.helmCommands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
-      expect(data.helmCommands.some((command: string) => command.includes('kubectl apply -f "$crd"'))).toBe(true);
+      expect(data.helmCommands.some((command: string) => command.includes('kubectl apply --server-side --force-conflicts -f "$crd"'))).toBe(true);
       expect(data.helmCommands.some((command: string) => command.includes('--skip-crds'))).toBe(true);
     });
 
@@ -174,7 +215,31 @@ describe('Installation Provider Routes', () => {
       expect(data.version).toBe('1.2.3');
       expect(data.message).toBe('Dynamo CRD not found');
       expect(data.helmCommands).toHaveLength(1);
+      expect(data.helmCommands[0]).toContain('helm pull https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz');
+      expect(data.helmCommands[0]).toContain('kubectl apply --server-side --force-conflicts -f "$crd"');
+      expect(data.helmCommands[0]).toContain('--skip-crds');
+      expect(data.helmCommands[0]).toContain('--force-conflicts');
       expect(data.helmCommands[0]).toContain('global.grove.install=true');
+    });
+
+    test('marks providers without installation metadata as not installable', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithoutInstallation),
+        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+          installed: false,
+          crdFound: false,
+          operatorRunning: false,
+          message: 'KAITO workspace CRD not found',
+        })),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/status');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.installable).toBe(false);
+      expect(data.helmCommands).toHaveLength(0);
+      expect(data.message).toBe('No installation metadata found for provider kaito');
     });
 
     test('returns 404 for unknown provider', async () => {
@@ -205,12 +270,12 @@ describe('Installation Provider Routes', () => {
       expect(data.providerName).toBe('Kaito');
       expect(data.commands).toBeDefined();
       expect(data.commands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
-      expect(data.commands.some((command: string) => command.includes('kubectl apply -f "$crd"'))).toBe(true);
+      expect(data.commands.some((command: string) => command.includes('kubectl apply --server-side --force-conflicts -f "$crd"'))).toBe(true);
       expect(data.commands.some((command: string) => command.includes('--skip-crds'))).toBe(true);
       expect(data.steps).toBeDefined();
     });
 
-    test('preserves chart values in generated commands for non-KAITO providers', async () => {
+    test('preserves chart values in generated Dynamo CRD-safe commands', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => createDynamoProviderConfigWithNestedValues()),
       );
@@ -222,6 +287,10 @@ describe('Installation Provider Routes', () => {
       expect(data.providerId).toBe('dynamo');
       expect(data.providerName).toBe('Dynamo');
       expect(data.commands).toHaveLength(1);
+      expect(data.commands[0]).toContain('helm pull https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz');
+      expect(data.commands[0]).toContain('kubectl apply --server-side --force-conflicts -f "$crd"');
+      expect(data.commands[0]).toContain('--skip-crds');
+      expect(data.commands[0]).toContain('--force-conflicts');
       expect(data.commands[0]).toContain("--set-json 'dynamo-operator=");
       expect(data.commands[0]).toContain('"tag":"v0.15.0"');
     });
@@ -294,6 +363,34 @@ describe('Installation Provider Routes', () => {
       expect(res.status).toBe(400);
     });
 
+    test('rejects providers without installation metadata before checking helm', async () => {
+      let helmChecks = 0;
+      let installAttempts = 0;
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithoutInstallation),
+        mockServiceMethod(helmService, 'checkHelmAvailable', async () => {
+          helmChecks += 1;
+          return { available: true, version: '3.14.0' };
+        }),
+        mockServiceMethod(helmService, 'installProvider', async () => {
+          installAttempts += 1;
+          return {
+            success: true,
+            results: [{ step: 'install', result: { success: true, stdout: 'ok', stderr: '' } }],
+          };
+        }),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/install', { method: 'POST' });
+      expect(res.status).toBe(400);
+
+      const data = await res.json();
+      expect(data.error.message).toContain('No installation metadata found for provider kaito');
+      expect(helmChecks).toBe(0);
+      expect(installAttempts).toBe(0);
+    });
+
     test('returns 200 on successful install', async () => {
       let installCharts: any[] = [];
 
@@ -321,12 +418,12 @@ describe('Installation Provider Routes', () => {
       expect(installCharts[0].skipCrds).toBe(true);
     });
 
-    test('keeps standard chart install behavior for non-KAITO providers', async () => {
+    test('uses CRD-safe chart install behavior for Dynamo', async () => {
       let installCharts: any[] = [];
-      const nonKaitoConfig = createDynamoProviderConfig();
+      const dynamoConfig = createDynamoProviderConfig();
 
       restores.push(
-        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => nonKaitoConfig),
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => dynamoConfig),
         mockServiceMethod(helmService, 'checkHelmAvailable', async () => ({ available: true, version: '3.14.0' })),
         mockServiceMethod(helmService, 'installProvider', async (_repos, charts) => {
           installCharts = charts as any[];
@@ -342,9 +439,35 @@ describe('Installation Provider Routes', () => {
 
       expect(installCharts).toHaveLength(1);
       expect(installCharts[0].chart).toBe('https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz');
+      expect(installCharts[0].preInstallMissingCrds).toBe(true);
+      expect(installCharts[0].skipCrds).toBe(true);
+      expect(installCharts[0].forceConflicts).toBe(true);
+      expect(installCharts[0].values?.['global.grove.install']).toBe(true);
+    });
+
+    test('keeps standard chart install behavior for non-KAITO non-Dynamo providers', async () => {
+      let installCharts: any[] = [];
+      const kuberayConfig = createKubeRayProviderConfig();
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => kuberayConfig),
+        mockServiceMethod(helmService, 'checkHelmAvailable', async () => ({ available: true, version: '3.14.0' })),
+        mockServiceMethod(helmService, 'installProvider', async (_repos, charts) => {
+          installCharts = charts as any[];
+          return {
+            success: true,
+            results: [{ step: 'install', result: { success: true, stdout: 'ok', stderr: '' } }],
+          };
+        }),
+      );
+
+      const res = await app.request('/api/installation/providers/kuberay/install', { method: 'POST' });
+      expect(res.status).toBe(200);
+
+      expect(installCharts).toHaveLength(1);
+      expect(installCharts[0].chart).toBe('kuberay/kuberay-operator');
       expect(installCharts[0].preInstallMissingCrds).toBeUndefined();
       expect(installCharts[0].skipCrds).toBeUndefined();
-      expect(installCharts[0].values?.['global.grove.install']).toBe(true);
     });
   });
 

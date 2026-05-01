@@ -397,7 +397,7 @@ describe('HelmService - getInstallCommands Logic', () => {
     expect(commands[0]).toContain('KAITO_WORKSPACE_CHART_DIR=$(mktemp -d)');
     expect(commands[0]).toContain('helm pull kaito/workspace --untar --untardir "$KAITO_WORKSPACE_CHART_DIR" --version 0.9.0');
     expect(commands[0]).toContain('kubectl get -f "$crd" --ignore-not-found -o name');
-    expect(commands[0]).toContain('kubectl apply -f "$crd"');
+    expect(commands[0]).toContain('kubectl apply --server-side --force-conflicts -f "$crd"');
     expect(commands[0]).toContain('helm install kaito-workspace "$KAITO_WORKSPACE_CHART_PATH"');
     expect(commands[0]).toContain('--skip-crds');
   });
@@ -465,9 +465,11 @@ describe('HelmService - Managed Chart CRDs', () => {
       if (args[0] === 'pull') {
         const untarDirIndex = args.indexOf('--untardir');
         const untarDir = args[untarDirIndex + 1];
+        mkdirSync(join(untarDir, 'workspace-0.9.0.tgz'), { recursive: true });
         const chartDir = join(untarDir, 'workspace');
         const crdsDir = join(chartDir, 'crds');
         mkdirSync(crdsDir, { recursive: true });
+        writeFileSync(join(chartDir, 'Chart.yaml'), 'apiVersion: v2\nname: workspace\nversion: 0.9.0\n', 'utf8');
         writeFileSync(
           join(crdsDir, 'workspaces.kaito.sh.yaml'),
           [
@@ -489,6 +491,20 @@ describe('HelmService - Managed Chart CRDs', () => {
             '  name: inferencepools.inference.networking.k8s.io',
             'spec:',
             '  group: inference.networking.k8s.io',
+          ].join('\n'),
+          'utf8',
+        );
+        const subchartCrdsDir = join(chartDir, 'charts', 'scheduler', 'crds');
+        mkdirSync(subchartCrdsDir, { recursive: true });
+        writeFileSync(
+          join(subchartCrdsDir, 'podgroups.scheduler.example.com.yaml'),
+          [
+            'apiVersion: apiextensions.k8s.io/v1',
+            'kind: CustomResourceDefinition',
+            'metadata:',
+            '  name: podgroups.scheduler.example.com',
+            'spec:',
+            '  group: scheduler.example.com',
           ].join('\n'),
           'utf8',
         );

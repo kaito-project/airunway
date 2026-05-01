@@ -11,6 +11,7 @@ rules:
       - pods
       - pods/log
       - services
+      - serviceaccounts
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Secrets and ConfigMaps (needed for HF tokens, config storage)
@@ -31,13 +32,14 @@ rules:
   - apiGroups: [""]
     resources:
       - namespaces
-    verbs: ["get", "list", "watch", "create"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 
   # Apps API - Deployments, ReplicaSets
   - apiGroups: ["apps"]
     resources:
       - deployments
       - replicasets
+      - statefulsets
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # AI Runway CRDs - ModelDeployments
@@ -53,11 +55,42 @@ rules:
       - inferenceproviderconfigs
     verbs: ["get", "list", "watch", "delete"]
 
-  # CRD management (needed for provider detection)
+  # CRD management (needed for provider detection and provider/platform installation)
   - apiGroups: ["apiextensions.k8s.io"]
     resources:
       - customresourcedefinitions
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # RBAC resources created by provider/platform Helm charts
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Allow installing charts that define their own RBAC permissions.
+  # Kubernetes requires these explicit verbs before a service account can create
+  # or bind Roles/ClusterRoles containing permissions it does not already hold.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - clusterroles
+    verbs: ["bind", "escalate"]
+
+  # Admission webhooks created by provider/platform Helm charts
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Policy resources created by provider/platform Helm charts
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # NVIDIA Dynamo CRDs
   - apiGroups: ["nvidia.com"]

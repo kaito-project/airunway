@@ -59,14 +59,22 @@ function extractProviderDetails(config: any) {
   };
 }
 
-function normalizeInstallCharts(providerId: string, charts: ReturnType<typeof extractProviderDetails>['helmCharts']) {
-  if (providerId !== 'kaito') {
-    return charts;
-  }
+function shouldPreInstallMissingCrds(providerId: string, chart: ReturnType<typeof extractProviderDetails>['helmCharts'][number]) {
+  return (
+    (providerId === 'kaito' && chart.chart === 'kaito/workspace')
+    || (providerId === 'dynamo' && chart.name === 'dynamo-platform')
+  );
+}
 
+function normalizeInstallCharts(providerId: string, charts: ReturnType<typeof extractProviderDetails>['helmCharts']) {
   return charts.map((chart) => (
-    chart.chart === 'kaito/workspace'
-      ? { ...chart, preInstallMissingCrds: true, skipCrds: true }
+    shouldPreInstallMissingCrds(providerId, chart)
+      ? {
+          ...chart,
+          preInstallMissingCrds: true,
+          skipCrds: true,
+          forceConflicts: providerId === 'dynamo' ? true : undefined,
+        }
       : chart
   ));
 }
@@ -151,6 +159,7 @@ const installation = new Hono()
 
     const provider = extractProviderDetails(config);
     const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+    const hasInstallMetadata = charts.length > 0;
     const status = config.status || {};
     const installationStatus = await kubernetesService.checkProviderInstallationStatus(
       providerId,
@@ -165,7 +174,10 @@ const installation = new Hono()
       crdFound: installationStatus.crdFound,
       operatorRunning: installationStatus.operatorRunning,
       version: status.version,
-      message: installationStatus.message,
+      message: hasInstallMetadata
+        ? installationStatus.message
+        : `No installation metadata found for provider ${providerId}`,
+      installable: hasInstallMetadata,
       installationSteps: provider.installationSteps,
       helmCommands: helmService.getInstallCommands(provider.helmRepos, charts),
     });
@@ -197,6 +209,13 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+
+    if (charts.length === 0) {
+      throw new HTTPException(400, {
+        message: `No installation metadata found for provider ${providerId}. Provider config is missing the airunway.ai/installation annotation or it contains no helmCharts.`,
+      });
+    }
 
     const helmStatus = await helmService.checkHelmAvailable();
     if (!helmStatus.available) {
@@ -206,7 +225,6 @@ const installation = new Hono()
     }
 
     logger.info({ providerId }, `Starting installation of ${provider.name}`);
-    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
     const result = await helmService.installProvider(
       provider.helmRepos,
       charts,

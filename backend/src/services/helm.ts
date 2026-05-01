@@ -27,6 +27,7 @@ export interface HelmChart {
   fetchUrl?: string;
   preCrdUrls?: string[];
   preInstallMissingCrds?: boolean;
+  forceConflicts?: boolean;
 }
 
 interface ChartCrdDocument {
@@ -407,6 +408,9 @@ class HelmService {
     if (chart.skipCrds) {
       cmd += ' --skip-crds';
     }
+    if (chart.forceConflicts) {
+      cmd += ' --force-conflicts';
+    }
     return cmd;
   }
 
@@ -430,7 +434,7 @@ class HelmService {
       this.buildPullChartCommand(chart, `"${chartDirRef}"`),
       `${chartPathVar}=$(find "${chartDirRef}" -mindepth 1 -maxdepth 1 -type d -print -quit)`,
       `test -n "${chartPathRef}"`,
-      `for crd in "${chartPathRef}/crds"/*.yaml; do [ -f "$crd" ] || continue; if [ -z "$(kubectl get -f "$crd" --ignore-not-found -o name)" ]; then kubectl apply -f "$crd"; fi; done`,
+      `find "${chartPathRef}" -type f -path "*/crds/*.yaml" -print -o -type f -path "*/crds/*.yml" -print | sort | while IFS= read -r crd; do if [ -z "$(kubectl get -f "$crd" --ignore-not-found -o name)" ]; then kubectl apply --server-side --force-conflicts -f "$crd"; fi; done`,
       this.buildInstallCommand(chart, `"${chartPathRef}"`, false),
       `rm -rf "${chartDirRef}"`,
     ].join(' && ');
@@ -469,7 +473,9 @@ class HelmService {
       return { success: false, result };
     }
 
-    const chartDir = readdirSync(tempDir, { withFileTypes: true }).find((entry) => entry.isDirectory());
+    const chartDir = readdirSync(tempDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .find((entry) => existsSync(join(tempDir, entry.name, 'Chart.yaml')));
     if (!chartDir) {
       const failure = {
         success: false,
@@ -489,39 +495,61 @@ class HelmService {
   }
 
   private getChartCrdDocuments(chartPath: string): ChartCrdDocument[] {
-    const crdsDir = join(chartPath, 'crds');
-    if (!existsSync(crdsDir)) {
-      return [];
-    }
+    const crdsDirs: string[] = [];
 
-    const crdDocuments: ChartCrdDocument[] = [];
-    const crdFiles = readdirSync(crdsDir)
-      .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
-      .sort();
+    const visit = (dir: string) => {
+      if (!existsSync(dir)) {
+        return;
+      }
 
-    for (const file of crdFiles) {
-      const filePath = join(crdsDir, file);
-      const documents = loadAll(readFileSync(filePath, 'utf8'));
-
-      for (const document of documents) {
-        if (!document || typeof document !== 'object') {
+      for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isDirectory()) {
           continue;
         }
 
-        const kind = (document as { kind?: string }).kind;
-        const metadata = (document as { metadata?: { name?: string } }).metadata;
-        if (kind !== 'CustomResourceDefinition' || !metadata?.name) {
+        const childPath = join(dir, entry.name);
+        if (entry.name === 'crds') {
+          crdsDirs.push(childPath);
           continue;
         }
 
-        crdDocuments.push({
-          name: metadata.name,
-          manifest: dump(document, { noRefs: true }),
-        });
+        visit(childPath);
+      }
+    };
+
+    visit(chartPath);
+
+    const crdDocuments = new Map<string, ChartCrdDocument>();
+
+    for (const crdsDir of crdsDirs) {
+      const crdFiles = readdirSync(crdsDir)
+        .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
+        .sort();
+
+      for (const file of crdFiles) {
+        const filePath = join(crdsDir, file);
+        const documents = loadAll(readFileSync(filePath, 'utf8'));
+
+        for (const document of documents) {
+          if (!document || typeof document !== 'object') {
+            continue;
+          }
+
+          const kind = (document as { kind?: string }).kind;
+          const metadata = (document as { metadata?: { name?: string } }).metadata;
+          if (kind !== 'CustomResourceDefinition' || !metadata?.name || crdDocuments.has(metadata.name)) {
+            continue;
+          }
+
+          crdDocuments.set(metadata.name, {
+            name: metadata.name,
+            manifest: dump(document, { noRefs: true }),
+          });
+        }
       }
     }
 
-    return crdDocuments;
+    return Array.from(crdDocuments.values());
   }
 
   private async ensureChartCrdsInstalled(
@@ -556,7 +584,7 @@ class HelmService {
       const manifestPath = join(tempDir, `crd-${i}-${stepName}.yaml`);
       writeFileSync(manifestPath, crd.manifest, 'utf8');
 
-      const applyResult = await this.executeKubectl(['apply', '-f', manifestPath], onStream);
+      const applyResult = await this.executeKubectl(['apply', '--server-side', '--force-conflicts', '-f', manifestPath], onStream);
       results.push({ step: `apply-crd-${stepName}`, result: applyResult });
       if (!applyResult.success) {
         return { success: false, results };
@@ -616,11 +644,15 @@ class HelmService {
       args.push('--skip-crds');
     }
 
+    if (chart.forceConflicts) {
+      args.push('--force-conflicts');
+    }
+
     // Don't use --wait - return immediately after submitting the install
     // The caller should poll for installation status updates
     // Timeout still applies to the install command itself
     
-    logger.info({ chart: chart.name, namespace: chart.namespace, version: chart.version, values: chart.values, skipCrds: chart.skipCrds }, `Installing helm chart: ${chart.name}`);
+    logger.info({ chart: chart.name, namespace: chart.namespace, version: chart.version, values: chart.values, skipCrds: chart.skipCrds, forceConflicts: chart.forceConflicts }, `Installing helm chart: ${chart.name}`);
 
     return this.execute(args, onStream);
   }
