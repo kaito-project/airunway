@@ -119,14 +119,26 @@ func (t *Transformer) buildSpec(md *airunwayv1alpha1.ModelDeployment) (map[strin
 		replicas = int64(md.Spec.Scaling.Replicas)
 	}
 
+	var llmConfig strings.Builder
+	fmt.Fprintf(&llmConfig, "        - model_loading_config:\n")
+	fmt.Fprintf(&llmConfig, "            model_id: %s\n", md.Spec.Model.ID)
+	fmt.Fprintf(&llmConfig, "            model_source: %s\n", md.Spec.Model.ID)
+	if md.Spec.Engine.ContextLength != nil {
+		fmt.Fprintf(&llmConfig, "          engine_kwargs:\n")
+		fmt.Fprintf(&llmConfig, "            max_model_len: %d\n", *md.Spec.Engine.ContextLength)
+	}
+	fmt.Fprintf(&llmConfig, "          deployment_config:\n")
+	fmt.Fprintf(&llmConfig, "            autoscaling_config:\n")
+	fmt.Fprintf(&llmConfig, "              min_replicas: %d\n", replicas)
+	fmt.Fprintf(&llmConfig, "              max_replicas: %d\n", replicas)
+
 	serveConfig := fmt.Sprintf(`applications:
   - name: llm
     route_prefix: /
-    import_path: vllm_serve:deployment
-    deployments:
-      - name: VLLMDeployment
-        num_replicas: %d
-`, replicas)
+    import_path: ray.serve.llm:build_openai_app
+    args:
+      llm_configs:
+%s`, llmConfig.String())
 
 	spec["serveConfigV2"] = serveConfig
 
@@ -170,24 +182,6 @@ func (t *Transformer) buildHeadGroupSpec(md *airunwayv1alpha1.ModelDeployment) m
 		headMemory = md.Spec.Resources.Memory
 	}
 
-	// Build engine args
-	engineArgs := t.buildEngineArgs(md)
-
-	// Build env vars
-	envVars := []interface{}{
-		map[string]interface{}{
-			"name":  "MODEL_ID",
-			"value": md.Spec.Model.ID,
-		},
-		map[string]interface{}{
-			"name":  "VLLM_ENGINE_ARGS",
-			"value": engineArgs,
-		},
-	}
-
-	// Add HF_TOKEN from secret if specified
-	envVars = append(envVars, t.buildEnvVars(md)...)
-
 	headGroupSpec := map[string]interface{}{
 		"rayStartParams": map[string]interface{}{
 			"dashboard-host": "0.0.0.0",
@@ -209,7 +203,6 @@ func (t *Transformer) buildHeadGroupSpec(md *airunwayv1alpha1.ModelDeployment) m
 								"memory": headMemory,
 							},
 						},
-						"env": envVars,
 					},
 				},
 			},
@@ -244,11 +237,14 @@ func (t *Transformer) buildAggregatedWorkerGroup(md *airunwayv1alpha1.ModelDeplo
 		limits[gpuType] = fmt.Sprintf("%d", md.Spec.Resources.GPU.Count)
 	}
 
+	// Build env var with HF_TOKEN from secret if specified
+	envVars := append([]interface{}{}, t.buildEnvVars(md)...)
+
 	workerGroup := map[string]interface{}{
-		"replicas":    replicas,
-		"minReplicas": replicas,
-		"maxReplicas": replicas,
-		"groupName":   "gpu-workers",
+		"replicas":       replicas,
+		"minReplicas":    replicas,
+		"maxReplicas":    replicas,
+		"groupName":      "gpu-workers",
 		"rayStartParams": map[string]interface{}{},
 		"template": map[string]interface{}{
 			"metadata": map[string]interface{}{
@@ -264,6 +260,7 @@ func (t *Transformer) buildAggregatedWorkerGroup(md *airunwayv1alpha1.ModelDeplo
 						"resources": map[string]interface{}{
 							"limits": limits,
 						},
+						"env": envVars,
 					},
 				},
 			},
@@ -277,6 +274,9 @@ func (t *Transformer) buildAggregatedWorkerGroup(md *airunwayv1alpha1.ModelDeplo
 func (t *Transformer) buildDisaggregatedWorkerGroups(md *airunwayv1alpha1.ModelDeployment) []interface{} {
 	image := t.getImage(md)
 	var workerGroups []interface{}
+
+	// Build env var with HF_TOKEN from secret if specified
+	envVars := append([]interface{}{}, t.buildEnvVars(md)...)
 
 	// Build prefill worker group
 	if md.Spec.Scaling != nil && md.Spec.Scaling.Prefill != nil {
@@ -296,10 +296,10 @@ func (t *Transformer) buildDisaggregatedWorkerGroups(md *airunwayv1alpha1.ModelD
 		}
 
 		prefillGroup := map[string]interface{}{
-			"replicas":    int64(prefillSpec.Replicas),
-			"minReplicas": int64(prefillSpec.Replicas),
-			"maxReplicas": int64(prefillSpec.Replicas),
-			"groupName":   "prefill-workers",
+			"replicas":       int64(prefillSpec.Replicas),
+			"minReplicas":    int64(prefillSpec.Replicas),
+			"maxReplicas":    int64(prefillSpec.Replicas),
+			"groupName":      "prefill-workers",
 			"rayStartParams": map[string]interface{}{},
 			"template": map[string]interface{}{
 				"metadata": map[string]interface{}{
@@ -315,6 +315,7 @@ func (t *Transformer) buildDisaggregatedWorkerGroups(md *airunwayv1alpha1.ModelD
 							"resources": map[string]interface{}{
 								"limits": prefillLimits,
 							},
+							"env": envVars,
 						},
 					},
 				},
@@ -341,10 +342,10 @@ func (t *Transformer) buildDisaggregatedWorkerGroups(md *airunwayv1alpha1.ModelD
 		}
 
 		decodeGroup := map[string]interface{}{
-			"replicas":    int64(decodeSpec.Replicas),
-			"minReplicas": int64(decodeSpec.Replicas),
-			"maxReplicas": int64(decodeSpec.Replicas),
-			"groupName":   "decode-workers",
+			"replicas":       int64(decodeSpec.Replicas),
+			"minReplicas":    int64(decodeSpec.Replicas),
+			"maxReplicas":    int64(decodeSpec.Replicas),
+			"groupName":      "decode-workers",
 			"rayStartParams": map[string]interface{}{},
 			"template": map[string]interface{}{
 				"metadata": map[string]interface{}{
@@ -360,6 +361,7 @@ func (t *Transformer) buildDisaggregatedWorkerGroups(md *airunwayv1alpha1.ModelD
 							"resources": map[string]interface{}{
 								"limits": decodeLimits,
 							},
+							"env": envVars,
 						},
 					},
 				},
