@@ -23,15 +23,28 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
+  function podMatchesSelector(pod: any, selector?: string): boolean {
+    if (!selector) return true;
+    const labels = pod.metadata?.labels || {};
+    return selector.split(',').every((part) => {
+      const [key, value] = part.split('=');
+      return labels[key] === value;
+    });
+  }
+
   function mockOperatorPods(namespace: string, selector: string, items: any[], allNamespaceItems: any[] = []) {
     const service = kubernetesService as any;
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
     service.coreV1Api.listNamespacedPod = async (...args: any[]) => {
       expect(args[0]).toBe(namespace);
-      return { body: { items: args[5] === selector ? items : [] } };
+      const requestedSelector = args[5];
+      return { body: { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
     };
-    service.coreV1Api.listPodForAllNamespaces = async () => ({ body: { items: allNamespaceItems } });
+    service.coreV1Api.listPodForAllNamespaces = async (...args: any[]) => {
+      const requestedSelector = args[3];
+      return { body: { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
+    };
     restores.push(() => {
       service.coreV1Api.listNamespacedPod = originalNamespaced;
       service.coreV1Api.listPodForAllNamespaces = originalAllNamespaces;
@@ -209,6 +222,34 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.message).toBe('Dynamo CRD found but no ready Dynamo operator pods were detected in dynamo-system or matching known provider labels');
   });
 
+  test('does not treat unrelated controller-manager pods as Dynamo operator pods', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'dynamographdeployments.nvidia.com'),
+    );
+    mockOperatorPods('dynamo-system', dynamoOperatorSelector, [], [
+      {
+        metadata: {
+          namespace: 'kube-system',
+          name: 'unrelated-controller-manager',
+          labels: { 'control-plane': 'controller-manager' },
+        },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: true, restartCount: 0 },
+          ],
+        },
+      },
+    ]);
+
+    const status = await kubernetesService.checkDynamoInstallationStatus();
+
+    expect(status.installed).toBe(false);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(false);
+    expect(status.message).toBe('Dynamo CRD found but no ready Dynamo operator pods were detected in dynamo-system or matching known provider labels');
+  });
+
 
   test('reports KubeRay as not fully installed when the CRD exists but no ready operator pod is found', async () => {
     restores.push(
@@ -241,7 +282,7 @@ describe('KubernetesService - Runtime Status', () => {
     );
     mockOperatorPods('ray-system', kuberayOperatorSelector, [], [
       {
-        metadata: { namespace: 'ray-ops', name: 'kuberay-operator-ready' },
+        metadata: { namespace: 'ray-ops', name: 'kuberay-operator-ready', labels: { 'app.kubernetes.io/name': 'kuberay-operator' } },
         status: {
           phase: 'Running',
           containerStatuses: [

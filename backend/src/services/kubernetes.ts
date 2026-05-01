@@ -88,6 +88,7 @@ interface RuntimeInstallationProbe {
   operatorNamespace: string;
   operatorPodSelectors: string[];
   fallbackPodSelectors: string[];
+  crossNamespaceFallbackPodSelectors?: string[];
 }
 
 interface OperatorPodProbeResult {
@@ -121,6 +122,7 @@ const RUNTIME_INSTALLATION_PROBES: Record<string, RuntimeInstallationProbe> = {
     operatorNamespace: DYNAMO_NAMESPACE,
     operatorPodSelectors: [DYNAMO_OPERATOR_POD_SELECTOR],
     fallbackPodSelectors: ['app.kubernetes.io/name=dynamo-operator', 'control-plane=controller-manager'],
+    crossNamespaceFallbackPodSelectors: ['app.kubernetes.io/name=dynamo-operator'],
   },
   kuberay: {
     providerName: 'KubeRay',
@@ -854,7 +856,8 @@ class KubernetesService {
       probe.operatorNamespace,
       probe.operatorPodSelectors,
       probe.fallbackPodSelectors,
-      `check${probe.providerName.replace(/[^a-zA-Z0-9]/g, '')}OperatorPods`
+      `check${probe.providerName.replace(/[^a-zA-Z0-9]/g, '')}OperatorPods`,
+      probe.crossNamespaceFallbackPodSelectors
     );
     const operatorRunning = operatorProbe.ready;
     const installed = crdFound && operatorRunning;
@@ -886,8 +889,10 @@ class KubernetesService {
     operatorPodSelectors: string[],
     fallbackPodSelectors: string[],
     operationName: string,
+    crossNamespaceFallbackPodSelectors: string[] = fallbackPodSelectors,
   ): Promise<OperatorPodProbeResult> {
     const selectors = Array.from(new Set([...operatorPodSelectors, ...fallbackPodSelectors]));
+    const crossNamespaceSelectors = Array.from(new Set(crossNamespaceFallbackPodSelectors));
     let firstError: string | undefined;
 
     for (const selector of selectors) {
@@ -921,7 +926,7 @@ class KubernetesService {
       }
     }
 
-    for (const selector of fallbackPodSelectors) {
+    for (const selector of crossNamespaceSelectors) {
       try {
         const pods = await withRetry(
           () => this.coreV1Api.listPodForAllNamespaces(
