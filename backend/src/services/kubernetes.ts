@@ -573,24 +573,30 @@ class KubernetesService {
   }
 
   /**
-   * Read a version annotation from a CRD, if present.
+   * Read a CRD once and derive both existence and version from the same response.
    */
-  async getCRDVersionFromAnnotations(crdName: string, annotationKeys: string[]): Promise<string | undefined> {
+  private async getCRDStatusFromAnnotations(
+    crdName: string,
+    annotationKeys: string[]
+  ): Promise<{ installed: boolean; version?: string }> {
     try {
       const response = await withRetry(
         () => this.apiExtensionsApi.readCustomResourceDefinition(crdName),
-        { operationName: `getCRDVersionFromAnnotations:${crdName}`, maxRetries: 1 }
+        { operationName: `getCRDStatusFromAnnotations:${crdName}`, maxRetries: 1 }
       );
 
-      return extractCRDVersionFromAnnotations(response, annotationKeys);
+      return {
+        installed: true,
+        version: extractCRDVersionFromAnnotations(response, annotationKeys),
+      };
     } catch (error: any) {
       const statusCode = error?.statusCode || error?.response?.statusCode;
       if (statusCode !== 404) {
-        logger.debug({ error: error?.message || error, crdName }, 'Could not read CRD version annotation');
+        logger.debug({ error: error?.message || error, crdName }, 'Could not read CRD status');
       }
     }
 
-    return undefined;
+    return { installed: false };
   }
 
   /**
@@ -1660,17 +1666,15 @@ class KubernetesService {
   async checkGatewayCRDStatus(): Promise<GatewayCRDStatus> {
     const { PINNED_GAIE_VERSION, GAIE_CRD_URL, GATEWAY_API_CRD_URL } = await import('@airunway/shared');
 
-    const [
-      gatewayApiInstalled,
-      inferenceExtInstalled,
-      gatewayApiVersion,
-      inferenceExtVersion,
-    ] = await Promise.all([
-      this.checkCRDExists(GATEWAY_API_CRD_NAME),
-      this.checkCRDExists(INFERENCE_POOL_CRD_NAME),
-      this.getCRDVersionFromAnnotations(GATEWAY_API_CRD_NAME, GATEWAY_API_VERSION_ANNOTATIONS),
-      this.getCRDVersionFromAnnotations(INFERENCE_POOL_CRD_NAME, INFERENCE_EXTENSION_VERSION_ANNOTATIONS),
+    const [gatewayApiStatus, inferenceExtStatus] = await Promise.all([
+      this.getCRDStatusFromAnnotations(GATEWAY_API_CRD_NAME, GATEWAY_API_VERSION_ANNOTATIONS),
+      this.getCRDStatusFromAnnotations(INFERENCE_POOL_CRD_NAME, INFERENCE_EXTENSION_VERSION_ANNOTATIONS),
     ]);
+
+    const gatewayApiInstalled = gatewayApiStatus.installed;
+    const inferenceExtInstalled = inferenceExtStatus.installed;
+    const gatewayApiVersion = gatewayApiStatus.version;
+    const inferenceExtVersion = inferenceExtStatus.version;
 
     // Get live gateway status
     let gatewayAvailable = false;
