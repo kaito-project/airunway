@@ -2,6 +2,7 @@ package dynamo
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -43,6 +44,16 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(spec.SelectionRules) != 4 {
 		t.Fatalf("expected 4 selection rules, got %d", len(spec.SelectionRules))
 	}
+
+	if spec.Capabilities.Gateway == nil {
+		t.Fatal("gateway capabilities should not be nil")
+	}
+	if spec.Capabilities.Gateway.InferencePoolNamePattern != "{name}-pool" {
+		t.Errorf("expected inference pool name pattern to be '{name}-pool', got %s", spec.Capabilities.Gateway.InferencePoolNamePattern)
+	}
+	if spec.Capabilities.Gateway.InferencePoolNamespace != "{namespace}" {
+		t.Errorf("expected inference pool namespace to be '{namespace}', got %s", spec.Capabilities.Gateway.InferencePoolNamespace)
+	}
 }
 
 func TestGetInstallationInfo(t *testing.T) {
@@ -62,26 +73,21 @@ func TestGetInstallationInfo(t *testing.T) {
 	if info.HelmCharts[0].Chart != DynamoPlatformChartURL {
 		t.Errorf("expected platform chart URL %q, got %q", DynamoPlatformChartURL, info.HelmCharts[0].Chart)
 	}
-	groveInstall, ok := info.HelmCharts[0].Values["global.grove.install"]
-	if !ok {
-		t.Fatal("expected dynamo platform chart to enable Grove by default")
+	if info.HelmCharts[0].Values == nil || len(info.HelmCharts[0].Values.Raw) == 0 {
+		t.Fatal("expected dynamo platform chart to include Helm values")
 	}
-	if string(groveInstall.Raw) != "true" {
-		t.Fatalf("expected global.grove.install=true, got %s", string(groveInstall.Raw))
+	var values map[string]bool
+	if err := json.Unmarshal(info.HelmCharts[0].Values.Raw, &values); err != nil {
+		t.Fatalf("failed to decode Helm values: %v", err)
+	}
+	if !values["global.grove.install"] {
+		t.Fatalf("expected global.grove.install=true, got %s", string(info.HelmCharts[0].Values.Raw))
 	}
 	if len(info.Steps) != 1 {
 		t.Fatalf("expected 1 installation step, got %d", len(info.Steps))
 	}
 	if info.Steps[0].Command != "helm upgrade --install dynamo-platform "+DynamoPlatformChartURL+" --namespace dynamo-system --create-namespace --set-json global.grove.install=true" {
 		t.Fatalf("unexpected installation command: %s", info.Steps[0].Command)
-	}
-
-	if spec.Capabilities.Gateway.InferencePoolNamePattern != "{name}-pool" {
-		t.Errorf("expected inference pool name pattern to be '{name}-pool', got %s", spec.Capabilities.Gateway.InferencePoolNamePattern)
-	}
-
-	if spec.Capabilities.Gateway.InferencePoolNamespace != "{namespace}" {
-		t.Errorf("expected inference pool namespace to be '{namespace}', got %s", spec.Capabilities.Gateway.InferencePoolNamespace)
 	}
 }
 
@@ -128,6 +134,38 @@ func TestRegisterExisting(t *testing.T) {
 	err := mgr.Register(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegisterAnnotatesInstallationMetadata(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = airunwayv1alpha1.AddToScheme(scheme)
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&airunwayv1alpha1.InferenceProviderConfig{}).Build()
+	mgr := NewProviderConfigManager(c)
+
+	if err := mgr.Register(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	registered := &airunwayv1alpha1.InferenceProviderConfig{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: ProviderConfigName}, registered); err != nil {
+		t.Fatalf("failed to get registered provider config: %v", err)
+	}
+
+	if registered.Annotations[airunwayv1alpha1.AnnotationDocumentation] != ProviderDocumentation {
+		t.Fatalf("expected documentation annotation %q, got %q", ProviderDocumentation, registered.Annotations[airunwayv1alpha1.AnnotationDocumentation])
+	}
+
+	var installation airunwayv1alpha1.InstallationInfo
+	if err := json.Unmarshal([]byte(registered.Annotations[airunwayv1alpha1.AnnotationInstallation]), &installation); err != nil {
+		t.Fatalf("failed to decode installation annotation: %v", err)
+	}
+	if len(installation.HelmCharts) != 1 {
+		t.Fatalf("expected 1 annotated helm chart, got %d", len(installation.HelmCharts))
+	}
+	if installation.HelmCharts[0].Values == nil || len(installation.HelmCharts[0].Values.Raw) == 0 {
+		t.Fatal("expected annotated Helm chart to include values")
 	}
 }
 

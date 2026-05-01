@@ -27,6 +27,16 @@ const INFERENCE_EXTENSION_VERSION_ANNOTATIONS = [
   'app.kubernetes.io/version',
 ];
 
+const KAITO_WORKSPACE_CRD = 'workspaces.kaito.sh';
+const KAITO_NAMESPACE = 'kaito-workspace';
+const KAITO_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace';
+const DYNAMO_CRD = 'dynamographdeployments.nvidia.com';
+const DYNAMO_NAMESPACE = 'dynamo-system';
+const DYNAMO_OPERATOR_POD_SELECTOR = 'control-plane=controller-manager,app.kubernetes.io/name=dynamo-operator,app.kubernetes.io/instance=dynamo-platform';
+const KUBERAY_CRD = 'rayservices.ray.io';
+const KUBERAY_NAMESPACE = 'ray-system';
+const KUBERAY_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=kuberay-operator,app.kubernetes.io/instance=kuberay-operator';
+
 /**
  * GPU availability information from cluster nodes
  */
@@ -103,6 +113,58 @@ export interface InstallationStatus {
   message?: string;
 }
 
+interface RuntimeInstallationProbe {
+  providerName: string;
+  crdDisplayName?: string;
+  crdName: string;
+  operatorNamespace: string;
+  operatorPodSelectors: string[];
+  fallbackPodSelectors: string[];
+  crossNamespaceFallbackPodSelectors?: string[];
+}
+
+interface OperatorPodProbeResult {
+  ready: boolean;
+  namespace?: string;
+  selector?: string;
+  podName?: string;
+  error?: string;
+}
+
+function getK8sStatusCode(error: any): number | undefined {
+  return error?.statusCode || error?.response?.statusCode;
+}
+
+function getK8sErrorMessage(error: any): string {
+  return error?.body?.message || error?.response?.body?.message || error?.message || String(error);
+}
+
+const RUNTIME_INSTALLATION_PROBES: Record<string, RuntimeInstallationProbe> = {
+  kaito: {
+    providerName: 'KAITO',
+    crdDisplayName: 'KAITO workspace CRD',
+    crdName: KAITO_WORKSPACE_CRD,
+    operatorNamespace: KAITO_NAMESPACE,
+    operatorPodSelectors: [KAITO_OPERATOR_POD_SELECTOR],
+    fallbackPodSelectors: ['app.kubernetes.io/name=workspace'],
+  },
+  dynamo: {
+    providerName: 'Dynamo',
+    crdName: DYNAMO_CRD,
+    operatorNamespace: DYNAMO_NAMESPACE,
+    operatorPodSelectors: [DYNAMO_OPERATOR_POD_SELECTOR],
+    fallbackPodSelectors: ['app.kubernetes.io/name=dynamo-operator', 'control-plane=controller-manager'],
+    crossNamespaceFallbackPodSelectors: ['app.kubernetes.io/name=dynamo-operator'],
+  },
+  kuberay: {
+    providerName: 'KubeRay',
+    crdName: KUBERAY_CRD,
+    operatorNamespace: KUBERAY_NAMESPACE,
+    operatorPodSelectors: [KUBERAY_OPERATOR_POD_SELECTOR],
+    fallbackPodSelectors: ['app.kubernetes.io/name=kuberay-operator'],
+  },
+};
+
 export function toPodStatus(pod: k8s.V1Pod): PodStatus {
   const initStatuses = pod.status?.initContainerStatuses || [];
   const containerStatuses = pod.status?.containerStatuses || [];
@@ -119,6 +181,13 @@ export function toPodStatus(pod: k8s.V1Pod): PodStatus {
     reason: waitingState?.reason || terminatedState?.reason || pod.status?.reason,
     message: waitingState?.message || terminatedState?.message || pod.status?.message,
   };
+}
+
+function isRunningAndReadyPod(pod: k8s.V1Pod): boolean {
+  const containerStatuses = pod.status?.containerStatuses || [];
+  return pod.status?.phase === 'Running'
+    && containerStatuses.length > 0
+    && containerStatuses.every((status) => status.ready);
 }
 
 class KubernetesService {
@@ -622,20 +691,26 @@ class KubernetesService {
         );
 
         const items = (response.body as any)?.items || [];
-        for (const item of items) {
-          const name = item.metadata?.name || 'unknown';
-          const status = item.status || {};
-          const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+        const runtimeEntries = await Promise.all(
+          items.map(async (item: any): Promise<RuntimeStatus> => {
+            const name = item.metadata?.name || 'unknown';
+            const status = item.status || {};
+            const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+            const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName);
 
-          runtimes.push({
-            id: name,
-            name: displayName,
-            installed: true,
-            healthy: status.ready === true,
-            version: status.version,
-            message: status.ready ? 'Provider ready' : 'Provider not ready',
-          });
-        }
+            return {
+              id: name,
+              name: displayName,
+              installed: runtimeStatus.installed,
+              healthy: runtimeStatus.operatorRunning ?? false,
+              crdFound: runtimeStatus.crdFound ?? runtimeStatus.installed,
+              operatorRunning: runtimeStatus.operatorRunning ?? false,
+              version: status.version,
+              message: runtimeStatus.message,
+            };
+          })
+        );
+        runtimes.push(...runtimeEntries);
       } catch (error: any) {
         const statusCode = error?.statusCode || error?.response?.statusCode;
         if (statusCode !== 404) {
@@ -791,6 +866,160 @@ class KubernetesService {
       gpuNodes: gpuAvailability.gpuNodes,
       message,
     };
+  }
+
+  /**
+   * Check whether the KAITO workspace operator is installed and running.
+   */
+  async checkKaitoInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('kaito');
+  }
+
+  async checkDynamoInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('dynamo');
+  }
+
+  async checkKubeRayInstallationStatus(): Promise<InstallationStatus> {
+    return this.checkOperatorBackedInstallationStatus('kuberay');
+  }
+
+  async checkProviderInstallationStatus(
+    providerId: string,
+    status?: { ready?: boolean },
+    providerName?: string,
+  ): Promise<InstallationStatus> {
+    switch (providerId) {
+      case 'kaito':
+        return this.checkKaitoInstallationStatus();
+      case 'dynamo':
+        return this.checkDynamoInstallationStatus();
+      case 'kuberay':
+        return this.checkKubeRayInstallationStatus();
+      default: {
+        const installed = status?.ready === true;
+        const displayName = providerName || providerId.charAt(0).toUpperCase() + providerId.slice(1);
+        return {
+          installed,
+          crdFound: installed,
+          operatorRunning: installed,
+          message: installed
+            ? `${displayName} is installed and running`
+            : `${displayName} is registered but not ready`,
+        };
+      }
+    }
+  }
+
+  private async checkOperatorBackedInstallationStatus(providerId: keyof typeof RUNTIME_INSTALLATION_PROBES): Promise<InstallationStatus> {
+    const probe = RUNTIME_INSTALLATION_PROBES[providerId];
+    const crdDisplayName = probe.crdDisplayName || `${probe.providerName} CRD`;
+    const [crdFound, operatorProbe] = await Promise.all([
+      this.checkCRDExists(probe.crdName),
+      this.findReadyOperatorPod(
+        probe.operatorNamespace,
+        probe.operatorPodSelectors,
+        probe.fallbackPodSelectors,
+        `check${probe.providerName.replace(/[^a-zA-Z0-9]/g, '')}OperatorPods`,
+        probe.crossNamespaceFallbackPodSelectors
+      ),
+    ]);
+    const operatorRunning = operatorProbe.ready;
+    const installed = crdFound && operatorRunning;
+
+    let message: string;
+    if (crdFound && operatorRunning) {
+      const location = operatorProbe.namespace && operatorProbe.namespace !== probe.operatorNamespace
+        ? ` in ${operatorProbe.namespace}`
+        : '';
+      message = `${crdDisplayName} found and ${probe.providerName} operator pods are ready${location}`;
+    } else if (crdFound && operatorProbe.error) {
+      message = `${crdDisplayName} found but ${probe.providerName} operator pods could not be checked: ${operatorProbe.error}`;
+    } else if (crdFound) {
+      message = `${crdDisplayName} found but no ready ${probe.providerName} operator pods were detected in ${probe.operatorNamespace} or matching known provider labels`;
+    } else {
+      message = `${crdDisplayName} not found`;
+    }
+
+    return {
+      installed,
+      crdFound,
+      operatorRunning,
+      message,
+    };
+  }
+
+  private async findReadyOperatorPod(
+    namespace: string,
+    operatorPodSelectors: string[],
+    fallbackPodSelectors: string[],
+    operationName: string,
+    crossNamespaceFallbackPodSelectors: string[] = fallbackPodSelectors,
+  ): Promise<OperatorPodProbeResult> {
+    const selectors = Array.from(new Set([...operatorPodSelectors, ...fallbackPodSelectors]));
+    const crossNamespaceSelectors = Array.from(new Set(crossNamespaceFallbackPodSelectors));
+    let firstError: string | undefined;
+
+    for (const selector of selectors) {
+      try {
+        const pods = await withRetry(
+          () => this.coreV1Api.listNamespacedPod(
+            namespace,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            selector
+          ),
+          { operationName: `${operationName}:${namespace}`, maxRetries: 1 }
+        );
+        const readyPod = pods.body.items.find((pod) => isRunningAndReadyPod(pod));
+        if (readyPod) {
+          return {
+            ready: true,
+            namespace,
+            selector,
+            podName: readyPod.metadata?.name,
+          };
+        }
+      } catch (error: any) {
+        const statusCode = getK8sStatusCode(error);
+        if (statusCode !== 404 && !firstError) {
+          firstError = getK8sErrorMessage(error);
+          logger.warn({ error: firstError, namespace, selector }, 'Unable to check provider operator pods in expected namespace');
+        }
+      }
+    }
+
+    for (const selector of crossNamespaceSelectors) {
+      try {
+        const pods = await withRetry(
+          () => this.coreV1Api.listPodForAllNamespaces(
+            undefined,
+            undefined,
+            undefined,
+            selector
+          ),
+          { operationName: `${operationName}:all-namespaces`, maxRetries: 1 }
+        );
+        const readyPod = pods.body.items.find((pod) => isRunningAndReadyPod(pod));
+        if (readyPod) {
+          return {
+            ready: true,
+            namespace: readyPod.metadata?.namespace,
+            selector,
+            podName: readyPod.metadata?.name,
+          };
+        }
+      } catch (error: any) {
+        const statusCode = getK8sStatusCode(error);
+        if (statusCode !== 404 && !firstError) {
+          firstError = getK8sErrorMessage(error);
+          logger.warn({ error: firstError, selector }, 'Unable to check provider operator pods across namespaces');
+        }
+      }
+    }
+
+    return { ready: false, error: firstError };
   }
 
   /**

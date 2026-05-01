@@ -365,6 +365,9 @@ bun run build:backend   # Compile TypeScript
 bun run compile         # Build single binary executable
 ```
 
+The backend pins TypeScript to `5.3.3` to keep Bun/import-meta compilation behavior stable.
+Do not widen that version without validating `bun run build:backend` and `bun run compile`.
+
 #### Backend Testing
 
 ```bash
@@ -449,9 +452,9 @@ kubectl create secret generic hf-token-secret \
 ### Install NVIDIA Dynamo (via Helm)
 ```bash
 export NAMESPACE=dynamo-system
-export RELEASE_VERSION=1.1.0-dev.1
+export RELEASE_VERSION=1.0.2
 
-# Dynamo v1.0-dev.1 bundles its CRDs in the platform chart
+# The Dynamo platform chart bundles its CRDs
 helm upgrade --install dynamo-platform \
   https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace ${NAMESPACE} \

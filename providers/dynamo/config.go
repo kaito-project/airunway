@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"time"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
@@ -42,7 +42,7 @@ const (
 	ProviderVersion = "dynamo-provider:v0.2.0"
 
 	// DynamoPlatformChartVersion is the upstream Dynamo platform chart version.
-	DynamoPlatformChartVersion = "1.1.0-dev.1"
+	DynamoPlatformChartVersion = "1.0.2"
 
 	// DynamoPlatformChartURL is the upstream Dynamo platform chart package.
 	DynamoPlatformChartURL = "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-" + DynamoPlatformChartVersion + ".tgz"
@@ -53,6 +53,7 @@ const (
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
 
+	dynamoPlatformValuesJSON      = `{"global.grove.install":true}`
 	dynamoGraphDeploymentResource = "dynamographdeployments"
 )
 
@@ -135,8 +136,8 @@ func GetInstallationInfo() *airunwayv1alpha1.InstallationInfo {
 				Chart:           DynamoPlatformChartURL,
 				Namespace:       "dynamo-system",
 				CreateNamespace: true,
-				Values: map[string]apiextensionsv1.JSON{
-					"global.grove.install": {Raw: []byte("true")},
+				Values: &runtime.RawExtension{
+					Raw: []byte(dynamoPlatformValuesJSON),
 				},
 			},
 		},
@@ -144,7 +145,7 @@ func GetInstallationInfo() *airunwayv1alpha1.InstallationInfo {
 			{
 				Title:       "Install Dynamo Platform",
 				Command:     "helm upgrade --install dynamo-platform " + DynamoPlatformChartURL + " --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
-				Description: "Install the Dynamo platform operator v1.1.0-dev.1 with bundled Grove enabled by default. This chart includes the required CRDs.",
+				Description: "Install the Dynamo platform operator v1.0.2 with bundled Grove enabled by default. This chart includes the required CRDs.",
 			},
 		},
 	}

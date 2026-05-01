@@ -17,8 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -100,9 +100,12 @@ type HelmChart struct {
 	// +optional
 	CreateNamespace bool `json:"createNamespace,omitempty"`
 
-	// values are Helm values passed via --set-json using dot-delimited keys
+	// values is a JSON object of Helm --set-json overrides.
+	// Each top-level key is the Helm values path to pass as the --set-json key,
+	// and each top-level value is the JSON payload for that path. This is not
+	// treated as a single arbitrary Helm values document.
 	// +optional
-	Values map[string]apiextensionsv1.JSON `json:"values,omitempty"`
+	Values *runtime.RawExtension `json:"values,omitempty"`
 }
 
 // InstallationStep defines a step in the provider installation process

@@ -82,7 +82,7 @@ metadata:
         "helmCharts": [
           {
             "name": "dynamo-platform",
-            "chart": "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.1.0-dev.1.tgz",
+            "chart": "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.2.tgz",
             "namespace": "dynamo-system",
             "createNamespace": true,
             "values": { "global.grove.install": true }
@@ -91,7 +91,7 @@ metadata:
         "steps": [
           {
             "title": "Install Dynamo Platform",
-            "command": "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.1.0-dev.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
+            "command": "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.2.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
             "description": "Install the Dynamo platform operator with bundled Grove and CRDs"
           }
         ]
