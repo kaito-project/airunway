@@ -659,9 +659,9 @@ class KubernetesService {
         version: extractCRDVersionFromAnnotations(response, annotationKeys),
       };
     } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+      const statusCode = getK8sStatusCode(error);
       if (statusCode !== 404) {
-        logger.debug({ error: error?.message || error, crdName }, 'Could not read CRD status');
+        logger.debug({ error: getK8sErrorMessage(error), crdName }, 'Could not read CRD status');
       }
     }
 
