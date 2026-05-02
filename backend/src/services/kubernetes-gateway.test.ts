@@ -21,7 +21,8 @@ describe('kubernetesService.getGatewayStatus', () => {
 
   function mockListGateways(items: unknown[] | Error) {
     const original = svc.customObjectsApi.listClusterCustomObject;
-    svc.customObjectsApi.listClusterCustomObject = async (group: string, _version: string, plural: string) => {
+    svc.customObjectsApi.listClusterCustomObject = async (...args: unknown[]) => {
+      const [group, , plural] = args;
       if (group === 'gateway.networking.k8s.io' && plural === 'gateways') {
         if (items instanceof Error) throw items;
         return { body: { items } };
