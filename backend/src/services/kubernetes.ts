@@ -14,6 +14,19 @@ const MODEL_DEPLOYMENT_CRD = {
   kind: 'ModelDeployment',
 };
 
+const GATEWAY_API_CRD_NAME = 'gateways.gateway.networking.k8s.io';
+const INFERENCE_POOL_CRD_NAME = 'inferencepools.inference.networking.k8s.io';
+
+const GATEWAY_API_VERSION_ANNOTATIONS = [
+  'gateway.networking.k8s.io/bundle-version',
+  'app.kubernetes.io/version',
+];
+
+const INFERENCE_EXTENSION_VERSION_ANNOTATIONS = [
+  'inference.networking.k8s.io/bundle-version',
+  'app.kubernetes.io/version',
+];
+
 const KAITO_WORKSPACE_CRD = 'workspaces.kaito.sh';
 const KAITO_NAMESPACE = 'kaito-workspace';
 const KAITO_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace';
@@ -68,6 +81,25 @@ export interface ClusterGpuCapacity {
   gpuNodeCount: number;           // Total number of nodes with GPUs
   totalMemoryGb?: number;         // Total GPU memory per GPU (e.g., 80 for A100 80GB)
   nodes: NodeGpuInfo[];           // Per-node breakdown
+}
+
+/**
+ * Extract the first non-empty version annotation from a Kubernetes CRD object or
+ * Kubernetes client response wrapper. The generated Kubernetes client has used
+ * both shapes across versions (`response.body` and the resource object itself).
+ */
+export function extractCRDVersionFromAnnotations(crdOrResponse: unknown, annotationKeys: string[]): string | undefined {
+  const crd = (crdOrResponse as any)?.body || crdOrResponse;
+  const annotations = (crd as any)?.metadata?.annotations || {};
+
+  for (const key of annotationKeys) {
+    const version = annotations[key];
+    if (typeof version === 'string' && version.trim().length > 0) {
+      return version.trim();
+    }
+  }
+
+  return undefined;
 }
 
 /**
@@ -607,6 +639,33 @@ class KubernetesService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Read a CRD once and derive both existence and version from the same response.
+   */
+  private async getCRDStatusFromAnnotations(
+    crdName: string,
+    annotationKeys: string[]
+  ): Promise<{ installed: boolean; version?: string }> {
+    try {
+      const response = await withRetry(
+        () => this.apiExtensionsApi.readCustomResourceDefinition(crdName),
+        { operationName: `getCRDStatusFromAnnotations:${crdName}`, maxRetries: 1 }
+      );
+
+      return {
+        installed: true,
+        version: extractCRDVersionFromAnnotations(response, annotationKeys),
+      };
+    } catch (error: any) {
+      const statusCode = getK8sStatusCode(error);
+      if (statusCode !== 404) {
+        logger.debug({ error: getK8sErrorMessage(error), crdName }, 'Could not read CRD status');
+      }
+    }
+
+    return { installed: false };
   }
 
   /**
@@ -1836,10 +1895,15 @@ class KubernetesService {
   async checkGatewayCRDStatus(): Promise<GatewayCRDStatus> {
     const { PINNED_GAIE_VERSION, GAIE_CRD_URL, GATEWAY_API_CRD_URL } = await import('@airunway/shared');
 
-    const [gatewayApiInstalled, inferenceExtInstalled] = await Promise.all([
-      this.checkCRDExists('gateways.gateway.networking.k8s.io'),
-      this.checkCRDExists('inferencepools.inference.networking.k8s.io'),
+    const [gatewayApiStatus, inferenceExtStatus] = await Promise.all([
+      this.getCRDStatusFromAnnotations(GATEWAY_API_CRD_NAME, GATEWAY_API_VERSION_ANNOTATIONS),
+      this.getCRDStatusFromAnnotations(INFERENCE_POOL_CRD_NAME, INFERENCE_EXTENSION_VERSION_ANNOTATIONS),
     ]);
+
+    const gatewayApiInstalled = gatewayApiStatus.installed;
+    const inferenceExtInstalled = inferenceExtStatus.installed;
+    const gatewayApiVersion = gatewayApiStatus.version;
+    const inferenceExtVersion = inferenceExtStatus.version;
 
     // Get live gateway status
     let gatewayAvailable = false;
@@ -1871,6 +1935,8 @@ class KubernetesService {
     return {
       gatewayApiInstalled,
       inferenceExtInstalled,
+      gatewayApiVersion,
+      inferenceExtVersion,
       pinnedVersion: PINNED_GAIE_VERSION,
       gatewayAvailable,
       gatewayEndpoint,
