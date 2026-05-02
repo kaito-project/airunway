@@ -1,4 +1,5 @@
 import { describe, test, expect, afterEach } from 'bun:test';
+import { INFERENCE_GATEWAY_LABEL } from '@airunway/shared';
 import { kubernetesService } from './kubernetes';
 import { mockServiceMethod } from '../test/helpers';
 
@@ -107,7 +108,7 @@ describe('kubernetesService.getGatewayStatus', () => {
     expect(result.available).toBe(false);
   });
 
-  test('multiple Gateways → picks the one labeled airunway.ai/inference-gateway=true', async () => {
+  test('multiple Gateways → picks the one with the inference-gateway label', async () => {
     mockCRDs({ inferencePool: true, gatewayApi: true });
     mockListGateways([
       { metadata: { name: 'gw-a', namespace: 'default' } },
@@ -115,7 +116,7 @@ describe('kubernetesService.getGatewayStatus', () => {
         metadata: {
           name: 'gw-b',
           namespace: 'default',
-          labels: { 'airunway.ai/inference-gateway': 'true' },
+          labels: { [INFERENCE_GATEWAY_LABEL]: 'true' },
         },
         status: { addresses: [{ value: 'gw-b.example.com' }] },
       },
