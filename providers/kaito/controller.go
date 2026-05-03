@@ -282,6 +282,18 @@ func (r *KaitoProviderReconciler) createOrUpdateResource(ctx context.Context, re
 // with the same value (via DeepEqual). Extra keys in existing (e.g. operator
 // defaults like presetOptions, accessMode) are ignored. This prevents infinite
 // update loops when the upstream operator adds defaulted fields we don't manage.
+//
+// Known limitation: this comparison is one-directional and does NOT detect
+// field DELETIONS. If a user removes a previously-set field from the
+// ModelDeployment spec (e.g. drops a provider.overrides key), the existing
+// Workspace still carries the stale value, this function returns true, and the
+// reconciler skips the update — so stale provider configuration can be left on
+// the Workspace indefinitely.
+//
+// TODO(airunway): replace this whole comparison with server-side apply using
+// a fixed FieldOwner. SSA solves both this deletion-blindness issue and the
+// pre-existing infinite-update-loop bug DeepEqual was working around. See
+// issue #264 for the full proposal.
 func managedFieldsSubset(desired, existing map[string]interface{}) bool {
 	for k, dv := range desired {
 		ev, ok := existing[k]

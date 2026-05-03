@@ -671,7 +671,13 @@ func TestTransformGPUAddsNvidiaLabel(t *testing.T) {
 
 func TestTransformNoGPUOmitsNvidiaLabel(t *testing.T) {
 	tr := NewTransformer()
+	// Use llamacpp here: it's the only realistic no-GPU path the webhook
+	// allows through to the transformer. For vLLM the defaulter sets
+	// GPU.Count=1 when Resources is nil and the validator rejects
+	// gpu.count==0, so a "vLLM with no GPU" state cannot reach this code.
 	md := newTestMD("test-model", "default")
+	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeLlamaCpp
+	md.Spec.Image = "my-image:latest"
 	md.Spec.Resources = nil
 
 	resources, err := tr.Transform(context.Background(), md)
@@ -683,6 +689,31 @@ func TestTransformNoGPUOmitsNvidiaLabel(t *testing.T) {
 	matchLabels, _, _ := unstructured.NestedStringMap(ws.Object, "resource", "labelSelector", "matchLabels")
 	if _, exists := matchLabels["nvidia.com/gpu.present"]; exists {
 		t.Error("did not expect nvidia.com/gpu.present when no GPU requested")
+	}
+}
+
+func TestTransformGPULabelWinsOverNodeSelector(t *testing.T) {
+	// A user can put nvidia.com/gpu.present in spec.nodeSelector — possibly
+	// set to "false" — and the forced GPU label must still win, otherwise the
+	// webhook-rejection failure this fix prevents would resurface.
+	tr := NewTransformer()
+	md := newTestMD("test-model", "default")
+	md.Spec.Resources = &airunwayv1alpha1.ResourceSpec{
+		GPU: &airunwayv1alpha1.GPUSpec{Count: 1},
+	}
+	md.Spec.NodeSelector = map[string]string{
+		"nvidia.com/gpu.present": "false",
+	}
+
+	resources, err := tr.Transform(context.Background(), md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ws := resources[0]
+	matchLabels, _, _ := unstructured.NestedStringMap(ws.Object, "resource", "labelSelector", "matchLabels")
+	if matchLabels["nvidia.com/gpu.present"] != "true" {
+		t.Errorf("expected nvidia.com/gpu.present=true (forced) to win over user nodeSelector, got %q", matchLabels["nvidia.com/gpu.present"])
 	}
 }
 
