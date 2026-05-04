@@ -6,9 +6,13 @@ import { ThroughputEstimate } from './ThroughputEstimate'
 import { type Model } from '@/lib/api'
 import { Cpu, HardDrive, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
+<<<<<<< HEAD
 import { useGpuThroughput } from '@/hooks/useGpuOperator'
 import { useInView } from '@/hooks/useInView'
 import { buildThroughputParamsForGpu } from '@/lib/gpu-throughput-params'
+=======
+import { getEngineDisplayName } from '@/lib/deploymentDisplay'
+>>>>>>> 955ec0b (feat: add direct vllm provider)
 
 interface ModelCardProps {
   model: Model
@@ -150,7 +154,7 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gp
               variant="secondary"
               className="text-xs font-medium rounded-full"
             >
-              {engine.toUpperCase()}
+              {getEngineDisplayName(engine)}
             </Badge>
           ))}
         </div>
