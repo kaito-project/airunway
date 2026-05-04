@@ -197,6 +197,14 @@ spec:
           value: "3001"
         - name: LOG_LEVEL
           value: info
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm/cache
+        - name: HELM_CONFIG_HOME
+          value: /tmp/helm/config
+        - name: HELM_DATA_HOME
+          value: /tmp/helm/data
+        - name: HOME
+          value: /tmp
         image: ghcr.io/kaito-project/airunway/dashboard:latest
         imagePullPolicy: Always
         livenessProbe:
@@ -233,9 +241,15 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
       securityContext:
         fsGroup: 65532
         runAsGroup: 65532
         runAsNonRoot: true
         runAsUser: 65532
       serviceAccountName: airunway
+      volumes:
+      - emptyDir: {}
+        name: tmp

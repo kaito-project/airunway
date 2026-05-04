@@ -11,6 +11,7 @@ import { handleK8sError } from '../lib/k8s-errors';
 import models from '../data/models.json';
 import logger from '../lib/logger';
 import type { DeploymentStatus, DeploymentConfig } from '@airunway/shared';
+import type { AppEnv } from '../types/hono';
 import { toModelDeploymentManifest } from '@airunway/shared';
 import {
   namespaceSchema,
@@ -74,14 +75,14 @@ const createDeploymentSchema = z.object({
   engine: z.enum(['vllm', 'sglang', 'trtllm', 'llamacpp']),
   namespace: namespaceSchema.optional(),
   mode: z.enum(['aggregated', 'disaggregated']).optional().default('aggregated'),
-  provider: z.string().optional(),
+  provider: resourceNameSchema.optional(),
   servedModelName: z.string().optional(),
-  routerMode: z.enum(['none', 'kv', 'round-robin']).optional().default('none'),
+  routerMode: z.enum(['default', 'kv', 'round-robin']).optional().default('default'),
   replicas: z.number().int().min(0).optional().default(1),
   hfTokenSecret: z.string().optional().default(''),
   contextLength: z.number().int().positive().optional(),
   enforceEager: z.boolean().optional().default(false),
-  enablePrefixCaching: z.boolean().optional().default(false),
+  enablePrefixCaching: z.boolean().optional().default(true),
   trustRemoteCode: z.boolean().optional().default(false),
   resources: z.object({
     gpu: z.number().int().min(0),
@@ -322,7 +323,7 @@ function resolveDeploymentImages(config: DeploymentConfig): DeploymentConfig {
   return config;
 }
 
-const deployments = new Hono()
+const deployments = new Hono<AppEnv>()
   .get('/', zValidator('query', listDeploymentsQuerySchema), async (c) => {
     try {
       const { namespace, limit, offset } = c.req.valid('query');
