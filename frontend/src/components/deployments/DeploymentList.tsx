@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/dialog'
 import { useDeleteDeployment, type DeploymentStatus } from '@/hooks/useDeployments'
 import { useToast } from '@/hooks/useToast'
-import { formatRelativeTime } from '@/lib/utils'
-import { Eye, Trash2, Rocket } from 'lucide-react'
+import { formatRelativeTime, generateAynaUrl } from '@/lib/utils'
+import { getEngineDisplayName, getProviderDisplayName } from '@/lib/deploymentDisplay'
+import { Eye, Trash2, MessageSquare, Rocket } from 'lucide-react'
 
 interface DeploymentListProps {
   deployments: DeploymentStatus[]
@@ -140,10 +141,10 @@ export function DeploymentList({ deployments, isLoading }: DeploymentListProps) 
               <Badge
                 variant="secondary"
               >
-                {deployment.provider}
+                {getProviderDisplayName(deployment.provider)}
               </Badge>
               <Badge variant="outline">
-                {deployment.engine ? (deployment.engine === 'llamacpp' ? 'Llama.cpp' : deployment.engine.toUpperCase()) : 'Pending'}
+                {getEngineDisplayName(deployment.engine)}
               </Badge>
               {deployment.mode === 'disaggregated' && (
                 <Badge variant="secondary" className="text-xs">P/D</Badge>

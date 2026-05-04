@@ -193,6 +193,23 @@ function getK8sErrorMessage(error: unknown): string {
   return e?.body?.message || e?.response?.body?.message || e?.message || String(error);
 }
 
+function getProviderDisplayName(providerId: string): string {
+  switch (providerId) {
+    case 'vllm':
+      return 'Direct vLLM';
+    case 'dynamo':
+      return 'Dynamo';
+    case 'kuberay':
+      return 'KubeRay';
+    case 'kaito':
+      return 'KAITO';
+    case 'llmd':
+      return 'llm-d';
+    default:
+      return providerId.charAt(0).toUpperCase() + providerId.slice(1);
+  }
+}
+
 const RUNTIME_INSTALLATION_PROBES: Record<string, RuntimeInstallationProbe> = {
   kaito: {
     providerName: 'KAITO',
