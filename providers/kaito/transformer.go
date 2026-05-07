@@ -130,9 +130,23 @@ func (t *Transformer) buildResource(md *airunwayv1alpha1.ModelDeployment) map[st
 	matchLabels := map[string]interface{}{
 		"kubernetes.io/os": "linux",
 	}
-	// Merge nodeSelector into matchLabels
+	// Merge user-provided nodeSelector first so the forced GPU label below
+	// always wins — preventing a user from accidentally disabling GPU node
+	// targeting via spec.nodeSelector["nvidia.com/gpu.present"].
 	for k, v := range md.Spec.NodeSelector {
 		matchLabels[k] = v
+	}
+	// When GPUs are requested, force-target nodes with NVIDIA GPUs so KAITO's
+	// webhook doesn't fail validating CPU nodes.
+	//
+	// Note: this assumes nodes are labeled with `nvidia.com/gpu.present=true`
+	// (typically provided by NFD / gpu-feature-discovery). The default airunway
+	// KAITO install disables those sub-charts (see config.go install command),
+	// so operators using mixed CPU/GPU pools must either enable NFD or label
+	// their GPU nodes manually. Users with a different GPU-presence label
+	// can override via spec.provider.overrides.
+	if md.Spec.Resources != nil && md.Spec.Resources.GPU != nil && md.Spec.Resources.GPU.Count > 0 {
+		matchLabels["nvidia.com/gpu.present"] = "true"
 	}
 	resource["labelSelector"] = map[string]interface{}{
 		"matchLabels": matchLabels,
