@@ -471,8 +471,9 @@ const deployments = new Hono()
   // Must be defined before /:name to avoid being caught by the wildcard
   .get('/pvcs', zValidator('query', z.object({ namespace: namespaceSchema })), async (c) => {
     const { namespace } = c.req.valid('query');
+    const userToken = c.get('token') as string | undefined;
     try {
-      const pvcs = await kubernetesService.listPVCs(namespace);
+      const pvcs = await kubernetesService.listPVCs(namespace, userToken);
       return c.json({ pvcs });
     } catch (error) {
       logger.error({ error, namespace }, 'Failed to list PVCs');

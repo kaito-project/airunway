@@ -419,6 +419,7 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName, avail
                         >
                           <SelectTrigger
                             id={`vol-claim-${index}`}
+                            onBlur={() => markTouched(index, 'claimName')}
                             className={isTouched(index, 'claimName') && !vol.claimName ? 'border-destructive' : ''}
                           >
                             <SelectValue placeholder="Select a disk..." />

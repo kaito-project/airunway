@@ -60,6 +60,13 @@ export interface ClusterGpuCapacity {
   nodes: NodeGpuInfo[];           // Per-node breakdown
 }
 
+export interface PersistentVolumeClaimInfo {
+  name: string;
+  status: string;
+  storageClass: string;
+  capacity: string;
+}
+
 /**
  * Installation status for CRDs
  */
@@ -104,6 +111,14 @@ class KubernetesService {
     this.defaultNamespace = process.env.DEFAULT_NAMESPACE || 'airunway-system';
   }
 
+  private createUserKubeConfig(userToken: string): k8s.KubeConfig {
+    const userKc = new k8s.KubeConfig();
+    const cluster = this.kc.getCurrentCluster();
+    const user: k8s.User = { name: 'user', token: userToken };
+    userKc.loadFromClusterAndUser(cluster!, user);
+    return userKc;
+  }
+
   /**
    * Create a CustomObjectsApi client authenticated with the given user token.
    */
@@ -111,21 +126,24 @@ class KubernetesService {
     if (!userToken) {
       return this.customObjectsApi;
     }
-    const userKc = new k8s.KubeConfig();
-    const cluster = this.kc.getCurrentCluster();
-    const user: k8s.User = { name: 'user', token: userToken };
-    userKc.loadFromClusterAndUser(cluster!, user);
-    return userKc.makeApiClient(k8s.CustomObjectsApi);
+    return this.createUserKubeConfig(userToken).makeApiClient(k8s.CustomObjectsApi);
+  }
+
+  /**
+   * Create a CoreV1Api client authenticated with the given user token.
+   */
+  private getCoreV1Api(userToken?: string): k8s.CoreV1Api {
+    if (!userToken) {
+      return this.coreV1Api;
+    }
+    return this.createUserKubeConfig(userToken).makeApiClient(k8s.CoreV1Api);
   }
 
   /**
    * Create user-scoped API clients for authorization checks (e.g. SSAR).
    */
   private createUserClients(userToken: string) {
-    const userKc = new k8s.KubeConfig();
-    const cluster = this.kc.getCurrentCluster();
-    const user: k8s.User = { name: 'user', token: userToken };
-    userKc.loadFromClusterAndUser(cluster!, user);
+    const userKc = this.createUserKubeConfig(userToken);
     return {
       authorizationV1Api: userKc.makeApiClient(k8s.AuthorizationV1Api),
     };
@@ -1708,21 +1726,26 @@ class KubernetesService {
   /**
    * List PersistentVolumeClaims in a namespace
    */
-  async listPVCs(namespace: string): Promise<{ name: string; status: string; storageClass: string; capacity: string }[]> {
-    try {
-      const response = await withRetry(
-        () => this.coreV1Api.listNamespacedPersistentVolumeClaim(namespace),
-        { operationName: 'listPVCs', maxRetries: 1 }
-      );
-      return (response.body.items || []).map((pvc) => ({
-        name: pvc.metadata?.name || '',
+  async listPVCs(namespace: string, userToken?: string): Promise<PersistentVolumeClaimInfo[]> {
+    const api = this.getCoreV1Api(userToken);
+    const response = await withRetry(
+      () => api.listNamespacedPersistentVolumeClaim(namespace),
+      { operationName: 'listPVCs', maxRetries: 1 }
+    );
+
+    return (response.body.items || []).flatMap((pvc) => {
+      const name = pvc.metadata?.name;
+      if (!name) {
+        return [];
+      }
+
+      return [{
+        name,
         status: pvc.status?.phase || 'Unknown',
         storageClass: pvc.spec?.storageClassName || '',
         capacity: pvc.status?.capacity?.['storage'] || pvc.spec?.resources?.requests?.['storage'] || '',
-      }));
-    } catch {
-      return [];
-    }
+      }];
+    });
   }
 }
 
