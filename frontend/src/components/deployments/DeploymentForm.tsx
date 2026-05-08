@@ -1160,6 +1160,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   }
 
   const selectedGpus = calculateSelectedGpus()
+  const supportsDisaggregatedMode = selectedRuntime !== 'kaito' && selectedRuntime !== 'vllm'
 
   // Compute current multi-node state from providerOverrides
   const currentMultiNode: MultiNodeRecommendation | null = (() => {
@@ -1792,8 +1793,8 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
           <RadioGroup
             value={config.mode}
             onValueChange={(value) => {
-              // Only allow changing mode for non-KAITO runtimes
-              if (selectedRuntime !== 'kaito') {
+              // Only allow changing to disaggregated for runtimes that advertise it
+              if (supportsDisaggregatedMode || value === 'aggregated') {
                 const newMode = value as DeploymentMode;
                 setTopologyManagedByAIConfig(false)
                 // Clear aggregated-only multi-node overrides when switching to disaggregated
@@ -1830,17 +1831,17 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
                 </p>
               </div>
             </div>
-            <div className={cn("flex items-start space-x-2", selectedRuntime === 'kaito' && "opacity-50")}>
+            <div className={cn("flex items-start space-x-2", !supportsDisaggregatedMode && "opacity-50")}>
                   <RadioGroupItem
                     value="disaggregated"
                     id="mode-disaggregated"
                     className="mt-1"
-                disabled={selectedRuntime === 'kaito'}
+                disabled={!supportsDisaggregatedMode}
               />
               <div>
                     <Label
                       htmlFor="mode-disaggregated"
-                  className={cn("font-medium flex items-center gap-2", selectedRuntime === 'kaito' ? "cursor-not-allowed" : "cursor-pointer")}
+                  className={cn("font-medium flex items-center gap-2", !supportsDisaggregatedMode ? "cursor-not-allowed" : "cursor-pointer")}
                 >
                   Disaggregated (P/D)
                   {aiConfigRecommendedMode === 'disaggregated' && (
@@ -1853,7 +1854,9 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
                 <p className="text-xs text-muted-foreground">
                       {selectedRuntime === 'kaito'
                     ? 'Separate prefill and decode workers - not supported by KAITO'
-                    : 'Separate prefill and decode workers for better resource utilization'}
+                    : selectedRuntime === 'vllm'
+                      ? 'Use Dynamo, KubeRay, or llm-d for prefill/decode serving'
+                      : 'Separate prefill and decode workers for better resource utilization'}
                 </p>
               </div>
             </div>
