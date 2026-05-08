@@ -6,8 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DeploymentStatusBadge } from '@/components/deployments/DeploymentStatusBadge'
 import { MetricsTab } from '@/components/metrics'
-import { formatRelativeTime, generateAynaUrl } from '@/lib/utils'
-import { Loader2, ArrowLeft, Trash2, Copy, Terminal, MessageSquare, Globe, HardDrive } from 'lucide-react'
+import { formatRelativeTime } from '@/lib/utils'
+import { Loader2, ArrowLeft, Trash2, Copy, Terminal, Globe, HardDrive } from 'lucide-react'
 import { useState } from 'react'
 import { buildPortForwardCommand } from '@airunway/shared'
 import {
@@ -295,22 +295,6 @@ export function DeploymentDetailsPage() {
                   </Button>
                 </div>
               </div>
-
-              {/* Ayna Integration */}
-              <div className="flex flex-wrap gap-2 pt-2 border-t">
-                <a href={generateAynaUrl({
-                  model: gatewayModelName,
-                  provider: 'openai',
-                  endpoint: gatewayBaseUrl.replace(/\/v1$/, ''),
-                  type: 'chat',
-                })}>
-                  <Button variant="outline">
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Open in Ayna
-                  </Button>
-                </a>
-              </div>
-
               {/* Port Forward - Secondary */}
               <details className="pt-2 border-t">
                 <summary className="text-sm font-medium cursor-pointer text-muted-foreground hover:text-foreground">
@@ -344,21 +328,6 @@ export function DeploymentDetailsPage() {
               <p className="text-xs text-muted-foreground mt-2">
                 After running the command, access the model at http://localhost:8000
               </p>
-
-              {/* Ayna Integration */}
-              <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t">
-                <a href={generateAynaUrl({
-                  model: deployment.modelId,
-                  provider: 'openai',
-                  endpoint: 'http://localhost:8000',
-                  type: 'chat',
-                })}>
-                  <Button variant="outline">
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Open in Ayna
-                  </Button>
-                </a>
-              </div>
             </>
           )}
         </div>
