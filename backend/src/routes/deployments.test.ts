@@ -288,7 +288,10 @@ describe('Deployment Routes', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(data.resources[0].manifest.spec.env).toEqual(env);
+      expect(data.resources[0].manifest.spec.env).toEqual([
+        { name: 'VLLM_USE_V1', value: '1' },
+        { name: 'NCCL_DEBUG', value: 'INFO' },
+      ]);
     });
 
     test('preserves Direct vLLM recipe provenance as metadata annotations in preview manifests', async () => {

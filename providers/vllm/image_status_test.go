@@ -116,6 +116,36 @@ func TestSetImageResolutionStatusDefaultImage(t *testing.T) {
 	}
 }
 
+func TestSetImageResolutionStatusReusesCachedDigestForSameRequestedImage(t *testing.T) {
+	md := newMDForController("cached-image", "default")
+	md.Status.Image = &airunwayv1alpha1.ImageStatus{
+		Requested: DefaultVLLMImage,
+		Resolved:  "vllm/vllm-openai@sha256:cached",
+		Digest:    "sha256:cached",
+		CreatedAt: "2026-05-01T00:00:00Z",
+		Revision:  "abc123",
+	}
+	resolver := successfulFakeResolver(fakeResolvedImage(DefaultVLLMImage, "sha256:fresh"))
+	r := &VLLMProviderReconciler{ImageResolver: resolver}
+
+	if err := r.setImageResolutionStatus(context.Background(), md); err != nil {
+		t.Fatalf("setImageResolutionStatus() error = %v", err)
+	}
+	if len(resolver.calls) != 0 {
+		t.Fatalf("resolver calls = %#v, want none when status.image already resolved current request", resolver.calls)
+	}
+
+	image := requireImageStatus(t, md)
+	if image.Resolved != "vllm/vllm-openai@sha256:cached" {
+		t.Fatalf("resolved image = %q, want cached digest", image.Resolved)
+	}
+	if image.Digest != "sha256:cached" {
+		t.Fatalf("digest = %q, want cached digest", image.Digest)
+	}
+	assertCondition(t, md, airunwayv1alpha1.ConditionTypeImageResolved, metav1.ConditionTrue, "ImageResolutionReused")
+	assertCondition(t, md, airunwayv1alpha1.ConditionTypeImageVerified, metav1.ConditionUnknown, "VerificationNotImplemented")
+}
+
 func TestSetImageResolutionStatusStableImage(t *testing.T) {
 	const stableImage = "vllm/vllm-openai:latest"
 	md := newMDForController("stable-image", "default")

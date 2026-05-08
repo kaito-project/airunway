@@ -50,8 +50,8 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if !hasAggregated {
 		t.Error("expected aggregated serving mode")
 	}
-	if hasDisaggregated {
-		t.Error("did not expect disaggregated serving mode to be advertised yet")
+	if !hasDisaggregated {
+		t.Error("expected disaggregated serving mode")
 	}
 
 	if len(spec.SelectionRules) != 1 {
@@ -76,6 +76,16 @@ func TestGetInstallationInfo(t *testing.T) {
 	}
 	if len(info.Steps) == 0 {
 		t.Error("expected installation steps")
+	}
+
+	foundLowercaseSecretCommand := false
+	for _, step := range info.Steps {
+		if step.Command == "kubectl create secret generic vllm-hf-token --from-literal=HF_TOKEN=<your-token> -n <model-namespace>" {
+			foundLowercaseSecretCommand = true
+		}
+	}
+	if !foundLowercaseSecretCommand {
+		t.Error("expected lowercase vllm-hf-token secret command")
 	}
 }
 

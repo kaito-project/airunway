@@ -378,7 +378,6 @@ describe('DeploymentForm', () => {
           recipeProvenance: {
             source: 'https://recipes.vllm.ai/microsoft/Phi-4-mini-instruct.json',
             id: 'microsoft/Phi-4-mini-instruct',
-            modelId: 'microsoft/Phi-4-mini-instruct',
             strategy: 'single_node_tp',
             hardware: 'a100',
             variant: 'default',

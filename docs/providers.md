@@ -82,7 +82,7 @@ The Web UI backend reads provider information (capabilities, installation steps,
 | KubeRay       | RayService            | ✅ Available | [kuberay.yaml](https://github.com/kaito-project/airunway/blob/main/providers/kuberay/deploy/kuberay.yaml) | Ray-based distributed inference with autoscaling                               |
 | KAITO         | Workspace             | ✅ Available | [kaito.yaml](https://github.com/kaito-project/airunway/blob/main/providers/kaito/deploy/kaito.yaml) | Flexible inference with vLLM (GPU) or llama.cpp (CPU/GPU)                      |
 | llm-d         | none                  | ✅ Available | [llmd.yaml](https://github.com/kaito-project/airunway/blob/main/providers/llmd/deploy/llmd.yaml) | Flexible inference with vLLM (GPU) with KV-cache routing and disaggregated serving |
-| Direct vLLM   | Deployment            | Provider-supplied/configurable | Provider-supplied `InferenceProviderConfig` / N/A in this repo | Direct vLLM OpenAI-compatible server deployments using `spec.engine.image` |
+| Direct vLLM   | Deployment            | ✅ Available | [vllm.yaml](https://github.com/kaito-project/airunway/blob/main/providers/vllm/deploy/vllm.yaml) | Direct vLLM OpenAI-compatible server deployments using `spec.engine.image` |
 
 ### KAITO Provider
 

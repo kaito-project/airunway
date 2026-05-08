@@ -136,6 +136,12 @@ export interface ScalingSpec {
   decode?: ComponentScalingSpec;
 }
 
+export interface EnvVar {
+  name: string;
+  value?: string;
+  valueFrom?: Record<string, unknown>;
+}
+
 export interface PodTemplateSpec {
   nodeSelector?: Record<string, string>;
   tolerations?: Array<{
@@ -168,7 +174,7 @@ export interface ModelDeploymentSpec {
   scaling?: ScalingSpec;
   resources?: ResourceSpec;
   image?: string;
-  env?: Record<string, string>;
+  env?: EnvVar[];
   podTemplate?: PodTemplateSpec;
   secrets?: SecretSpec;
   gateway?: GatewaySpec;
@@ -586,7 +592,7 @@ export function toModelDeploymentSpec(config: DeploymentConfig): ModelDeployment
   };
 
   if (config.env && Object.keys(config.env).length > 0) {
-    spec.env = config.env;
+    spec.env = Object.entries(config.env).map(([name, value]) => ({ name, value }));
   }
 
   if (config.imageRef) {

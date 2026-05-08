@@ -90,7 +90,7 @@ Note: The UI layer shown above includes the Frontend layer and the Backend layer
 
 ### Provider and Runtime Registration
 
-Providers and direct runtimes register capabilities, selection rules, and installation metadata through `InferenceProviderConfig` resources. Some providers reconcile provider-specific CRDs such as KAITO `Workspace`, Dynamo graph resources, KubeRay `RayService`, or llm-d resources. Provider-supplied direct runtimes such as Direct vLLM can instead target a plain Kubernetes `Deployment`; this repository does not assume a repo-local `providers/vllm` controller.
+Providers and direct runtimes register capabilities, selection rules, and installation metadata through `InferenceProviderConfig` resources. Some providers reconcile provider-specific CRDs such as KAITO `Workspace`, Dynamo graph resources, KubeRay `RayService`, or llm-d resources. Direct runtimes such as Direct vLLM can instead target a plain Kubernetes `Deployment`; this repository includes the Direct vLLM provider controller and shim manifests under `providers/vllm/`.
 
 ### Why the Frontend Is Fully Decoupled
 
