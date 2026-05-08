@@ -895,12 +895,15 @@ class KubernetesService {
   ): Promise<InstallationStatus> {
     if (!requiresCRD) {
       const displayName = providerName || getProviderDisplayName(providerId);
+      const ready = status?.ready === true;
       return {
-        installed: true,
+        installed: ready,
         crdFound: true,
-        operatorRunning: true,
+        operatorRunning: ready,
         requiresCRD: false,
-        message: `${displayName} is available without an upstream runtime operator installation`,
+        message: ready
+          ? `${displayName} is available without an upstream runtime operator installation`
+          : `${displayName} does not require an upstream runtime operator, but the provider is not ready`,
       };
     }
 

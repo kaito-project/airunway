@@ -33,6 +33,7 @@ export interface InstallationStatus {
   crdFound?: boolean;
   operatorRunning?: boolean;
   requiresCRD?: boolean;
+  installable?: boolean;
   installationSteps: InstallationStep[];
   helmCommands: string[];
 }

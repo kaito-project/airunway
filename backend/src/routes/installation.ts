@@ -200,6 +200,8 @@ const installation = new Hono()
     const provider = extractProviderDetails(config);
     const charts = normalizeInstallCharts(providerId, provider.helmCharts);
     const hasInstallMetadata = charts.length > 0;
+    const requiresCRD = provider.requiresCRD !== false;
+    const installable = requiresCRD && hasInstallMetadata;
     const status = config.status || {};
     const installationStatus = await kubernetesService.checkProviderInstallationStatus(
       providerId,
@@ -219,9 +221,9 @@ const installation = new Hono()
       message: hasInstallMetadata || provider.requiresCRD === false
         ? installationStatus.message
         : `No installation metadata found for provider ${providerId}`,
-      installable: hasInstallMetadata,
+      installable,
       installationSteps: provider.installationSteps,
-      helmCommands: helmService.getInstallCommands(provider.helmRepos, charts),
+      helmCommands: installable ? helmService.getInstallCommands(provider.helmRepos, charts) : [],
     });
   })
   .get('/providers/:providerId/commands', async (c) => {
@@ -234,11 +236,12 @@ const installation = new Hono()
 
     const provider = extractProviderDetails(config);
     const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+    const installable = provider.requiresCRD !== false && charts.length > 0;
 
     return c.json({
       providerId: provider.id,
       providerName: provider.name,
-      commands: helmService.getInstallCommands(provider.helmRepos, charts),
+      commands: installable ? helmService.getInstallCommands(provider.helmRepos, charts) : [],
       steps: provider.installationSteps,
     });
   })
@@ -252,6 +255,12 @@ const installation = new Hono()
 
     const provider = extractProviderDetails(config);
     const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+
+    if (provider.requiresCRD === false) {
+      throw new HTTPException(400, {
+        message: `${provider.name} does not require an upstream runtime operator installation.`,
+      });
+    }
 
     if (charts.length === 0) {
       throw new HTTPException(400, {
@@ -301,6 +310,12 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
+
+    if (provider.requiresCRD === false) {
+      throw new HTTPException(400, {
+        message: `${provider.name} does not require an upstream runtime operator installation.`,
+      });
+    }
 
     const helmStatus = await helmService.checkHelmAvailable();
     if (!helmStatus.available) {
