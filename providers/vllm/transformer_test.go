@@ -435,6 +435,46 @@ func TestTransformAggregatedEnvVars(t *testing.T) {
 	}
 }
 
+func TestTransformAggregatedEnvVarPrefersValueFromOverValue(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test-model", "default")
+	md.Spec.Env = []corev1.EnvVar{
+		{
+			Name:  "SECRET_VAL",
+			Value: "inline-fallback",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+					Key:                  "my-key",
+				},
+			},
+		},
+	}
+
+	resources, err := tr.Transform(context.Background(), md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	deploy := resources[0]
+	containers, _, _ := unstructured.NestedSlice(deploy.Object, "spec", "template", "spec", "containers")
+	container := containers[0].(map[string]interface{})
+	envVars, _ := container["env"].([]interface{})
+	if len(envVars) != 1 {
+		t.Fatalf("expected 1 env var, got %d", len(envVars))
+	}
+
+	env := envVars[0].(map[string]interface{})
+	if _, ok := env["value"]; ok {
+		t.Fatalf("env var should not set both value and valueFrom: %#v", env)
+	}
+	valueFrom := env["valueFrom"].(map[string]interface{})
+	secretKeyRef := valueFrom["secretKeyRef"].(map[string]interface{})
+	if secretKeyRef["name"] != "my-secret" || secretKeyRef["key"] != "my-key" {
+		t.Fatalf("unexpected secretKeyRef: %#v", secretKeyRef)
+	}
+}
+
 func TestTransformAggregatedNodeSelector(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test-model", "default")

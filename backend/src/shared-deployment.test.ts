@@ -102,7 +102,10 @@ describe('shared deployment manifest conversion', () => {
       env,
     });
 
-    expect(spec.env).toEqual(env);
+    expect(spec.env).toEqual([
+      { name: 'VLLM_USE_V1', value: '1' },
+      { name: 'NCCL_DEBUG', value: 'INFO' },
+    ]);
   });
 
   test('omits empty env from spec.env', () => {

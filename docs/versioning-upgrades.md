@@ -61,7 +61,7 @@ kubectl rollout undo deployment/airunway-controller-manager -n airunway-system
 | Dynamo   | v1.0.0          | nvidia.com/v1alpha1 | Requires NVIDIA GPU operator; CRDs are bundled in the platform chart |
 | KubeRay  | v1.1.0          | ray.io/v1           | Optional: KubeRay autoscaler for scaling     |
 | llm-d    | Provider-specific | Provider-specific | Register an `InferenceProviderConfig`; compatibility follows the installed llm-d provider stack |
-| Direct vLLM | Provider-supplied | apps/v1 `Deployment` | No repo-local provider shim is assumed; use `spec.engine.image` for the vLLM server image |
+| Direct vLLM | v0.1.0 | apps/v1 `Deployment` | Repo-local provider shim is in `providers/vllm/deploy/vllm.yaml`; use `spec.engine.image` for the vLLM server image |
 
 Controller version is independent of provider operator versions. The controller detects provider CRD versions dynamically.
 

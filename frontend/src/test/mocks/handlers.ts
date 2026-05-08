@@ -119,7 +119,7 @@ export const handlers = [
       annotations: {},
       recipeProvenance: {
         source: 'mock',
-        modelId: body.modelId || 'test/model',
+        id: body.modelId || 'test/model',
       },
       warnings: [],
     })

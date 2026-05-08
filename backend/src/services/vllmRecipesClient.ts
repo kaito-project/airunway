@@ -96,12 +96,22 @@ export class VllmRecipesClient {
   }
 
   resolveReference(reference: string): string {
-    try {
-      return new URL(reference).toString();
-    } catch {
-      const normalizedReference = reference.startsWith('/') ? reference : `/${reference}`;
-      return `${this.sourceBaseUrl}${normalizedReference}`;
+    const baseUrl = new URL(`${this.sourceBaseUrl}/`);
+    const resolved = new URL(reference, baseUrl);
+
+    if (!['http:', 'https:'].includes(resolved.protocol)) {
+      throw new Error(`vLLM recipe references must use HTTP(S): ${reference}`);
     }
+
+    if (resolved.origin !== baseUrl.origin) {
+      throw new Error(`vLLM recipe references must stay under ${baseUrl.origin}: ${reference}`);
+    }
+
+    if (!resolved.pathname.startsWith(baseUrl.pathname)) {
+      throw new Error(`vLLM recipe references must stay under ${this.sourceBaseUrl}: ${reference}`);
+    }
+
+    return resolved.toString();
   }
 
   private async fetchJson<T>(url: string): Promise<T> {

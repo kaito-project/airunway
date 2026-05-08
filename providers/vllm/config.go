@@ -66,10 +66,15 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 			},
 			ServingModes: []airunwayv1alpha1.ServingMode{
 				airunwayv1alpha1.ServingModeAggregated,
+				airunwayv1alpha1.ServingModeDisaggregated,
 			},
 			CPUSupport: false,
 			GPUSupport: true,
 		},
+		// Direct vLLM is intentionally a low-priority fallback for vLLM GPU
+		// workloads. Managed providers such as Dynamo and KubeRay keep higher
+		// priorities, while users can still force Direct vLLM with
+		// spec.provider.name: vllm.
 		SelectionRules: []airunwayv1alpha1.SelectionRule{
 			{
 				Condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 0 && spec.engine.type == 'vllm'",
@@ -91,7 +96,7 @@ func GetInstallationInfo() *airunwayv1alpha1.InstallationInfo {
 			},
 			{
 				Title:       "Create HuggingFace Token Secret",
-				Command:     "kubectl create secret generic vLLM-hf-token --from-literal=HF_TOKEN=<your-token> -n <model-namespace>",
+				Command:     "kubectl create secret generic vllm-hf-token --from-literal=HF_TOKEN=<your-token> -n <model-namespace>",
 				Description: "Create the HuggingFace token secret in the same namespace as your ModelDeployment.",
 			},
 		},

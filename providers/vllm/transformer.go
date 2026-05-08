@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -441,16 +442,13 @@ func (t *Transformer) buildEnvVars(md *airunwayv1alpha1.ModelDeployment) []inter
 		ev := map[string]interface{}{
 			"name": e.Name,
 		}
-		if e.Value != "" {
+		if valueFrom := envVarSourceToMap(e.ValueFrom); len(valueFrom) > 0 {
+			// Kubernetes EnvVar validation rejects entries that set both value and
+			// valueFrom. Prefer valueFrom when both are provided, matching the
+			// explicit external reference over the inline fallback value.
+			ev["valueFrom"] = valueFrom
+		} else if e.Value != "" {
 			ev["value"] = e.Value
-		}
-		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
-			ev["valueFrom"] = map[string]interface{}{
-				"secretKeyRef": map[string]interface{}{
-					"name": e.ValueFrom.SecretKeyRef.Name,
-					"key":  e.ValueFrom.SecretKeyRef.Key,
-				},
-			}
 		}
 		envVars = append(envVars, ev)
 	}
@@ -469,6 +467,23 @@ func (t *Transformer) buildEnvVars(md *airunwayv1alpha1.ModelDeployment) []inter
 	}
 
 	return envVars
+}
+
+func envVarSourceToMap(source *corev1.EnvVarSource) map[string]interface{} {
+	if source == nil {
+		return nil
+	}
+
+	payload, err := json.Marshal(source)
+	if err != nil {
+		return nil
+	}
+
+	var valueFrom map[string]interface{}
+	if err := json.Unmarshal(payload, &valueFrom); err != nil {
+		return nil
+	}
+	return valueFrom
 }
 
 // buildTolerations converts tolerations from ModelDeployment to unstructured format.

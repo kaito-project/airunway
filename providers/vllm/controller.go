@@ -451,6 +451,18 @@ func (r *VLLMProviderReconciler) setImageResolutionStatus(ctx context.Context, m
 	}
 
 	if shouldResolveImage(tag, digest) {
+		if reuseResolvedImageStatus(status, md.Status.Image, imageRef) {
+			message := fmt.Sprintf("Reused resolved Direct vLLM image %q to %q from %s selection.", imageRef, status.Resolved, source)
+			message = r.appendRecipeProvenanceCondition(md, message)
+			status.Message = message
+			md.Status.Image = status
+
+			r.setUnsupportedImageCondition(md, source)
+			r.setCondition(md, airunwayv1alpha1.ConditionTypeImageResolved, metav1.ConditionTrue, "ImageResolutionReused", message)
+			r.setCondition(md, airunwayv1alpha1.ConditionTypeImageVerified, metav1.ConditionUnknown, "VerificationNotImplemented", imageVerificationNotImplementedMessage)
+			return nil
+		}
+
 		resolver := r.ImageResolver
 		if resolver == nil {
 			resolver = NewRemoteImageResolver()
@@ -497,6 +509,25 @@ func (r *VLLMProviderReconciler) setImageResolutionStatus(ctx context.Context, m
 	r.setCondition(md, airunwayv1alpha1.ConditionTypeImageResolved, metav1.ConditionTrue, "ImageResolved", message)
 	r.setCondition(md, airunwayv1alpha1.ConditionTypeImageVerified, metav1.ConditionUnknown, "VerificationNotImplemented", imageVerificationNotImplementedMessage)
 	return nil
+}
+
+func reuseResolvedImageStatus(status, current *airunwayv1alpha1.ImageStatus, requested string) bool {
+	if current == nil {
+		return false
+	}
+	if strings.TrimSpace(current.Requested) != strings.TrimSpace(requested) {
+		return false
+	}
+	if strings.TrimSpace(current.Resolved) == "" || strings.TrimSpace(current.Digest) == "" {
+		return false
+	}
+
+	status.Resolved = current.Resolved
+	status.Digest = current.Digest
+	status.CreatedAt = current.CreatedAt
+	status.Revision = current.Revision
+	status.Age = current.Age
+	return true
 }
 
 func shouldResolveImage(tag, digest string) bool {
