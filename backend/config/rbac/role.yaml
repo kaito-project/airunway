@@ -33,6 +33,12 @@ rules:
       - namespaces
     verbs: ["get", "list", "watch", "create"]
 
+  # Authentication API - validate bearer tokens when auth is enabled
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - tokenreviews
+    verbs: ["create"]
+
   # Apps API - Deployments, ReplicaSets
   - apiGroups: ["apps"]
     resources:
