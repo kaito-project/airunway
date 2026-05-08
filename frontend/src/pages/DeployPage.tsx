@@ -10,11 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, ArrowLeft, Cpu, HardDrive, Layers, ExternalLink, Info } from 'lucide-react'
 import { GpuFitIndicator } from '@/components/models/GpuFitIndicator'
-<<<<<<< HEAD
 import { ThroughputEstimate } from '@/components/models/ThroughputEstimate'
-=======
 import { getEngineDisplayName } from '@/lib/deploymentDisplay'
->>>>>>> 955ec0b (feat: add direct vllm provider)
 import { getGpuFitCapacityDisplay } from '@/lib/gpu-fit-capacity'
 import { buildThroughputParams } from '@/lib/gpu-throughput-params'
 import { useGpuThroughput } from '@/hooks/useGpuOperator'

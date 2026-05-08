@@ -147,6 +147,7 @@ const selectDefaultRuntimeId = (runtimes: RuntimeSelectionMetadata[] | undefined
 
   return 'dynamo'
 }
+}
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
