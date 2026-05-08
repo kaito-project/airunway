@@ -159,7 +159,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5" />
-          <h2 className="text-lg font-heading">Chat with Model</h2>
+          <h2 className="text-lg font-heading">Chat with model</h2>
         </div>
         <Button
           type="button"
@@ -173,7 +173,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
         </Button>
       </div>
       <p className="mb-4 text-sm text-muted-foreground">
-        Send OpenAI-compatible chat requests directly to this running deployment.
+        Send a message directly to this running model and see its reply here.
       </p>
 
       <div
@@ -182,7 +182,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       >
         {messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Start a conversation with the deployed model.
+            Start a conversation with this model.
           </p>
         ) : (
           messages.map((message) => (

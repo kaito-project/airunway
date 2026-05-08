@@ -113,19 +113,19 @@ describe('DeploymentDetailsPage chat panel', () => {
     toastMock.mockReset()
   })
 
-  it('shows chat only for running deployments with a gateway endpoint', () => {
+  it('shows chat only for running deployments with a frontend service', () => {
     const running = renderDetailsPage()
-    expect(screen.getByRole('heading', { name: 'Chat with Model' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Chat with model' })).toBeInTheDocument()
     running.unmount()
 
     deploymentMock.current = createDeployment({ phase: 'Pending' })
     const pending = renderDetailsPage()
-    expect(screen.queryByRole('heading', { name: 'Chat with Model' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Chat with model' })).not.toBeInTheDocument()
     pending.unmount()
 
-    deploymentMock.current = createDeployment({ gateway: undefined })
+    deploymentMock.current = createDeployment({ frontendService: undefined })
     renderDetailsPage()
-    expect(screen.queryByRole('heading', { name: 'Chat with Model' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Chat with model' })).not.toBeInTheDocument()
   })
 
   it('sends the prompt and renders streamed assistant responses', async () => {
