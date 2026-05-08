@@ -54,12 +54,11 @@ rules:
       - events
     verbs: ["list"]
 
-  # Namespaces (read, list, create, delete; no watch)
-  # delete used by: KubernetesService.deleteNamespace (services/kubernetes.ts)
+  # Namespaces (read, list, create; no watch/delete)
   - apiGroups: [""]
     resources:
       - namespaces
-    verbs: ["get", "list", "create", "delete"]
+    verbs: ["get", "list", "create"]
 
   # Node info for GPU detection (listNode only; no get/watch)
   - apiGroups: [""]
@@ -91,11 +90,11 @@ rules:
       - inferenceproviderconfigs
     verbs: ["get", "list", "delete"]
 
-  # CRD management (readCustomResourceDefinition, deleteCustomResourceDefinition)
+  # CRD management (readCustomResourceDefinition only; no delete)
   - apiGroups: ["apiextensions.k8s.io"]
     resources:
       - customresourcedefinitions
-    verbs: ["get", "delete"]
+    verbs: ["get"]
 
   # NVIDIA ClusterPolicies (listClusterCustomObject only)
   - apiGroups: ["nvidia.com"]
