@@ -73,6 +73,12 @@ rules:
   - watch
   - create
 - apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
   - apps
   resources:
   - deployments
