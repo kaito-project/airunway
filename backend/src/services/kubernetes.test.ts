@@ -112,6 +112,73 @@ describe('KubernetesService - CRD Version Annotation Extraction', () => {
 });
 
 
+describe('KubernetesService - deployment pod lookup', () => {
+  test('aggregates and de-duplicates pods across all supported selectors', async () => {
+    const service = kubernetesService as any;
+    const originalCoreV1Api = service.coreV1Api;
+    const selectors: string[] = [];
+
+    const pod = (name: string, labels: Record<string, string> = {}) => ({
+      metadata: { name, labels },
+      status: {
+        phase: 'Running',
+        containerStatuses: [
+          { ready: true, restartCount: 0, state: { running: {} } },
+        ],
+      },
+    });
+
+    service.coreV1Api = {
+      listNamespacedPod: async (...args: unknown[]) => {
+        const labelSelector = args[5] as string;
+        selectors.push(labelSelector);
+
+        if (labelSelector === 'app.kubernetes.io/instance=demo') {
+          return { body: { items: [pod('demo-router'), pod('demo-shared')] } };
+        }
+
+        if (labelSelector === 'airunway.ai/deployment=demo') {
+          return { body: { items: [pod('demo-shared'), pod('demo-worker')] } };
+        }
+
+        if (labelSelector === 'ray.io/cluster') {
+          return {
+            body: {
+              items: [
+                pod('demo-ray-head', { 'ray.io/cluster': 'demo-raycluster' }),
+                pod('other-ray-head', { 'ray.io/cluster': 'other-raycluster' }),
+              ],
+            },
+          };
+        }
+
+        return { body: { items: [] } };
+      },
+    };
+
+    try {
+      const pods = await kubernetesService.getDeploymentPods('demo', 'default');
+
+      expect(pods.map((item) => item.name)).toEqual([
+        'demo-router',
+        'demo-shared',
+        'demo-worker',
+        'demo-ray-head',
+      ]);
+      expect(new Set(pods.map((item) => item.name)).size).toBe(pods.length);
+      expect(selectors).toEqual([
+        'app.kubernetes.io/instance=demo',
+        'airunway.ai/deployment=demo',
+        'kaito.sh/workspace=demo',
+        'app=demo',
+        'ray.io/cluster',
+      ]);
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+});
+
 describe('KubernetesService - Type Definitions', () => {
   describe('ClusterGpuCapacity', () => {
     test('creates valid capacity with GPU nodes', () => {

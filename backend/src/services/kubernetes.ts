@@ -525,7 +525,19 @@ class KubernetesService {
 
   async getDeploymentPods(name: string, namespace: string): Promise<PodStatus[]> {
     const coreApi = this.coreV1Api;
-    // Try multiple label selectors since different providers use different labels
+    const podsByName = new Map<string, k8s.V1Pod>();
+    const addPods = (pods: k8s.V1Pod[]) => {
+      for (const pod of pods) {
+        const podName = pod.metadata?.name;
+        if (podName && !podsByName.has(podName)) {
+          podsByName.set(podName, pod);
+        }
+      }
+    };
+
+    // Try multiple label selectors since different providers use different labels.
+    // Some deployment stacks create related components with different labels, so
+    // aggregate across all matches instead of stopping at the first selector.
     const labelSelectors = [
       `app.kubernetes.io/instance=${name}`,  // Standard K8s label (Dynamo, KubeRay)
       `airunway.ai/deployment=${name}`,  // AIRunway label
@@ -549,7 +561,7 @@ class KubernetesService {
 
         if (response.body.items.length > 0) {
           logger.debug({ name, namespace, labelSelector, podCount: response.body.items.length }, 'Found pods with selector');
-          return response.body.items.map((pod) => toPodStatus(pod));
+          addPods(response.body.items);
         }
       } catch (error) {
         logger.debug({ error, name, namespace, labelSelector }, 'Error trying label selector');
@@ -581,14 +593,20 @@ class KubernetesService {
 
       if (matchingPods.length > 0) {
         logger.debug({ name, namespace, podCount: matchingPods.length }, 'Found KubeRay pods by cluster label prefix');
-        return matchingPods.map((pod) => toPodStatus(pod));
+        addPods(matchingPods);
       }
     } catch (error) {
       logger.debug({ error, name, namespace }, 'Error trying KubeRay cluster label selector');
     }
 
-    logger.debug({ name, namespace }, 'No pods found with any label selector');
-    return [];
+    const pods = Array.from(podsByName.values());
+    if (pods.length === 0) {
+      logger.debug({ name, namespace }, 'No pods found with any label selector');
+      return [];
+    }
+
+    logger.debug({ name, namespace, podCount: pods.length }, 'Found deployment pods');
+    return pods.map((pod) => toPodStatus(pod));
   }
 
   /**
