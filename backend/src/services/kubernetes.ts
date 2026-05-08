@@ -535,17 +535,17 @@ class KubernetesService {
       }
     };
 
-    // Try multiple label selectors since different providers use different labels.
+    // Try multiple exact label selectors since different providers use different labels.
     // Some deployment stacks create related components with different labels, so
-    // aggregate across all matches instead of stopping at the first selector.
-    const labelSelectors = [
-      `app.kubernetes.io/instance=${name}`,  // Standard K8s label (Dynamo, KubeRay)
-      `airunway.ai/deployment=${name}`,  // AIRunway label
-      `kaito.sh/workspace=${name}`,          // KAITO workspace label
-      `app=${name}`,                         // Common fallback
+    // aggregate across all exact matches instead of stopping at the first selector.
+    const exactLabelSelectors = [
+      `app.kubernetes.io/instance=${name}`,      // Standard K8s label (Dynamo)
+      `airunway.ai/deployment=${name}`,          // AIRunway label
+      `airunway.ai/model-deployment=${name}`,    // Pod-template label used by KubeRay
+      `kaito.sh/workspace=${name}`,              // KAITO workspace label
     ];
 
-    for (const labelSelector of labelSelectors) {
+    for (const labelSelector of exactLabelSelectors) {
       try {
         const response = await withRetry(
           () => coreApi.listNamespacedPod(
@@ -569,9 +569,11 @@ class KubernetesService {
       }
     }
 
-    // KubeRay creates pods with ray.io/cluster label set to a generated RayCluster name
-    // The RayCluster name is the RayService name with a random suffix, so we need to
-    // find pods where the ray.io/cluster label starts with the deployment name
+    // KubeRay creates pods with ray.io/cluster label set to a generated RayCluster name.
+    // Modern Airunway KubeRay pods carry airunway.ai/model-deployment (handled above),
+    // but keep this as a backwards-compatible fallback. Only accept an exact name or
+    // the RayService-generated "<deployment>-raycluster..." form so deployments like
+    // "demo" do not match unrelated clusters like "demo2" or "demo-extra".
     try {
       const response = await withRetry(
         () => coreApi.listNamespacedPod(
@@ -585,10 +587,9 @@ class KubernetesService {
         { operationName: 'getDeploymentPods:kuberay', maxRetries: 1 }
       );
 
-      // Filter pods where ray.io/cluster label starts with the deployment name
       const matchingPods = response.body.items.filter(pod => {
         const clusterLabel = pod.metadata?.labels?.['ray.io/cluster'] || '';
-        return clusterLabel.startsWith(name);
+        return clusterLabel === name || clusterLabel.startsWith(`${name}-raycluster`);
       });
 
       if (matchingPods.length > 0) {
@@ -597,6 +598,33 @@ class KubernetesService {
       }
     } catch (error) {
       logger.debug({ error, name, namespace }, 'Error trying KubeRay cluster label selector');
+    }
+
+    if (podsByName.size === 0) {
+      // Last-resort fallback for older or third-party manifests that only set app=<name>.
+      // Avoid aggregating this broad label with canonical matches because unrelated pods
+      // can legitimately share the same app label in a namespace.
+      try {
+        const labelSelector = `app=${name}`;
+        const response = await withRetry(
+          () => coreApi.listNamespacedPod(
+            namespace,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            labelSelector
+          ),
+          { operationName: 'getDeploymentPods:fallbackApp', maxRetries: 1 }
+        );
+
+        if (response.body.items.length > 0) {
+          logger.debug({ name, namespace, labelSelector, podCount: response.body.items.length }, 'Found pods with fallback selector');
+          addPods(response.body.items);
+        }
+      } catch (error) {
+        logger.debug({ error, name, namespace }, 'Error trying fallback app label selector');
+      }
     }
 
     const pods = Array.from(podsByName.values());

@@ -113,7 +113,7 @@ describe('KubernetesService - CRD Version Annotation Extraction', () => {
 
 
 describe('KubernetesService - deployment pod lookup', () => {
-  test('aggregates and de-duplicates pods across all supported selectors', async () => {
+  test('aggregates and de-duplicates pods across exact supported selectors', async () => {
     const service = kubernetesService as any;
     const originalCoreV1Api = service.coreV1Api;
     const selectors: string[] = [];
@@ -141,11 +141,21 @@ describe('KubernetesService - deployment pod lookup', () => {
           return { body: { items: [pod('demo-shared'), pod('demo-worker')] } };
         }
 
+        if (labelSelector === 'airunway.ai/model-deployment=demo') {
+          return { body: { items: [pod('demo-ray-template')] } };
+        }
+
+        if (labelSelector === 'app=demo') {
+          return { body: { items: [pod('unrelated-app-pod')] } };
+        }
+
         if (labelSelector === 'ray.io/cluster') {
           return {
             body: {
               items: [
                 pod('demo-ray-head', { 'ray.io/cluster': 'demo-raycluster' }),
+                pod('demo2-ray-head', { 'ray.io/cluster': 'demo2-raycluster' }),
+                pod('demo-extra-ray-head', { 'ray.io/cluster': 'demo-extra-raycluster' }),
                 pod('other-ray-head', { 'ray.io/cluster': 'other-raycluster' }),
               ],
             },
@@ -163,15 +173,61 @@ describe('KubernetesService - deployment pod lookup', () => {
         'demo-router',
         'demo-shared',
         'demo-worker',
+        'demo-ray-template',
         'demo-ray-head',
       ]);
       expect(new Set(pods.map((item) => item.name)).size).toBe(pods.length);
       expect(selectors).toEqual([
         'app.kubernetes.io/instance=demo',
         'airunway.ai/deployment=demo',
+        'airunway.ai/model-deployment=demo',
         'kaito.sh/workspace=demo',
-        'app=demo',
         'ray.io/cluster',
+      ]);
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+
+  test('uses broad app selector only as a last-resort fallback', async () => {
+    const service = kubernetesService as any;
+    const originalCoreV1Api = service.coreV1Api;
+    const selectors: string[] = [];
+
+    const pod = (name: string) => ({
+      metadata: { name },
+      status: {
+        phase: 'Running',
+        containerStatuses: [
+          { ready: true, restartCount: 0, state: { running: {} } },
+        ],
+      },
+    });
+
+    service.coreV1Api = {
+      listNamespacedPod: async (...args: unknown[]) => {
+        const labelSelector = args[5] as string;
+        selectors.push(labelSelector);
+
+        if (labelSelector === 'app=legacy-demo') {
+          return { body: { items: [pod('legacy-demo-pod')] } };
+        }
+
+        return { body: { items: [] } };
+      },
+    };
+
+    try {
+      const pods = await kubernetesService.getDeploymentPods('legacy-demo', 'default');
+
+      expect(pods.map((item) => item.name)).toEqual(['legacy-demo-pod']);
+      expect(selectors).toEqual([
+        'app.kubernetes.io/instance=legacy-demo',
+        'airunway.ai/deployment=legacy-demo',
+        'airunway.ai/model-deployment=legacy-demo',
+        'kaito.sh/workspace=legacy-demo',
+        'ray.io/cluster',
+        'app=legacy-demo',
       ]);
     } finally {
       service.coreV1Api = originalCoreV1Api;
