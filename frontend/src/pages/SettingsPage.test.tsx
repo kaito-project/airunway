@@ -7,6 +7,7 @@ const mutateAsync = vi.fn()
 const refetch = vi.fn()
 const startOAuth = vi.fn()
 const toast = vi.fn()
+const providerStatusCalls: string[] = []
 let mockGpuStatus = {
   installed: false,
   gpusAvailable: false,
@@ -141,6 +142,16 @@ const getMockInstallationStatus = (providerId: string) => {
           { title: 'Start vLLM operator', commands: ['helm install vllm-operator vllm/operator'] },
         ],
       }
+    case 'registered-vllm-provider':
+      return {
+        installed: false,
+        providerName: 'vLLM',
+        message: 'Provider is registered but not ready yet.',
+        crdFound: false,
+        operatorRunning: false,
+        requiresCRD: false,
+        installationSteps: [],
+      }
     default:
       return {
         installed: true,
@@ -185,11 +196,14 @@ vi.mock('@/hooks/useInstallation', () => ({
     },
     isLoading: false,
   }),
-  useProviderInstallationStatus: (providerId: string) => ({
-    data: getMockInstallationStatus(providerId),
-    isLoading: false,
-    refetch,
-  }),
+  useProviderInstallationStatus: (providerId: string) => {
+    providerStatusCalls.push(providerId)
+    return {
+      data: getMockInstallationStatus(providerId),
+      isLoading: false,
+      refetch,
+    }
+  },
   useInstallProvider: () => ({
     mutateAsync,
   }),
@@ -258,6 +272,7 @@ describe('SettingsPage', () => {
     refetch.mockReset()
     startOAuth.mockReset()
     toast.mockReset()
+    providerStatusCalls.length = 0
     mockRuntimes = defaultMockRuntimes()
     mockGpuStatus = {
       installed: false,
@@ -467,6 +482,36 @@ describe('SettingsPage', () => {
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /install vllm/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('defaults to a registered provider instead of Dynamo when no runtime is installed and Dynamo is absent', async () => {
+    mockRuntimes = [
+      {
+        id: 'registered-vllm-provider',
+        name: 'vLLM',
+        installed: false,
+        healthy: false,
+        requiresCRD: false,
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    await screen.findByText('vLLM Status')
+
+    expect(providerStatusCalls).toContain('registered-vllm-provider')
+    expect(providerStatusCalls).not.toContain('dynamo')
+
+    const vllmCard = screen.getByText('vLLM').closest('.rounded-2xl')
+    expect(vllmCard).toHaveClass('ring-2', 'ring-cyan-400')
+
+    const installationPanel = screen.getByText('vLLM Status').closest('.rounded-2xl')
+    expect(within(installationPanel as HTMLElement).getByText('Registered')).toBeInTheDocument()
+    expect(within(installationPanel as HTMLElement).getAllByText('Provider is registered but not ready yet.').length).toBeGreaterThan(0)
   })
 
   it('keeps a runtime in a starting state after install command succeeds but operator is not ready yet', async () => {

@@ -58,6 +58,10 @@ type RuntimeCrdMetadata = {
   requiresCRD?: boolean | null
 }
 
+type RuntimeSelectionMetadata = RuntimeCrdMetadata & {
+  installed?: boolean | null
+}
+
 const KNOWN_RUNTIME_IDS = new Set(['dynamo', 'kuberay', 'kaito', 'llmd', 'vllm'])
 const CRD_LESS_RUNTIME_IDS = new Set(['llmd', 'vllm'])
 const CRD_LESS_RUNTIME_DISPLAY_NAMES = new Set(['LLM-D', 'vLLM'])
@@ -120,6 +124,29 @@ const crdLessRuntimeStateLabel = (ready: boolean | null | undefined) => (
   ready ? 'Ready' : 'Registered'
 )
 
+const selectDefaultRuntimeId = (runtimes: RuntimeSelectionMetadata[] | undefined): RuntimeId | null => {
+  if (!runtimes) {
+    return null
+  }
+
+  const installedRuntime = runtimes.find(r => r.installed && r.id)
+  if (installedRuntime?.id) {
+    return canonicalizeRuntimeId(installedRuntime.id)
+  }
+
+  const dynamoRuntime = runtimes.find(r => runtimeIdsMatch(r.id, 'dynamo') && r.id)
+  if (dynamoRuntime?.id) {
+    return canonicalizeRuntimeId(dynamoRuntime.id)
+  }
+
+  const firstRegisteredRuntime = runtimes.find(r => r.id)
+  if (firstRegisteredRuntime?.id) {
+    return canonicalizeRuntimeId(firstRegisteredRuntime.id)
+  }
+
+  return 'dynamo'
+}
+
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { isLoading: settingsLoading } = useSettings()
@@ -154,18 +181,14 @@ export function SettingsPage() {
   const runtimes = runtimesStatus?.runtimes || []
   const readyRuntimeCount = runtimes.filter(r => runtimeRequiresCRD(r) ? r.installed : (r.installed || r.healthy)).length
   const helmAvailable = helmStatus?.available ?? false
+  const defaultRuntime = selectDefaultRuntimeId(runtimesStatus?.runtimes)
 
   // Set default runtime once data is loaded
   useEffect(() => {
-    if (runtimesStatus?.runtimes && selectedRuntime === null) {
-      const installedRuntime = runtimesStatus.runtimes.find(r => r.installed)
-      if (installedRuntime) {
-        setSelectedRuntime(canonicalizeRuntimeId(installedRuntime.id))
-      } else {
-        setSelectedRuntime('dynamo')
-      }
+    if (runtimesStatus?.runtimes && selectedRuntime === null && defaultRuntime) {
+      setSelectedRuntime(defaultRuntime)
     }
-  }, [runtimesStatus, selectedRuntime])
+  }, [runtimesStatus, selectedRuntime, defaultRuntime])
 
   // Update URL when tab changes
   useEffect(() => {
@@ -176,7 +199,7 @@ export function SettingsPage() {
     }
   }, [activeTab, setSearchParams])
 
-  const effectiveRuntime = selectedRuntime || 'dynamo'
+  const effectiveRuntime = selectedRuntime || defaultRuntime || ''
 
   const {
     data: installationStatus,
