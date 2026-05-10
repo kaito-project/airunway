@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -157,6 +157,41 @@ export function StorageVolumesSection({ volumes, onChange, deploymentName, avail
     const updated = volumes.map((v, i) => i === index ? { ...v, ...updates } : v)
     onChange(updated)
   }
+
+  useEffect(() => {
+    if (!availablePVCs || availablePVCs.length === 0) return
+
+    const validClaimNames = new Set(availablePVCs.map((pvc) => pvc.name))
+    const clearedIndices: number[] = []
+
+    const updated = volumes.map((vol, index) => {
+      const sourceMode = sourceModes[index] ?? (
+        vol.size ? 'new' :
+        vol.claimName !== undefined ? 'existing' :
+        'new'
+      )
+
+      if (sourceMode !== 'existing' || !vol.claimName || validClaimNames.has(vol.claimName)) {
+        return vol
+      }
+
+      clearedIndices.push(index)
+      return { ...vol, claimName: '' }
+    })
+
+    if (clearedIndices.length === 0) return
+
+    onChange(updated)
+    setTouched(prev => {
+      const next = { ...prev }
+      for (const index of clearedIndices) {
+        const fields = new Set(next[index] || [])
+        fields.add('claimName')
+        next[index] = fields
+      }
+      return next
+    })
+  }, [availablePVCs, volumes, sourceModes, onChange])
 
   const handlePurposeChange = (index: number, purpose: VolumePurpose) => {
     const updates: Partial<StorageVolume> = { purpose }
