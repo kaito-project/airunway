@@ -1986,12 +1986,19 @@ class KubernetesService {
    * This allows fetching service endpoints (e.g. /metrics) even when running off-cluster.
    * Uses raw fetch instead of the generated client to support text/plain responses.
    */
-  async proxyServiceGet(serviceName: string, namespace: string, port: number, path: string): Promise<string> {
+  async proxyServiceGet(
+    serviceName: string,
+    namespace: string,
+    port: number,
+    path: string,
+    options: { accept?: string; signal?: AbortSignal } = {},
+  ): Promise<string> {
     const response = await this.proxyServiceRequest(serviceName, namespace, port, path, {
       method: 'GET',
       headers: {
-        'Accept': 'text/plain',
+        'Accept': options.accept ?? 'text/plain',
       },
+      signal: options.signal,
     });
 
     if (!response.ok) {

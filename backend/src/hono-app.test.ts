@@ -157,12 +157,15 @@ describe('Hono Routes', () => {
       expect(res.headers.get('Cache-Control')).toBe('no-cache, no-transform');
       expect(await res.text()).toBe(upstreamSse);
 
-      expect(capturedModelLookupArgs).toEqual([
+      expect(capturedModelLookupArgs?.slice(0, 4)).toEqual([
         'test-deploy-frontend',
         'default',
         8080,
         'v1/models',
       ]);
+      const modelLookupOptions = capturedModelLookupArgs?.[4] as { accept?: string; signal?: unknown } | undefined;
+      expect(modelLookupOptions?.accept).toBe('application/json');
+      expect(modelLookupOptions?.signal).toBeInstanceOf(AbortSignal);
       expect(capturedChatProxyArgs).toEqual([
         'test-deploy-frontend',
         'default',
@@ -223,6 +226,205 @@ describe('Hono Routes', () => {
         {
           messages: [{ role: 'user', content: 'Hello' }],
           model: 'served-from-gateway',
+          stream: true,
+        },
+      ]);
+    });
+
+
+    test('POST /api/deployments/:name/chat gateway fallback ignores request model', async () => {
+      let capturedDirectProxyArgs: unknown[] | undefined;
+      let capturedGatewayBody: Record<string, unknown> | undefined;
+      let capturedGatewayHeader: string | null = null;
+      const gatewaySse = 'data: {"choices":[{"delta":{"content":"Hello from gateway"}}]}\n\ndata: [DONE]\n\n';
+      const originalFetch = globalThis.fetch;
+
+      restores.push(() => {
+        globalThis.fetch = originalFetch;
+      });
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedGatewayBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        capturedGatewayHeader = new Headers(init?.headers).get('X-Gateway-Model-Name');
+        return new Response(gatewaySse, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }) as typeof fetch;
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'dynamo',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+          gateway: { endpoint: 'https://gateway.example.com', modelName: 'gateway-configured-model' },
+          servedModelName: 'deployment-served-model',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async (...args: unknown[]) => {
+          capturedDirectProxyArgs = args;
+          return new Response(JSON.stringify({
+            reason: 'NotFound',
+            details: { kind: 'services' },
+          }), { status: 404 });
+        }),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+          model: 'user-requested-model',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(gatewaySse);
+      expect(capturedDirectProxyArgs).toEqual([
+        'test-deploy-frontend',
+        'default',
+        8080,
+        'v1/chat/completions',
+        {
+          messages: [{ role: 'user', content: 'Hello' }],
+          model: 'user-requested-model',
+          stream: true,
+        },
+      ]);
+      expect(capturedGatewayBody).toEqual({
+        messages: [{ role: 'user', content: 'Hello' }],
+        model: 'gateway-configured-model',
+        stream: true,
+      });
+      expect(capturedGatewayHeader).toBe('gateway-configured-model');
+    });
+
+    test('POST /api/deployments/:name/chat skips KAITO llama.cpp servedModelName and discovers model', async () => {
+      let capturedModelLookupArgs: unknown[] | undefined;
+      let capturedChatProxyArgs: unknown[] | undefined;
+      const upstreamSse = 'data: [DONE]\n\n';
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'kaito',
+          engine: 'llamacpp',
+          modelId: 'deployment-model-id',
+          servedModelName: 'incorrect-served-model-name',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServiceGet', async (...args: unknown[]) => {
+          capturedModelLookupArgs = args;
+          return JSON.stringify({ data: [{ id: 'discovered-llamacpp-model' }] });
+        }),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async (...args: unknown[]) => {
+          capturedChatProxyArgs = args;
+          return new Response(upstreamSse, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          });
+        }),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(upstreamSse);
+      expect(capturedModelLookupArgs?.slice(0, 4)).toEqual([
+        'test-deploy-frontend',
+        'default',
+        8080,
+        'v1/models',
+      ]);
+      const modelLookupOptions = capturedModelLookupArgs?.[4] as { accept?: string; signal?: unknown } | undefined;
+      expect(modelLookupOptions?.accept).toBe('application/json');
+      expect(modelLookupOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(capturedChatProxyArgs).toEqual([
+        'test-deploy-frontend',
+        'default',
+        8080,
+        'v1/chat/completions',
+        {
+          messages: [{ role: 'user', content: 'Hello' }],
+          model: 'discovered-llamacpp-model',
+          stream: true,
+        },
+      ]);
+    });
+
+    test('POST /api/deployments/:name/chat skips KAITO llama.cpp servedModelName and falls back to modelId', async () => {
+      let capturedChatProxyArgs: unknown[] | undefined;
+      const upstreamSse = 'data: [DONE]\n\n';
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'kaito',
+          engine: 'llamacpp',
+          modelId: 'deployment-model-id',
+          servedModelName: 'incorrect-served-model-name',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServiceGet', async () => {
+          throw new Error('model discovery failed');
+        }),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async (...args: unknown[]) => {
+          capturedChatProxyArgs = args;
+          return new Response(upstreamSse, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          });
+        }),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(upstreamSse);
+      expect(capturedChatProxyArgs).toEqual([
+        'test-deploy-frontend',
+        'default',
+        8080,
+        'v1/chat/completions',
+        {
+          messages: [{ role: 'user', content: 'Hello' }],
+          model: 'deployment-model-id',
           stream: true,
         },
       ]);

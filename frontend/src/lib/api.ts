@@ -346,7 +346,7 @@ export const deploymentsApi = {
     );
   },
 
-  chat: async (name: string, payload: ChatCompletionRequest, namespace?: string): Promise<Response> => {
+  chat: async (name: string, payload: ChatCompletionRequest, namespace?: string, options?: { signal?: AbortSignal }): Promise<Response> => {
     const url = namespace
       ? `${API_BASE}/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/chat`
       : `${API_BASE}/api/deployments/${encodeURIComponent(name)}/chat`;
@@ -361,6 +361,7 @@ export const deploymentsApi = {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
+      signal: options?.signal,
     });
 
     if (response.status === 401) {

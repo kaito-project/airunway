@@ -167,7 +167,10 @@ describe('DeploymentDetailsPage chat panel', () => {
       expect(chatMock).toHaveBeenCalledWith(
         'qwen3-0-6b-vllm-abc123',
         { messages: [{ role: 'user', content: 'Hello' }] },
-        'airunway-system'
+        'airunway-system',
+        expect.objectContaining({
+          signal: expect.objectContaining({ aborted: false }),
+        })
       )
     })
     expect(await screen.findByText('Hello from model')).toBeInTheDocument()

@@ -77,6 +77,8 @@ const DNS_LABEL_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const SYSTEM_PATHS = ['/dev', '/proc', '/sys', '/etc', '/var/run'];
 const DEFAULT_FRONTEND_SERVICE_PORT = 8000;
+const CHAT_MODEL_DISCOVERY_TIMEOUT_MS = 1000;
+const CHAT_MODEL_DISCOVERY_ACCEPT_HEADER = 'application/json';
 
 // Matches Kubernetes resource.Quantity: a valid decimal number with optional
 // binary (Ki, Mi, Gi, Ti, Pi, Ei) or decimal (n, u, m, k, M, G, T, P, E) suffix.
@@ -438,42 +440,88 @@ function extractFirstModelId(modelsResponse: unknown): string | undefined {
   return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
-async function resolveChatModel(
+function isKaitoLlamaCppDeployment(deployment: DeploymentStatus): boolean {
+  return deployment.provider === 'kaito' && deployment.engine === 'llamacpp';
+}
+
+function getDeploymentConfiguredChatModel(deployment: DeploymentStatus): string | undefined {
+  if (deployment.gateway?.modelName) {
+    return deployment.gateway.modelName;
+  }
+
+  if (deployment.servedModelName && !isKaitoLlamaCppDeployment(deployment)) {
+    return deployment.servedModelName;
+  }
+
+  return undefined;
+}
+
+async function discoverUpstreamChatModel(
   deployment: DeploymentStatus,
   serviceName: string,
   namespace: string,
-  servicePort: number,
-  requestedModel?: string
-): Promise<string> {
-  const configuredModel = requestedModel
-    || deployment.gateway?.modelName
-    || deployment.servedModelName;
-
-  if (configuredModel) {
-    return configuredModel;
-  }
+  servicePort: number
+): Promise<string | undefined> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CHAT_MODEL_DISCOVERY_TIMEOUT_MS);
 
   try {
     const modelsText = await kubernetesService.proxyServiceGet(
       serviceName,
       namespace,
       servicePort,
-      'v1/models'
+      'v1/models',
+      { accept: CHAT_MODEL_DISCOVERY_ACCEPT_HEADER, signal: controller.signal }
     );
-    const upstreamModel = extractFirstModelId(JSON.parse(modelsText));
-    if (upstreamModel) {
-      return upstreamModel;
-    }
+    return extractFirstModelId(JSON.parse(modelsText));
   } catch (error) {
     logger.debug(
       { error, deploymentName: deployment.name, namespace, serviceName, servicePort },
       'Could not resolve model from upstream /v1/models; falling back to deployment model ID'
     );
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return deployment.modelId;
 }
 
+async function resolveDeploymentChatModel(
+  deployment: DeploymentStatus,
+  serviceName: string,
+  namespace: string,
+  servicePort: number
+): Promise<string> {
+  const configuredModel = getDeploymentConfiguredChatModel(deployment);
+  if (configuredModel) {
+    return configuredModel;
+  }
+
+  return (await discoverUpstreamChatModel(deployment, serviceName, namespace, servicePort))
+    || deployment.modelId;
+}
+
+async function resolveDirectChatModel(
+  deployment: DeploymentStatus,
+  serviceName: string,
+  namespace: string,
+  servicePort: number,
+  requestedModel?: string
+): Promise<string> {
+  if (requestedModel) {
+    return requestedModel;
+  }
+
+  return resolveDeploymentChatModel(deployment, serviceName, namespace, servicePort);
+}
+
+async function resolveGatewayChatModel(
+  deployment: DeploymentStatus,
+  serviceName: string,
+  namespace: string,
+  servicePort: number
+): Promise<string> {
+  return resolveDeploymentChatModel(deployment, serviceName, namespace, servicePort);
+}
 
 async function handleDeploymentChat(
   c: Context<AppEnv>,
@@ -504,7 +552,7 @@ async function handleDeploymentChat(
 
   const frontendServicePort = frontendService.servicePort || DEFAULT_FRONTEND_SERVICE_PORT;
 
-  const resolvedModel = await resolveChatModel(
+  const directModel = await resolveDirectChatModel(
     deployment,
     frontendService.serviceName,
     resolvedNamespace,
@@ -519,7 +567,7 @@ async function handleDeploymentChat(
     'v1/chat/completions',
     {
       ...body,
-      model: resolvedModel,
+      model: directModel,
       stream: true,
     }
   );
@@ -528,14 +576,20 @@ async function handleDeploymentChat(
     const details = await upstreamResponse.text();
 
     if (deployment.gateway?.endpoint && isMissingServiceProxyResponse(upstreamResponse.status, details)) {
+      const gatewayModel = await resolveGatewayChatModel(
+        deployment,
+        frontendService.serviceName,
+        resolvedNamespace,
+        frontendServicePort
+      );
       const gatewayResponse = await proxyGatewayChatPostStream(
         deployment.gateway.endpoint,
         {
           ...body,
-          model: resolvedModel,
+          model: gatewayModel,
           stream: true,
         },
-        resolvedModel
+        gatewayModel
       );
 
       if (gatewayResponse.ok) {

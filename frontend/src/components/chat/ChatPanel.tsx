@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useState } from 'react'
+import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
 import { Bot, Loader2, Send, Trash2, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { deploymentsApi, type ChatMessage } from '@/lib/api'
@@ -86,6 +86,18 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
+  const mountedRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
+    }
+  }, [])
 
   const clearConversation = () => {
     if (isStreaming) return
@@ -115,6 +127,10 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       content,
     }))
 
+    abortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     setInput('')
     setError(null)
     setIsStreaming(true)
@@ -123,7 +139,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
     let assistantHasContent = false
 
     const appendAssistantContent = (content: string) => {
-      if (!content) return
+      if (!content || !mountedRef.current || abortController.signal.aborted) return
       assistantHasContent = true
       setMessages((currentMessages) =>
         currentMessages.map((message) =>
@@ -149,7 +165,8 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       const response = await deploymentsApi.chat(
         deploymentName,
         { messages: outgoingMessages },
-        namespace
+        namespace,
+        { signal: abortController.signal }
       )
 
       if (!response.ok) {
@@ -167,6 +184,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
 
       while (!streamDone) {
         const { value, done } = await reader.read()
+        if (!mountedRef.current || abortController.signal.aborted) return
         buffer += decoder.decode(value, { stream: !done })
 
         const lines = buffer.split(/\r?\n/)
@@ -187,6 +205,9 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
         }
       }
     } catch (chatError) {
+      if (chatError instanceof Error && chatError.name === 'AbortError') return
+      if (!mountedRef.current || abortController.signal.aborted) return
+
       setError(getErrorMessage(chatError))
       setMessages((currentMessages) =>
         assistantHasContent
@@ -194,7 +215,12 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
           : currentMessages.filter((message) => message.id !== assistantMessage.id)
       )
     } finally {
-      setIsStreaming(false)
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null
+      }
+      if (mountedRef.current && !abortController.signal.aborted) {
+        setIsStreaming(false)
+      }
     }
   }
 
