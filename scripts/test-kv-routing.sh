@@ -47,6 +47,8 @@
 #   --kube-worker-label LABEL   (KUBE_WORKER_LABEL) e.g. "app=foo" or
 #                                                 "nvidia.com/dynamo-graph-deployment-name=qwen-agg".
 #   --kube-metrics-port PORT    (KUBE_METRICS_PORT) Worker metrics port [9090].
+#   --kube-worker-container NAME (KUBE_WORKER_CONTAINER) Optional worker container;
+#                                                 if unset, kubectl default is used.
 #
 # Requires: bash, curl, jq, bc (and kubectl in Kubernetes mode).
 
@@ -62,8 +64,9 @@ EXTRA_HEADERS=()
 KUBE_NAMESPACE="${KUBE_NAMESPACE:-}"
 KUBE_WORKER_LABEL="${KUBE_WORKER_LABEL:-}"
 KUBE_METRICS_PORT="${KUBE_METRICS_PORT:-9090}"
+KUBE_WORKER_CONTAINER="${KUBE_WORKER_CONTAINER:-}"
 
-usage() { sed -n '2,50p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,/^$/p' "$0"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --kube-namespace)     KUBE_NAMESPACE="$2"; shift 2 ;;
     --kube-worker-label)  KUBE_WORKER_LABEL="$2"; shift 2 ;;
     --kube-metrics-port)  KUBE_METRICS_PORT="$2"; shift 2 ;;
+    --kube-worker-container) KUBE_WORKER_CONTAINER="$2"; shift 2 ;;
     -h|--help)            usage ;;
     *)                    echo "unknown arg: $1" >&2; usage 1 ;;
   esac
@@ -103,6 +107,14 @@ echo "    prompts:     $NUM_PROMPTS"
 echo "    max-tokens:  $MAX_TOKENS"
 echo "    auth:        $([[ -n "$API_KEY" ]] && echo yes || echo no)"
 echo "    kube-mode:   $([[ $KUBE_MODE -eq 1 ]] && echo 'ns='"$KUBE_NAMESPACE"' label='"$KUBE_WORKER_LABEL" || echo off)"
+if [[ $KUBE_MODE -eq 1 ]]; then
+  if [[ -n "$KUBE_WORKER_CONTAINER" ]]; then
+    echo "    kube-container: $KUBE_WORKER_CONTAINER"
+  else
+    echo "    kube-container: (kubectl default)"
+  fi
+  echo "    kube-metrics:   localhost:${KUBE_METRICS_PORT}/metrics"
+fi
 
 # ── Worker pod discovery (Kubernetes mode only) ───────────────────────
 WORKERS=""
@@ -130,10 +142,30 @@ fi
 SINCE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # ── Worker metrics scraping (Kubernetes mode only) ────────────────────
+kubectl_worker_exec() {
+  local pod="$1"
+  shift
+  local cmd=(kubectl exec -n "$KUBE_NAMESPACE" "$pod")
+  if [[ -n "$KUBE_WORKER_CONTAINER" ]]; then
+    cmd+=(-c "$KUBE_WORKER_CONTAINER")
+  fi
+  cmd+=(-- "$@")
+  "${cmd[@]}"
+}
+
+kubectl_worker_logs() {
+  local pod="$1"
+  local cmd=(kubectl logs -n "$KUBE_NAMESPACE" "$pod")
+  if [[ -n "$KUBE_WORKER_CONTAINER" ]]; then
+    cmd+=(-c "$KUBE_WORKER_CONTAINER")
+  fi
+  cmd+=(--since-time="$SINCE")
+  "${cmd[@]}"
+}
+
 get_prompt_tokens() {
   local pod="$1"
-  kubectl exec -n "$KUBE_NAMESPACE" "$pod" -c main -- \
-    curl -s "localhost:${KUBE_METRICS_PORT}/metrics" 2>/dev/null \
+  kubectl_worker_exec "$pod" curl -s "localhost:${KUBE_METRICS_PORT}/metrics" 2>/dev/null \
     | grep '^vllm:prompt_tokens_total' \
     | grep -oE '[0-9.]+$' || echo "0"
 }
@@ -382,7 +414,7 @@ if [[ $KUBE_MODE -eq 1 ]]; then
   for _ in $(seq 1 20); do
     seen=0
     for w in $WORKERS; do
-      if kubectl logs -n "$KUBE_NAMESPACE" "$w" --since-time="$SINCE" 2>/dev/null \
+      if kubectl_worker_logs "$w" 2>/dev/null \
            | grep -q 'Prefix cache hit rate'; then
         seen=1; break
       fi
@@ -463,7 +495,7 @@ if [[ $KUBE_MODE -eq 1 ]]; then
   echo
   echo "  Worker prefix cache hit rates since $SINCE:"
   for w in $WORKERS; do
-    hit=$(kubectl logs -n "$KUBE_NAMESPACE" "$w" --since-time="$SINCE" 2>/dev/null \
+    hit=$(kubectl_worker_logs "$w" 2>/dev/null \
             | grep -oE 'Prefix cache hit rate: [0-9.]+%' | tail -1 || true)
     printf "    [%s] %s\n" "$w" "${hit:-(no metrics flushed yet)}"
   done
