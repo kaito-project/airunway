@@ -94,6 +94,32 @@ const defaultMockRuntimes = (): MockRuntimeStatus[] => [
 
 let mockRuntimes = defaultMockRuntimes()
 
+const llmdSetupSteps = [
+  {
+    title: 'Install NVIDIA GPU Device Plugin',
+    command: 'kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.0/deployments/static/nvidia-device-plugin.yml',
+    description: 'Install the NVIDIA device plugin so GPU nodes advertise GPU resources.',
+  },
+  {
+    title: 'Create HuggingFace Token Secret',
+    command: 'kubectl create secret generic llm-d-hf-token --from-literal=HF_TOKEN=<your-token> -n <model-namespace>',
+    description: 'Create the HuggingFace token secret in the same namespace as your ModelDeployment.',
+  },
+]
+
+const vllmSetupSteps = [
+  {
+    title: 'Confirm GPU Nodes Are Ready',
+    command: 'kubectl describe nodes | grep nvidia.com/gpu',
+    description: 'Verify at least one node advertises GPU resources before deploying native vLLM workloads.',
+  },
+  {
+    title: 'Create HuggingFace Token Secret',
+    command: 'kubectl create secret generic vllm-hf-token --from-literal=HF_TOKEN=<your-token> -n <model-namespace>',
+    description: 'Create the HuggingFace token secret in the same namespace as your ModelDeployment.',
+  },
+]
+
 const getMockInstallationStatus = (providerId: string) => {
   switch (providerId) {
     case 'available-runtime':
@@ -115,6 +141,15 @@ const getMockInstallationStatus = (providerId: string) => {
         installationSteps: [],
       }
     case 'llmd':
+      return {
+        installed: true,
+        providerName: 'LLM-D',
+        message: 'Runtime is ready to use.',
+        crdFound: false,
+        operatorRunning: false,
+        requiresCRD: false,
+        installationSteps: llmdSetupSteps,
+      }
     case 'custom-llmd-registration':
       return {
         installed: true,
@@ -123,12 +158,18 @@ const getMockInstallationStatus = (providerId: string) => {
         crdFound: true,
         operatorRunning: true,
         requiresCRD: true,
-        installationSteps: [
-          { title: 'Install LLM-D CRD', commands: ['kubectl apply -f llmd-crd.yaml'] },
-          { title: 'Start LLM-D operator', commands: ['helm install llmd-operator llmd/operator'] },
-        ],
+        installationSteps: llmdSetupSteps,
       }
     case 'vllm':
+      return {
+        installed: true,
+        providerName: 'vLLM',
+        message: 'Runtime is ready to use.',
+        crdFound: false,
+        operatorRunning: false,
+        requiresCRD: false,
+        installationSteps: vllmSetupSteps,
+      }
     case 'custom-vllm-registration':
       return {
         installed: true,
@@ -137,10 +178,7 @@ const getMockInstallationStatus = (providerId: string) => {
         crdFound: true,
         operatorRunning: true,
         requiresCRD: true,
-        installationSteps: [
-          { title: 'Install vLLM CRD', commands: ['kubectl apply -f vllm-crd.yaml'] },
-          { title: 'Start vLLM operator', commands: ['helm install vllm-operator vllm/operator'] },
-        ],
+        installationSteps: vllmSetupSteps,
       }
     case 'registered-vllm-provider':
       return {
@@ -374,6 +412,11 @@ describe('SettingsPage', () => {
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button', { name: /install llm-d/i })).not.toBeInTheDocument()
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Manual Installation Steps')).toBeInTheDocument()
+    expect(screen.getByText('Install NVIDIA GPU Device Plugin')).toBeInTheDocument()
+    expect(screen.getByText('Create HuggingFace Token Secret')).toBeInTheDocument()
+    expect(screen.queryByText('Install LLM-D CRD')).not.toBeInTheDocument()
+    expect(screen.queryByText('Start LLM-D operator')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('vLLM'))
 
@@ -399,6 +442,11 @@ describe('SettingsPage', () => {
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /install vllm/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Manual Installation Steps')).toBeInTheDocument()
+    expect(screen.getByText('Confirm GPU Nodes Are Ready')).toBeInTheDocument()
+    expect(screen.queryByText('Install NVIDIA GPU Device Plugin')).not.toBeInTheDocument()
+    expect(screen.queryByText('Install vLLM CRD')).not.toBeInTheDocument()
+    expect(screen.queryByText('Start vLLM operator')).not.toBeInTheDocument()
   })
 
   it('uses display names to hide CRD controls for CRD-less providers with custom ids', async () => {
@@ -454,6 +502,10 @@ describe('SettingsPage', () => {
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button', { name: /install llm-d/i })).not.toBeInTheDocument()
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(within(llmdInstallationPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Manual Installation Steps')).toBeInTheDocument()
+    expect(screen.getByText('Install NVIDIA GPU Device Plugin')).toBeInTheDocument()
+    expect(screen.queryByText('Install LLM-D CRD')).not.toBeInTheDocument()
+    expect(screen.queryByText('Start LLM-D operator')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('vLLM'))
 
@@ -482,6 +534,58 @@ describe('SettingsPage', () => {
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /install vllm/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(within(vllmInstallationPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Manual Installation Steps')).toBeInTheDocument()
+    expect(screen.getByText('Confirm GPU Nodes Are Ready')).toBeInTheDocument()
+    expect(screen.queryByText('Install vLLM CRD')).not.toBeInTheDocument()
+    expect(screen.queryByText('Start vLLM operator')).not.toBeInTheDocument()
+  })
+
+  it('treats native lower-case vllm runtime id as a CRD-less provider', async () => {
+    mockRuntimes = [
+      {
+        id: 'vllm',
+        name: 'vLLM',
+        installed: true,
+        healthy: true,
+        crdFound: true,
+        operatorRunning: true,
+        requiresCRD: false,
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    await screen.findByText('vLLM Status')
+
+    expect(providerStatusCalls).toContain('vllm')
+
+    const vllmCard = screen.getByText('vLLM').closest('.rounded-2xl')
+    expect(within(vllmCard as HTMLElement).getByText('vLLM for high-throughput inference')).toBeInTheDocument()
+    expect(within(vllmCard as HTMLElement).getByText('Runtime is ready to use.')).toBeInTheDocument()
+    expect(within(vllmCard as HTMLElement).getByText('Ready')).toBeInTheDocument()
+    expect(within(vllmCard as HTMLElement).queryByText('Installed')).not.toBeInTheDocument()
+    expect(within(vllmCard as HTMLElement).queryByText('Not Installed')).not.toBeInTheDocument()
+    expect(vllmCard).not.toHaveTextContent(/CRD|operator/i)
+
+    const vllmStatusPanel = screen.getByText('vLLM Status').closest('.rounded-2xl')
+    expect(within(vllmStatusPanel as HTMLElement).getByText('Ready')).toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByText('Installed')).not.toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByText('Not Installed')).not.toBeInTheDocument()
+    expect(vllmStatusPanel).not.toHaveTextContent(/CRD|operator/i)
+    expect(within(vllmStatusPanel as HTMLElement).queryByText('CRD Installed')).not.toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByText('Operator Running')).not.toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByRole('button', { name: /install vllm/i })).not.toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
+    expect(within(vllmStatusPanel as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Manual Installation Steps')).toBeInTheDocument()
+    expect(screen.getByText('Confirm GPU Nodes Are Ready')).toBeInTheDocument()
+    expect(screen.getByText('Create HuggingFace Token Secret')).toBeInTheDocument()
+    expect(screen.queryByText('Install vLLM CRD')).not.toBeInTheDocument()
+    expect(screen.queryByText('Start vLLM operator')).not.toBeInTheDocument()
   })
 
   it('defaults to a registered provider instead of Dynamo when no runtime is installed and Dynamo is absent', async () => {

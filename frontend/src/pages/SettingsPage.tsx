@@ -111,8 +111,9 @@ const runtimeDescription = (id: string, name?: string | null) => {
     case 'dynamo':
       return 'NVIDIA Dynamo for high-performance GPU inference'
     case 'kuberay':
-    default:
       return 'Ray Serve via KubeRay for distributed Ray-based model serving with vLLM'
+    default:
+      return 'Inference runtime provider'
   }
 }
 
@@ -813,7 +814,7 @@ export function SettingsPage() {
           )}
 
           {/* Installation Steps */}
-          {selectedRuntimeRequiresCRD && installationStatus?.installationSteps && installationStatus.installationSteps.length > 0 && (
+          {installationStatus?.installationSteps && installationStatus.installationSteps.length > 0 && (
             <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
               <div className="mb-4">
                 <h3 className="font-heading text-lg font-semibold">Manual Installation Steps</h3>
