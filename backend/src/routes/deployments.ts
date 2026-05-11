@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { HTTPException } from 'hono/http-exception';
@@ -79,6 +80,25 @@ const SYSTEM_PATHS = ['/dev', '/proc', '/sys', '/etc', '/var/run'];
 const DEFAULT_FRONTEND_SERVICE_PORT = 8000;
 const CHAT_MODEL_DISCOVERY_TIMEOUT_MS = 1000;
 const CHAT_MODEL_DISCOVERY_ACCEPT_HEADER = 'application/json';
+const UPSTREAM_CHAT_ERROR_DETAILS_MAX_LENGTH = 1000;
+const UPSTREAM_CHAT_ERROR_STATUS_CODES = [
+  400,
+  401,
+  403,
+  404,
+  408,
+  409,
+  410,
+  413,
+  415,
+  422,
+  429,
+  500,
+  501,
+  502,
+  503,
+  504,
+] as const satisfies readonly ContentfulStatusCode[];
 const CHAT_STREAM_HEADERS = {
   'Content-Type': 'text/event-stream',
   'Cache-Control': 'no-cache, no-transform',
@@ -357,6 +377,28 @@ function truncateErrorMessage(message: string, maxLength = 500): string {
   return message.length > maxLength ? `${message.slice(0, maxLength)}…` : message;
 }
 
+function toUpstreamChatErrorStatusCode(statusCode: number): ContentfulStatusCode {
+  return UPSTREAM_CHAT_ERROR_STATUS_CODES.includes(
+    statusCode as (typeof UPSTREAM_CHAT_ERROR_STATUS_CODES)[number]
+  )
+    ? statusCode as ContentfulStatusCode
+    : 502;
+}
+
+function sanitizeUpstreamErrorDetails(details: string): string | undefined {
+  const normalized = details
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim();
+
+  if (!normalized || normalized.startsWith('<')) {
+    return undefined;
+  }
+
+  return normalized.length > UPSTREAM_CHAT_ERROR_DETAILS_MAX_LENGTH
+    ? `${normalized.slice(0, UPSTREAM_CHAT_ERROR_DETAILS_MAX_LENGTH - 1)}…`
+    : normalized;
+}
+
 function getUpstreamChatErrorMessage(
   statusCode: number,
   details: string,
@@ -625,27 +667,33 @@ async function handleDeploymentChat(
       }
 
       const gatewayDetails = await gatewayResponse.text();
+      const statusCode = toUpstreamChatErrorStatusCode(gatewayResponse.status);
+      const sanitizedDetails = sanitizeUpstreamErrorDetails(gatewayDetails);
+
       return c.json(
         {
           error: {
             message: getUpstreamChatErrorMessage(gatewayResponse.status, gatewayDetails, name),
-            statusCode: gatewayResponse.status,
-            details: gatewayDetails,
+            statusCode,
+            ...(sanitizedDetails ? { details: sanitizedDetails } : {}),
           },
         },
-        gatewayResponse.status as never
+        statusCode
       );
     }
+
+    const statusCode = toUpstreamChatErrorStatusCode(upstreamResponse.status);
+    const sanitizedDetails = sanitizeUpstreamErrorDetails(details);
 
     return c.json(
       {
         error: {
           message: getUpstreamChatErrorMessage(upstreamResponse.status, details, name),
-          statusCode: upstreamResponse.status,
-          details,
+          statusCode,
+          ...(sanitizedDetails ? { details: sanitizedDetails } : {}),
         },
       },
-      upstreamResponse.status as never
+      statusCode
     );
   }
 

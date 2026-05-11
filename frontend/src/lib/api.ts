@@ -7,6 +7,7 @@ console.log('[API] API_BASE:', API_BASE || '(same origin)');
 
 // Auth token storage key
 const AUTH_TOKEN_KEY = 'airunway_auth_token';
+const AIRUNWAY_AUTH_ERROR_HEADER = 'X-Airunway-Auth-Error';
 
 /**
  * Get the stored auth token
@@ -24,6 +25,11 @@ function getAuthToken(): string | null {
  */
 function dispatchUnauthorized(): void {
   window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+}
+
+function isAuthenticationError(response: Response): boolean {
+  return response.status === 401 &&
+    response.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)?.toLowerCase() === 'true';
 }
 
 // ============================================================================
@@ -231,8 +237,9 @@ async function request<T>(endpoint: string, options?: RequestOptions): Promise<T
   console.log('[API] Response status:', response.status, 'for', url);
 
   if (!response.ok) {
-    // Handle 401 Unauthorized - dispatch event to trigger logout
-    if (response.status === 401) {
+    // Handle Airunway auth failures - dispatch event to trigger logout.
+    // Upstream/model 401s are application errors and should not log out the user.
+    if (isAuthenticationError(response)) {
       console.warn('[API] Unauthorized - dispatching auth:unauthorized event');
       dispatchUnauthorized();
     }
@@ -363,6 +370,11 @@ export const deploymentsApi = {
       body: JSON.stringify(payload),
       signal: options?.signal,
     });
+
+    if (isAuthenticationError(response)) {
+      console.warn('[API] Unauthorized chat response - dispatching auth:unauthorized event');
+      dispatchUnauthorized();
+    }
 
     return response;
   },

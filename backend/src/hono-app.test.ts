@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import app from './hono-app';
 import { kubernetesService } from './services/kubernetes';
 import { configService } from './services/config';
+import { authService } from './services/auth';
 import { mockServiceMethod } from './test/helpers';
 import { mockDeployment } from './test/fixtures';
 
@@ -15,6 +16,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 // Shorter timeout for tests that depend on K8s (which may not be available)
 const K8S_TEST_TIMEOUT = 2000;
+const AIRUNWAY_AUTH_ERROR_HEADER = 'X-Airunway-Auth-Error';
 
 function expectChatProxyCall(capturedArgs: unknown[] | undefined, expectedArgs: unknown[]): void {
   expect(capturedArgs?.slice(0, 5)).toEqual(expectedArgs);
@@ -633,6 +635,52 @@ describe('Hono Routes', () => {
       expect(data.error.details).toBe(gatewayError);
     });
 
+    test('POST /api/deployments/:name/chat preserves upstream 401s without marking them as Airunway auth errors', async () => {
+      const upstreamError = JSON.stringify({
+        error: {
+          message: 'Invalid upstream API key',
+          type: 'authentication_error',
+        },
+      });
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'dynamo',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+          servedModelName: 'served-from-status',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async () => (
+          new Response(upstreamError, {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)).toBeNull();
+      const data = await res.json();
+      expect(data.error.message).toBe('Invalid upstream API key');
+      expect(data.error.statusCode).toBe(401);
+      expect(data.error.details).toBe(upstreamError);
+    });
+
     test('POST /api/deployments/:name/chat returns a readable message when the model endpoint is missing', async () => {
       const upstreamDetails = JSON.stringify({
         kind: 'Status',
@@ -802,6 +850,7 @@ describe('Hono Routes', () => {
       // Models endpoint should require auth
       const res = await app.request('/api/models');
       expect(res.status).toBe(401);
+      expect(res.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)).toBe('true');
       const data = await res.json();
       expect(data.error.message).toBe('Authentication required');
     });
@@ -809,12 +858,22 @@ describe('Hono Routes', () => {
     test('invalid bearer token returns 401', async () => {
       process.env.AUTH_ENABLED = 'true';
 
-      const res = await app.request('/api/models', {
-        headers: {
-          'Authorization': 'Bearer invalid-token',
-        },
-      });
-      expect(res.status).toBe(401);
+      const restoreValidate = mockServiceMethod(authService, 'validateToken', async () => ({
+        valid: false,
+        error: 'Invalid token',
+      }));
+
+      try {
+        const res = await app.request('/api/models', {
+          headers: {
+            'Authorization': 'Bearer invalid-token',
+          },
+        });
+        expect(res.status).toBe(401);
+        expect(res.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)).toBe('true');
+      } finally {
+        restoreValidate();
+      }
     });
   });
 

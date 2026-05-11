@@ -185,7 +185,15 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       while (!streamDone) {
         const { value, done } = await reader.read()
         if (!mountedRef.current || abortController.signal.aborted) return
-        buffer += decoder.decode(value, { stream: !done })
+        const chunk = value
+          ? decoder.decode(value, { stream: !done })
+          : done
+            ? decoder.decode()
+            : ''
+
+        if (chunk) {
+          buffer += chunk
+        }
 
         const lines = buffer.split(/\r?\n/)
         buffer = lines.pop() ?? ''
