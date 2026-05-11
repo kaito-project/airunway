@@ -13,7 +13,7 @@ const PROD_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com",
-  "font-src 'self' https://api.fontshare.com https://fonts.gstatic.com",
+  "font-src 'self' https://api.fontshare.com https://cdn.fontshare.com https://fonts.gstatic.com",
   "img-src 'self' data: https:",
   "connect-src 'self' http: https:",
   "frame-src 'none'",

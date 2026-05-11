@@ -179,6 +179,63 @@ describe('OAuth → Secrets → Deploy Flow', () => {
   // Edge cases
   // ==========================================================================
 
+  test('POST /token-with-state preserves PKCE state after transient token exchange failure', async () => {
+    const startRes = await app.request('/api/oauth/huggingface/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirectUri: 'http://localhost:3000/callback' }),
+    });
+    expect(startRes.status).toBe(200);
+    const startData = await startRes.json();
+    const { state } = startData;
+
+    const restoreFailure = mockFetchByUrl({
+      '/oauth/token': {
+        body: { error: 'temporarily_unavailable' },
+        ok: false,
+        status: 500,
+      },
+    });
+    restores.push(restoreFailure);
+
+    const firstRes = await app.request('/api/oauth/huggingface/token-with-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: 'auth-code-transient-failure',
+        state,
+      }),
+    });
+    expect(firstRes.status).toBe(400);
+
+    restoreFailure();
+    restores.pop();
+
+    restores.push(
+      mockFetchByUrl({
+        '/oauth/token': {
+          body: { access_token: 'hf_retry_token_abc123', expires_in: 3600, scope: 'openid profile read-repos' },
+        },
+        '/api/whoami-v2': {
+          body: { id: 'user-123', name: 'testuser', fullname: 'Test User', email: 'test@example.com', avatarUrl: 'https://huggingface.co/avatars/testuser.png' },
+        },
+      }),
+    );
+
+    const retryRes = await app.request('/api/oauth/huggingface/token-with-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: 'auth-code-retry',
+        state,
+      }),
+    });
+    expect(retryRes.status).toBe(200);
+    const retryData = await retryRes.json();
+    expect(retryData.accessToken).toBe('hf_retry_token_abc123');
+    expect(retryData.user.name).toBe('testuser');
+  });
+
   test('POST /token with invalid code returns 400', async () => {
     // Mock fetch to return an error from HuggingFace token endpoint
     restores.push(

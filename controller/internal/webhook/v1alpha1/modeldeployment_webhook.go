@@ -780,41 +780,69 @@ func (v *ModelDeploymentCustomValidator) validateOverrides(spec *airunwayv1alpha
 		return allErrs
 	}
 
-	allErrs = append(allErrs, checkBlockedKeys(overrideMap, specPath.Child("provider", "overrides"))...)
+	providerOverridesPath := specPath.Child("provider", "overrides")
+	allErrs = append(allErrs, checkBlockedKeys(overrideMap, providerOverridesPath)...)
+	allErrs = append(allErrs, checkSizingOverrideKeys(overrideMap, providerOverridesPath)...)
 
 	return allErrs
+}
+
+// sizingOverrideKeys are workload-sizing fields that cannot be set via
+// spec.provider.overrides because provider-specific raw overrides are merged
+// after admission validates spec.resources/spec.scaling ceilings. Denying
+// these unstructured keys keeps resource limits enforceable.
+var sizingOverrideKeys = []string{
+	"replicas",
+	"resources",
 }
 
 // checkBlockedKeys recursively walks an unmarshalled JSON value and reports
 // any blocked keys found in nested objects, including those nested inside
 // arrays (e.g. {"containers": [{"securityContext": ...}]}).
 func checkBlockedKeys(m map[string]interface{}, fldPath *field.Path) field.ErrorList {
+	return checkForbiddenOverrideKeys(m, fldPath, blockedOverrideKeys, func(key string) string {
+		return fmt.Sprintf("overriding %q is not allowed for security reasons", key)
+	})
+}
+
+// checkSizingOverrideKeys recursively walks provider overrides and rejects
+// fields that would let raw provider overrides bypass resource/replica ceilings.
+func checkSizingOverrideKeys(m map[string]interface{}, fldPath *field.Path) field.ErrorList {
+	return checkForbiddenOverrideKeys(m, fldPath, sizingOverrideKeys, func(key string) string {
+		return fmt.Sprintf("overriding %q is not allowed because it can bypass admission resource limits; use spec.resources / spec.scaling instead", key)
+	})
+}
+
+// checkForbiddenOverrideKeys recursively walks an unmarshalled JSON object and
+// reports any forbidden keys found in nested objects, including those nested
+// inside arrays.
+func checkForbiddenOverrideKeys(m map[string]interface{}, fldPath *field.Path, forbiddenKeys []string, detailFor func(string) string) field.ErrorList {
 	var allErrs field.ErrorList
 	for key, val := range m {
-		for _, blocked := range blockedOverrideKeys {
-			if key == blocked {
+		for _, forbidden := range forbiddenKeys {
+			if key == forbidden {
 				allErrs = append(allErrs, field.Forbidden(
 					fldPath.Child(key),
-					fmt.Sprintf("overriding %q is not allowed for security reasons", key),
+					detailFor(key),
 				))
 			}
 		}
-		allErrs = append(allErrs, checkBlockedKeysInValue(val, fldPath.Child(key))...)
+		allErrs = append(allErrs, checkForbiddenOverrideKeysInValue(val, fldPath.Child(key), forbiddenKeys, detailFor)...)
 	}
 	return allErrs
 }
 
-// checkBlockedKeysInValue inspects an arbitrary JSON value and recurses into
-// nested objects and arrays so blocked keys can't bypass validation by being
-// nested inside list-valued overrides.
-func checkBlockedKeysInValue(val interface{}, fldPath *field.Path) field.ErrorList {
+// checkForbiddenOverrideKeysInValue inspects an arbitrary JSON value and
+// recurses into nested objects and arrays so forbidden keys can't bypass
+// validation by being nested inside list-valued overrides.
+func checkForbiddenOverrideKeysInValue(val interface{}, fldPath *field.Path, forbiddenKeys []string, detailFor func(string) string) field.ErrorList {
 	switch v := val.(type) {
 	case map[string]interface{}:
-		return checkBlockedKeys(v, fldPath)
+		return checkForbiddenOverrideKeys(v, fldPath, forbiddenKeys, detailFor)
 	case []interface{}:
 		var allErrs field.ErrorList
 		for i, item := range v {
-			allErrs = append(allErrs, checkBlockedKeysInValue(item, fldPath.Index(i))...)
+			allErrs = append(allErrs, checkForbiddenOverrideKeysInValue(item, fldPath.Index(i), forbiddenKeys, detailFor)...)
 		}
 		return allErrs
 	}

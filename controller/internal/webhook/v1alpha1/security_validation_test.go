@@ -25,6 +25,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
+func requireValidationErrorField(t *testing.T, errs field.ErrorList, fieldName string) {
+	t.Helper()
+	for _, err := range errs {
+		if err.Field == fieldName {
+			return
+		}
+	}
+	t.Fatalf("expected validation error for %s, got %v", fieldName, errs)
+}
+
 func TestValidateOverrides_BlocksSecurityContext(t *testing.T) {
 	v := &ModelDeploymentCustomValidator{}
 	overrides := map[string]interface{}{
@@ -102,7 +112,6 @@ func TestValidateOverrides_BlocksNestedSecurityContext(t *testing.T) {
 func TestValidateOverrides_AllowsSafeFields(t *testing.T) {
 	v := &ModelDeploymentCustomValidator{}
 	overrides := map[string]interface{}{
-		"replicas": 3,
 		"labels": map[string]interface{}{
 			"team": "ml",
 		},
@@ -117,6 +126,64 @@ func TestValidateOverrides_AllowsSafeFields(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors for safe fields, got %v", errs)
 	}
+}
+
+func TestValidateOverrides_BlocksNestedReplicas(t *testing.T) {
+	v := &ModelDeploymentCustomValidator{}
+	overrides := map[string]interface{}{
+		"frontend": map[string]interface{}{
+			"replicas": MaxReplicas + 1,
+		},
+	}
+	raw, _ := json.Marshal(overrides)
+	spec := &airunwayv1alpha1.ModelDeploymentSpec{
+		Provider: &airunwayv1alpha1.ProviderSpec{
+			Overrides: &runtime.RawExtension{Raw: raw},
+		},
+	}
+	errs := v.validateOverrides(spec, field.NewPath("spec"))
+	requireValidationErrorField(t, errs, "spec.provider.overrides.frontend.replicas")
+}
+
+func TestValidateOverrides_BlocksNestedResources(t *testing.T) {
+	v := &ModelDeploymentCustomValidator{}
+	overrides := map[string]interface{}{
+		"frontend": map[string]interface{}{
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{
+					"cpu": "1024",
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(overrides)
+	spec := &airunwayv1alpha1.ModelDeploymentSpec{
+		Provider: &airunwayv1alpha1.ProviderSpec{
+			Overrides: &runtime.RawExtension{Raw: raw},
+		},
+	}
+	errs := v.validateOverrides(spec, field.NewPath("spec"))
+	requireValidationErrorField(t, errs, "spec.provider.overrides.frontend.resources")
+}
+
+func TestValidateOverrides_BlocksSizingKeysInsideArray(t *testing.T) {
+	v := &ModelDeploymentCustomValidator{}
+	overrides := map[string]interface{}{
+		"services": []interface{}{
+			map[string]interface{}{
+				"name":     "frontend",
+				"replicas": MaxReplicas + 1,
+			},
+		},
+	}
+	raw, _ := json.Marshal(overrides)
+	spec := &airunwayv1alpha1.ModelDeploymentSpec{
+		Provider: &airunwayv1alpha1.ProviderSpec{
+			Overrides: &runtime.RawExtension{Raw: raw},
+		},
+	}
+	errs := v.validateOverrides(spec, field.NewPath("spec"))
+	requireValidationErrorField(t, errs, "spec.provider.overrides.services[0].replicas")
 }
 
 func TestValidateOverrides_NilOverrides(t *testing.T) {

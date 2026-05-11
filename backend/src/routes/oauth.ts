@@ -153,10 +153,9 @@ const oauth = new Hono()
       throw new HTTPException(404, { message: 'OAuth session not found or expired' });
     }
 
-    pkceStore.delete(state);
-
     try {
       const result = await huggingFaceService.handleOAuthCallback(code, data.verifier, data.redirectUri);
+      pkceStore.delete(state);
       return c.json(result);
     } catch (error) {
       logger.error({ error }, 'HuggingFace OAuth token exchange failed');
