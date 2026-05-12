@@ -10,9 +10,13 @@ import { aikitService, GGUF_RUNNER_IMAGE } from '../services/aikit';
 import { handleK8sError } from '../lib/k8s-errors';
 import models from '../data/models.json';
 import logger from '../lib/logger';
-import type { DeploymentStatus, DeploymentConfig } from '@airunway/shared';
 import type { AppEnv } from '../types/hono';
-import { toModelDeploymentManifest } from '@airunway/shared';
+import {
+  parseFrontendService,
+  toModelDeploymentManifest,
+  type DeploymentStatus,
+  type DeploymentConfig,
+} from '@airunway/shared';
 import {
   namespaceSchema,
   resourceNameSchema,
@@ -115,6 +119,7 @@ const createDeploymentSchema = z.object({
   computeType: z.enum(['cpu', 'gpu']).optional(),
   maxModelLen: z.number().int().positive().optional(),
   recipeProvenance: recipeProvenanceSchema,
+  gatewayEnabled: z.boolean().optional(),
   storage: storageSchema,
 }).superRefine((data, ctx) => {
   const volumes = data.storage?.volumes;
@@ -482,6 +487,25 @@ const deployments = new Hono<AppEnv>()
       primaryResource: { kind: 'ModelDeployment', apiVersion: 'airunway.ai/v1alpha1' },
     });
   })
+  // List PVCs in a namespace (for storage volume selection)
+  // Use a reserved segment to avoid conflicting with deployment names like "pvcs".
+  .get('/-/pvcs', zValidator('query', z.object({ namespace: namespaceSchema })), async (c) => {
+    const { namespace } = c.req.valid('query');
+    const userToken = c.get('token') as string | undefined;
+    try {
+      const pvcs = await kubernetesService.listPVCs(namespace, userToken);
+      return c.json({ pvcs });
+    } catch (error) {
+      const { message, statusCode } = handleK8sError(error, {
+        operation: 'listPVCs',
+        namespace,
+      });
+
+      throw new HTTPException(statusCode as 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502 | 503 | 504, {
+        message: `Failed to list storage disks: ${message}`,
+      });
+    }
+  })
   .get(
     '/:name',
     zValidator('param', deploymentParamsSchema),
@@ -614,7 +638,12 @@ const deployments = new Hono<AppEnv>()
         throw new HTTPException(404, { message: 'Deployment not found' });
       }
 
-      const metricsResponse = await metricsService.getDeploymentMetrics(name, resolvedNamespace);
+      const frontendService = parseFrontendService(deployment.frontendService);
+      const metricsResponse = await metricsService.getDeploymentMetrics(name, resolvedNamespace, {
+        providerId: deployment.provider,
+        serviceName: frontendService?.serviceName,
+        port: frontendService?.servicePort,
+      });
       return c.json(metricsResponse);
     }
 )

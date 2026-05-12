@@ -8,9 +8,10 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useConfetti } from '@/components/ui/confetti'
-import { useCreateDeployment, type DeploymentConfig } from '@/hooks/useDeployments'
+import { useCreateDeployment, usePVCs, type DeploymentConfig } from '@/hooks/useDeployments'
 import { useHuggingFaceStatus, useGgufFiles } from '@/hooks/useHuggingFace'
 import { usePremadeModels } from '@/hooks/useAikit'
+import { useGatewayStatus } from '@/hooks/useGateway'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
 import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, vllmRecipesApi, type Engine, type KaitoResourceType, type VllmRecipeIndexEntry, type VllmRecipeResolveRequest, type VllmRecipeResolveResult } from '@/lib/api'
@@ -140,9 +141,10 @@ const DIRECT_VLLM_NIGHTLY_IMAGE = 'vllm/vllm-openai:cu130-nightly'
 const DIRECT_VLLM_STABLE_IMAGE = 'vllm/vllm-openai:latest'
 
 type DirectVllmImageChoice = 'nightly' | 'stable' | 'custom'
+type RuntimeInfo = { name: string; description: string; defaultNamespace: string }
 
 // Runtime metadata for display
-const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defaultNamespace: string }> = {
+const RUNTIME_INFO: Record<RuntimeId, RuntimeInfo> = {
   dynamo: {
     name: 'NVIDIA Dynamo',
     description: 'High-performance inference with KV-cache routing and disaggregated serving',
@@ -158,16 +160,30 @@ const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defau
     description: 'Flexible inference with GGUF (llama.cpp) and vLLM support',
     defaultNamespace: 'kaito-workspace',
   },
-  vllm: {
-    name: 'Direct vLLM',
-    description: 'Direct vLLM provider for newest model support and configurable launch images',
-    defaultNamespace: 'default',
-  },
   llmd: {
     name: 'llm-d',
     description: 'GPU-accelerated vLLM inference with disaggregated prefill/decode support',
     defaultNamespace: 'default',
   },
+  vllm: {
+    name: 'vLLM',
+    description: 'High-throughput inference with the native vLLM provider',
+    defaultNamespace: 'default',
+  },
+}
+
+const DIRECT_VLLM_RUNTIME_INFO: RuntimeInfo = {
+  name: 'Direct vLLM',
+  description: 'Direct vLLM provider for newest model support and configurable launch images',
+  defaultNamespace: 'default',
+}
+
+function getRuntimeInfo(runtime: RuntimeStatus): RuntimeInfo | undefined {
+  if (runtime.id === 'vllm' && /direct\s+vllm/i.test(runtime.name)) {
+    return DIRECT_VLLM_RUNTIME_INFO
+  }
+
+  return RUNTIME_INFO[runtime.id as RuntimeId]
 }
 
 // Engine support by runtime (only traditional GPU engines, not llamacpp)
@@ -175,8 +191,21 @@ const RUNTIME_ENGINES: Record<RuntimeId, TraditionalEngine[]> = {
   dynamo: ['vllm', 'sglang', 'trtllm'],
   kuberay: ['vllm'], // KubeRay only supports vLLM currently
   kaito: ['vllm'], // KAITO exposes vLLM in the engine picker; single-engine llama.cpp models bypass it
-  vllm: ['vllm'], // Direct vLLM uses vLLM exclusively
+  vllm: ['vllm'], // vLLM uses vLLM exclusively
   llmd: ['vllm'], // llm-d uses vLLM exclusively
+}
+
+function normalizeGatewayAvailability(
+  config: DeploymentConfig,
+  gatewayAvailable: boolean | undefined
+): DeploymentConfig {
+  if (gatewayAvailable !== false || !('gatewayEnabled' in config)) {
+    return config
+  }
+
+  const nextConfig = { ...config }
+  delete nextConfig.gatewayEnabled
+  return nextConfig
 }
 
 // Check if a runtime is compatible with a model based on engine support
@@ -291,6 +320,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   const createDeployment = useCreateDeployment()
   const { data: hfStatus } = useHuggingFaceStatus()
   const { data: premadeModels } = usePremadeModels()
+  const { data: gatewayInfo } = useGatewayStatus()
   const formRef = useRef<HTMLFormElement>(null)
   const { trigger: triggerConfetti, ConfettiComponent } = useConfetti(2500)
 
@@ -302,30 +332,33 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   const getDefaultRuntime = (): RuntimeId => {
     if (!runtimes || runtimes.length === 0) {
       // Fallback based on model engines
-      return model.supportedEngines.includes('llamacpp') ? 'kaito' : 'dynamo';
+      return model.supportedEngines.includes('llamacpp') ? 'kaito' : 'dynamo'
     }
 
     // Find first compatible and installed runtime
-    const compatibleRuntimes: RuntimeId[] = ['dynamo', 'kuberay', 'kaito', 'vllm', 'llmd'];
+    const compatibleRuntimes: RuntimeId[] = ['dynamo', 'kuberay', 'kaito', 'vllm', 'llmd']
     for (const rtId of compatibleRuntimes) {
-      const rt = runtimes.find(r => r.id === rtId);
+      const rt = runtimes.find(r => r.id === rtId)
       if (rt?.installed && isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId;
+        return rtId
       }
     }
 
-    // If no compatible installed runtime, return first compatible one
+    // If no compatible installed runtime, return the first compatible runtime that is available to select
     for (const rtId of compatibleRuntimes) {
-      if (isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId;
+      const rt = runtimes.find(r => r.id === rtId)
+      if (rt && isRuntimeCompatible(rtId, model.supportedEngines)) {
+        return rtId
       }
     }
 
-    return 'dynamo';
+    return 'dynamo'
   }
 
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId>(getDefaultRuntime)
   const selectedRuntimeStatus = runtimes?.find(r => r.id === selectedRuntime)
+  const isSelectedCrdLessRuntime = selectedRuntimeStatus?.requiresCRD === false
+  const isSelectedCrdLessRuntimeNotReady = isSelectedCrdLessRuntime && !selectedRuntimeStatus?.installed
   const isRuntimeInstalled = selectedRuntimeStatus?.installed ?? false
 
   // AI Configurator state - tracks supported backends and recommended mode
@@ -446,6 +479,11 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       gpu: 0, // Will be set from recommendation
     },
   })
+
+  // Fetch PVCs for the selected namespace (for existing disk selection)
+  const { data: availablePVCs } = usePVCs(
+    selectedRuntime === 'dynamo' ? config.namespace : undefined
+  )
 
   // Calculate GPU recommendation based on model characteristics
   const gpuRecommendation = calculateGpuRecommendation(model, detailedCapacity)
@@ -584,6 +622,12 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       return next
     })
   }, [selectedRuntime, directVllmImageRef, model.id])
+
+  // Clear stale gatewayEnabled when gateway support disappears; keep the default-on UI
+  // state implicit so untouched deployments omit spec.gateway.
+  useEffect(() => {
+    setConfig(prev => normalizeGatewayAvailability(prev, gatewayInfo?.available))
+  }, [gatewayInfo?.available])
 
   // Set initial GPU value from recommendation when component mounts
   useEffect(() => {
@@ -799,7 +843,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
 
     try {
       // Build the deployment config, adding KAITO-specific fields if needed
-      let deployConfig = { ...config }
+      let deployConfig = normalizeGatewayAvailability(config, gatewayInfo?.available)
 
       if (selectedRuntime === 'vllm') {
         if (directVllmCustomImageRequired) {
@@ -921,7 +965,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
         variant: 'destructive',
       })
     }
-  }, [config, createDeployment, navigate, toast, triggerConfetti, selectedRuntime, directVllmCustomImageRequired, directVllmImageRef, kaitoComputeType, kaitoResourceType, selectedPremadeModel, isHuggingFaceGgufModel, isVllmModel, model.id, model.gated, ggufFile, ggufRunMode, maxModelLen])
+  }, [config, createDeployment, navigate, toast, triggerConfetti, selectedRuntime, directVllmCustomImageRequired, directVllmImageRef, kaitoComputeType, kaitoResourceType, selectedPremadeModel, isHuggingFaceGgufModel, isVllmModel, model.id, ggufFile, ggufRunMode, maxModelLen, gatewayInfo?.available])
 
   const updateConfig = <K extends keyof DeploymentConfig>(
     key: K,
@@ -1080,7 +1124,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
     }
 
     if (!isRuntimeInstalled) {
-      return 'Deployment Method Not Installed'
+      return isSelectedCrdLessRuntimeNotReady ? 'Runtime Not Ready' : 'Runtime Not Installed'
     }
 
     if (selectedRuntime === 'kaito' && !isHuggingFaceGgufModel && !isVllmModel && !selectedPremadeModel) {
@@ -1158,11 +1202,13 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
           </h3>
           <div className="grid gap-4 sm:grid-cols-2">
             {runtimes.map((runtime) => {
-              const info = RUNTIME_INFO[runtime.id as RuntimeId]
+              const info = getRuntimeInfo(runtime)
               if (!info) return null
 
               const isCompatible = isRuntimeCompatible(runtime.id as RuntimeId, model.supportedEngines)
               const isSelected = selectedRuntime === runtime.id
+              const isCrdLessRuntime = runtime.requiresCRD === false
+              const isCrdLessRuntimeNotReady = isCrdLessRuntime && !runtime.installed
 
               return (
                 <div
@@ -1221,7 +1267,12 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                       ) : runtime.installed ? (
                         <Badge variant="outline" className="text-green-400 border-green-500/50 bg-green-500/10 text-xs">
                           <CheckCircle2 className="h-3 w-3 mr-1" />
-                          Installed
+                          {isCrdLessRuntime ? 'Registered' : 'Installed'}
+                        </Badge>
+                      ) : isCrdLessRuntimeNotReady ? (
+                        <Badge variant="outline" className="text-yellow-400 border-yellow-500/50 bg-yellow-500/10 text-xs">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Not Ready
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-yellow-400 border-yellow-500/50 bg-yellow-500/10 text-xs">
@@ -1240,10 +1291,16 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                     )}
                     {isCompatible && !runtime.installed && isSelected && (
                       <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
-                        <Link to="/installation" className="underline hover:no-underline">
-                          Install {info.name}
-                        </Link>{' '}
-                        before deploying.
+                        {isCrdLessRuntime ? (
+                          'Provider is registered but not ready yet.'
+                        ) : (
+                          <>
+                            <Link to="/installation" className="underline hover:no-underline">
+                              Install {info.name}
+                            </Link>{' '}
+                            before deploying.
+                          </>
+                        )}
                       </p>
                     )}
                   </div>
@@ -1311,15 +1368,33 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
             <summary className="text-sm font-medium cursor-pointer text-muted-foreground hover:text-foreground">
               Advanced Settings
             </summary>
-            <div className="mt-3 space-y-2">
-              <Label htmlFor="namespace">Namespace</Label>
-              <Input
-                id="namespace"
-                value={config.namespace}
-                onChange={(e) => updateConfig('namespace', e.target.value)}
-                placeholder={RUNTIME_INFO[selectedRuntime].defaultNamespace}
-                required
-              />
+            <div className="mt-3 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="namespace">Namespace</Label>
+                <Input
+                  id="namespace"
+                  value={config.namespace}
+                  onChange={(e) => updateConfig('namespace', e.target.value)}
+                  placeholder={RUNTIME_INFO[selectedRuntime].defaultNamespace}
+                  required
+                />
+              </div>
+
+              {gatewayInfo?.available && (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="gateway-enabled">Gateway routing</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Route requests to this model through the cluster gateway. Defaults to enabled when a gateway is detected.
+                    </p>
+                  </div>
+                  <Switch
+                    id="gateway-enabled"
+                    checked={config.gatewayEnabled ?? true}
+                    onCheckedChange={(checked) => updateConfig('gatewayEnabled', checked)}
+                  />
+                </div>
+              )}
             </div>
           </details>
         </div>
@@ -1916,6 +1991,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
               }))
             }}
             deploymentName={config.name}
+            availablePVCs={availablePVCs}
           />
         </div>
       )}
@@ -2341,7 +2417,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
         {/* Manifest Preview - build config with runtime-specific fields */}
         {(() => {
           // Build preview config with all necessary fields
-          let previewConfig = { ...config };
+          let previewConfig = normalizeGatewayAvailability(config, gatewayInfo?.available);
 
           if (selectedRuntime === 'vllm') {
             previewConfig = normalizeDirectVllmConfig(previewConfig, previewConfig.imageRef || directVllmImageRef, model.id);
