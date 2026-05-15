@@ -1,5 +1,5 @@
 # Example: KAITO provider registration (typically created by kaito-provider controller)
-# Installation and documentation metadata are stored in annotations, not in spec.
+# Provider metadata and capabilities are stored in annotations. The spec only contains desired-state selection rules.
 apiVersion: airunway.ai/v1alpha1
 kind: InferenceProviderConfig
 metadata:
@@ -8,16 +8,19 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kaito
   annotations:
-    airunway.ai/documentation: "https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md"
+    airunway.ai/display-name: KAITO
+    airunway.ai/description: Kubernetes AI Toolchain Operator for simplified model deployment
+    airunway.ai/default-namespace: kaito-workspace
+    airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md
+    airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md
+    airunway.ai/capabilities: |
+      {
+        "engines": ["vllm", "llamacpp"],
+        "servingModes": ["aggregated"],
+        "cpuSupport": true,
+        "gpuSupport": true
+      }
 spec:
-  capabilities:
-    engines:
-      - vllm
-      - llamacpp
-    servingModes:
-      - aggregated
-    cpuSupport: true
-    gpuSupport: true
   selectionRules:
     - condition: "!has(spec.resources.gpu) || spec.resources.gpu.count == 0"
       priority: 100
@@ -33,21 +36,23 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: dynamo
   annotations:
-    airunway.ai/documentation: "https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md"
+    airunway.ai/display-name: Dynamo
+    airunway.ai/description: NVIDIA Dynamo for high-performance GPU inference
+    airunway.ai/default-namespace: dynamo-system
+    airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md
+    airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md
+    airunway.ai/capabilities: |
+      {
+        "engines": ["vllm", "sglang", "trtllm"],
+        "servingModes": ["aggregated", "disaggregated"],
+        "cpuSupport": false,
+        "gpuSupport": true,
+        "gateway": {
+          "inferencePoolNamePattern": "{name}-pool",
+          "inferencePoolNamespace": "{namespace}"
+        }
+      }
 spec:
-  capabilities:
-    engines:
-      - vllm
-      - sglang
-      - trtllm
-    servingModes:
-      - aggregated
-      - disaggregated
-    cpuSupport: false
-    gpuSupport: true
-    gateway:
-      inferencePoolNamePattern: "{name}-pool"
-      inferencePoolNamespace: "{namespace}"
   selectionRules:
     - condition: "spec.engine.type == 'trtllm'"
       priority: 100
@@ -67,16 +72,19 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kuberay
   annotations:
-    airunway.ai/documentation: "https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md"
+    airunway.ai/display-name: KubeRay
+    airunway.ai/description: Ray Serve via KubeRay for distributed Ray-based model serving with vLLM
+    airunway.ai/default-namespace: ray-system
+    airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md
+    airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md
+    airunway.ai/capabilities: |
+      {
+        "engines": ["vllm"],
+        "servingModes": ["aggregated", "disaggregated"],
+        "cpuSupport": false,
+        "gpuSupport": true
+      }
 spec:
-  capabilities:
-    engines:
-      - vllm
-    servingModes:
-      - aggregated
-      - disaggregated
-    cpuSupport: false
-    gpuSupport: true
   selectionRules:
     - condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 1 && spec.engine.type == 'vllm'"
       priority: 80
@@ -90,14 +98,17 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: llmd
   annotations:
-    airunway.ai/documentation: "https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md"
+    airunway.ai/display-name: llm-d
+    airunway.ai/description: 'llm-d provider: deploys vLLM Deployments + Services directly. Requires GPU nodes with the NVIDIA device plugin.'
+    airunway.ai/default-namespace: default
+    airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md
+    airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md
+    airunway.ai/capabilities: |
+      {
+        "engines": ["vllm"],
+        "servingModes": ["aggregated", "disaggregated"],
+        "cpuSupport": false,
+        "gpuSupport": true
+      }
 spec:
-  capabilities:
-    engines:
-      - vllm
-    servingModes:
-      - aggregated
-      - disaggregated
-    cpuSupport: false
-    gpuSupport: true
   selectionRules: []

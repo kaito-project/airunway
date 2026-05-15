@@ -8,6 +8,7 @@ import { metricsService } from '../services/metrics';
 import { validateGpuFit, formatGpuWarnings } from '../services/gpuValidation';
 import { aikitService, GGUF_RUNNER_IMAGE } from '../services/aikit';
 import { handleK8sError } from '../lib/k8s-errors';
+import { extractProviderDetails } from '../lib/providers';
 import models from '../data/models.json';
 import logger from '../lib/logger';
 import type { AppEnv } from '../types/hono';
@@ -292,6 +293,48 @@ const createDeploymentSchema = z.object({
   }
 });
 
+
+function validateSupportedCapability(
+  providerId: string,
+  label: string,
+  value: string | undefined,
+  supported: string[] | undefined,
+): void {
+  if (!value || !supported || supported.length === 0) {
+    return;
+  }
+
+  if (!supported.includes(value)) {
+    throw new HTTPException(422, {
+      message: `Provider "${providerId}" does not support ${label} "${value}". Supported ${label}s: ${supported.join(', ')}`,
+    });
+  }
+}
+
+async function validateProviderCapabilities(config: DeploymentConfig): Promise<void> {
+  if (!config.provider) {
+    return;
+  }
+
+  const providerConfig = await kubernetesService.getInferenceProviderConfig(config.provider);
+  if (!providerConfig) {
+    throw new HTTPException(404, { message: `Provider not found: ${config.provider}` });
+  }
+
+  const provider = extractProviderDetails(providerConfig);
+  const capabilities = provider.capabilities ?? {
+    engines: [],
+    modes: [],
+    modelSources: [],
+    routerModes: [],
+  };
+
+  validateSupportedCapability(config.provider, 'engine', config.engine, capabilities.engines);
+  validateSupportedCapability(config.provider, 'mode', config.mode, capabilities.modes);
+  validateSupportedCapability(config.provider, 'model source', config.modelSource, capabilities.modelSources);
+  validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
+}
+
 function resolveDeploymentImages(config: DeploymentConfig): DeploymentConfig {
   if (config.provider !== 'kaito') {
     return config;
@@ -369,6 +412,7 @@ const deployments = new Hono<AppEnv>()
       ...body,
       namespace: body.namespace || (await configService.getDefaultNamespace()),
     });
+    await validateProviderCapabilities(config);
 
     // GPU fit validation
     let gpuWarnings: string[] = [];
@@ -430,6 +474,7 @@ const deployments = new Hono<AppEnv>()
       ...body,
       namespace: body.namespace || (await configService.getDefaultNamespace()),
     });
+    await validateProviderCapabilities(config);
 
     // Apply storage defaults that the mutating webhook would add,
     // so the preview manifest matches what Kubernetes will persist.

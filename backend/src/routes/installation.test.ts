@@ -17,6 +17,8 @@ describe('Installation Provider Routes', () => {
           chart: 'https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.1.tgz',
           namespace: 'dynamo-system',
           createNamespace: true,
+          preInstallMissingCrds: true,
+          skipCrds: true,
           values,
         },
       ],
@@ -37,7 +39,24 @@ describe('Installation Provider Routes', () => {
         ...mockInferenceProviderConfig.metadata,
         name: 'dynamo',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/display-name': 'Dynamo',
+          'airunway.ai/description': 'NVIDIA Dynamo for high-performance GPU inference',
+          'airunway.ai/default-namespace': 'dynamo-system',
+          'airunway.ai/capabilities': mockInferenceProviderConfig.metadata.annotations['airunway.ai/capabilities'],
+          'airunway.ai/health': JSON.stringify({
+            crds: [
+              {
+                name: 'dynamographs.nvidia.com',
+                displayName: 'Dynamo GraphDeployment CRD',
+              },
+            ],
+            operatorPods: [
+              {
+                namespace: 'dynamo-system',
+                selectors: ['app.kubernetes.io/name=dynamo-operator'],
+              },
+            ],
+          }),
           'airunway.ai/installation': JSON.stringify(createDynamoInstallation({
             'global.grove.install': true,
           })),
@@ -57,7 +76,24 @@ describe('Installation Provider Routes', () => {
         ...mockInferenceProviderConfig.metadata,
         name: 'dynamo',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/display-name': 'Dynamo',
+          'airunway.ai/description': 'NVIDIA Dynamo for high-performance GPU inference',
+          'airunway.ai/default-namespace': 'dynamo-system',
+          'airunway.ai/capabilities': mockInferenceProviderConfig.metadata.annotations['airunway.ai/capabilities'],
+          'airunway.ai/health': JSON.stringify({
+            crds: [
+              {
+                name: 'dynamographs.nvidia.com',
+                displayName: 'Dynamo GraphDeployment CRD',
+              },
+            ],
+            operatorPods: [
+              {
+                namespace: 'dynamo-system',
+                selectors: ['app.kubernetes.io/name=dynamo-operator'],
+              },
+            ],
+          }),
           'airunway.ai/installation': JSON.stringify(createDynamoInstallation({
             'dynamo-operator': {
               controllerManager: {
@@ -86,7 +122,10 @@ describe('Installation Provider Routes', () => {
         ...mockInferenceProviderConfig.metadata,
         name: 'kuberay',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/display-name': 'KubeRay',
+          'airunway.ai/description': 'Ray Serve via KubeRay',
+          'airunway.ai/default-namespace': 'ray-system',
+          'airunway.ai/capabilities': mockInferenceProviderConfig.metadata.annotations['airunway.ai/capabilities'],
           'airunway.ai/installation': JSON.stringify({
             description: 'Ray Serve via KubeRay',
             defaultNamespace: 'ray-system',
@@ -134,12 +173,12 @@ describe('Installation Provider Routes', () => {
 
   describe('GET /api/installation/providers/:providerId/status', () => {
     test('uses live KAITO installation status instead of provider config readiness', async () => {
-      let kaitoStatusChecks = 0;
+      let providerStatusChecks = 0;
 
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => mockInferenceProviderConfig),
-        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
-          kaitoStatusChecks += 1;
+        mockServiceMethod(kubernetesService, 'checkProviderInstallationStatus', async () => {
+          providerStatusChecks += 1;
           return {
             installed: false,
             crdFound: true,
@@ -154,8 +193,8 @@ describe('Installation Provider Routes', () => {
 
       const data = await res.json();
       expect(data.providerId).toBe('kaito');
-      expect(data.providerName).toBe('Kaito');
-      expect(kaitoStatusChecks).toBe(1);
+      expect(data.providerName).toBe('KAITO');
+      expect(providerStatusChecks).toBe(1);
       expect(data.installed).toBe(false);
       expect(data.crdFound).toBe(true);
       expect(data.operatorRunning).toBe(false);
@@ -169,8 +208,8 @@ describe('Installation Provider Routes', () => {
     });
 
     test('uses live Dynamo installation status for non-KAITO providers', async () => {
-      let kaitoStatusChecks = 0;
-      let dynamoStatusChecks = 0;
+      let providerStatusChecks = 0;
+      let providerStatusArgs: unknown[] = [];
       const nonKaitoConfig = {
         ...createDynamoProviderConfig(),
         status: {
@@ -181,17 +220,9 @@ describe('Installation Provider Routes', () => {
 
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => nonKaitoConfig),
-        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
-          kaitoStatusChecks += 1;
-          return {
-            installed: true,
-            crdFound: true,
-            operatorRunning: true,
-            message: 'should not be used',
-          };
-        }),
-        mockServiceMethod(kubernetesService, 'checkDynamoInstallationStatus', async () => {
-          dynamoStatusChecks += 1;
+        mockServiceMethod(kubernetesService, 'checkProviderInstallationStatus', async (...args: unknown[]) => {
+          providerStatusChecks += 1;
+          providerStatusArgs = args;
           return {
             installed: false,
             crdFound: false,
@@ -205,8 +236,9 @@ describe('Installation Provider Routes', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(kaitoStatusChecks).toBe(0);
-      expect(dynamoStatusChecks).toBe(1);
+      expect(providerStatusChecks).toBe(1);
+      expect(providerStatusArgs[0]).toBe('dynamo');
+      expect(providerStatusArgs[2]).toBe('Dynamo');
       expect(data.providerId).toBe('dynamo');
       expect(data.providerName).toBe('Dynamo');
       expect(data.installed).toBe(false);
@@ -225,7 +257,7 @@ describe('Installation Provider Routes', () => {
     test('marks providers without installation metadata as not installable', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithoutInstallation),
-        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+        mockServiceMethod(kubernetesService, 'checkProviderInstallationStatus', async () => ({
           installed: false,
           crdFound: false,
           operatorRunning: false,
@@ -267,7 +299,7 @@ describe('Installation Provider Routes', () => {
 
       const data = await res.json();
       expect(data.providerId).toBe('kaito');
-      expect(data.providerName).toBe('Kaito');
+      expect(data.providerName).toBe('KAITO');
       expect(data.commands).toBeDefined();
       expect(data.commands.some((command: string) => command.includes('helm pull kaito/workspace'))).toBe(true);
       expect(data.commands.some((command: string) => command.includes('kubectl apply --server-side --force-conflicts -f "$crd"'))).toBe(true);

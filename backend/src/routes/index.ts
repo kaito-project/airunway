@@ -1,6 +1,7 @@
 export { default as health } from './health';
 export { default as models } from './models';
 export { default as settings } from './settings';
+export { default as providers } from './providers';
 export { default as deployments } from './deployments';
 export { default as installation } from './installation';
 export { default as oauth } from './oauth';

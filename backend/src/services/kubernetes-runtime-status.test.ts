@@ -51,13 +51,13 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
-  test('uses live KAITO installation status for KAITO runtime entries', async () => {
-    let kaitoStatusChecks = 0;
+  test('uses annotation-driven installation status for KAITO runtime entries', async () => {
+    const providerStatusChecks: any[] = [];
 
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
-      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
-        kaitoStatusChecks += 1;
+      mockServiceMethod(kubernetesService as any, 'checkProviderInstallationStatus', async (...args: any[]) => {
+        providerStatusChecks.push(args);
         return {
           installed: false,
           crdFound: false,
@@ -65,26 +65,79 @@ describe('KubernetesService - Runtime Status', () => {
           message: 'KAITO workspace CRD not found',
         };
       }),
+      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
+        throw new Error('getRuntimesStatus should use annotation-driven provider status checks');
+      }),
     );
     mockProviderConfigs([mockInferenceProviderConfig]);
 
     const runtimes = await kubernetesService.getRuntimesStatus();
     const kaito = runtimes.find((runtime) => runtime.id === 'kaito');
 
-    expect(kaitoStatusChecks).toBe(1);
+    expect(providerStatusChecks).toHaveLength(1);
+    expect(providerStatusChecks[0][0]).toBe('kaito');
+    expect(providerStatusChecks[0][1]).toEqual(mockInferenceProviderConfig.status);
+    expect(providerStatusChecks[0][2]).toBe('KAITO');
+    expect(providerStatusChecks[0][3]).toMatchObject({
+      crds: [{ name: 'workspaces.kaito.sh', displayName: 'KAITO Workspace CRD' }],
+      operatorPods: [{
+        namespace: 'kaito-workspace',
+        selectors: [
+          'app.kubernetes.io/name=kaito',
+          'app=kaito',
+          'control-plane=controller-manager',
+        ],
+      }],
+    });
     expect(kaito).toBeDefined();
+    expect(kaito?.name).toBe('KAITO');
     expect(kaito?.installed).toBe(false);
     expect(kaito?.healthy).toBe(false);
     expect(kaito?.version).toBe('0.10.0');
     expect(kaito?.message).toBe('KAITO workspace CRD not found');
   });
 
-  test('uses live Dynamo installation status for Dynamo runtime entries', async () => {
-    let kaitoStatusChecks = 0;
-    let dynamoStatusChecks = 0;
-    const nonKaitoConfig = {
+  test('uses annotation-driven installation status for Dynamo runtime entries', async () => {
+    const providerStatusChecks: any[] = [];
+    const dynamoHealth = {
+      crds: [
+        {
+          name: 'dynamographdeployments.nvidia.com',
+          displayName: 'DynamoGraphDeployment CRD',
+        },
+      ],
+      operatorPods: [
+        {
+          namespace: 'dynamo-system',
+          selectors: [
+            dynamoOperatorSelector,
+            'app.kubernetes.io/name=dynamo-operator',
+            'control-plane=controller-manager',
+          ],
+        },
+        {
+          selectors: ['app.kubernetes.io/name=dynamo-operator'],
+        },
+      ],
+    };
+    const dynamoConfig = {
       ...mockInferenceProviderConfig,
-      metadata: { ...mockInferenceProviderConfig.metadata, name: 'dynamo' },
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'dynamo',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/display-name': 'Dynamo',
+          'airunway.ai/description': 'NVIDIA Dynamo for high-performance GPU inference',
+          'airunway.ai/default-namespace': 'dynamo-system',
+          'airunway.ai/documentation-url': 'https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md',
+          'airunway.ai/capabilities': JSON.stringify({
+            engines: ['vllm', 'sglang', 'trtllm'],
+            servingModes: ['aggregated', 'disaggregated'],
+          }),
+          'airunway.ai/health': JSON.stringify(dynamoHealth),
+        },
+      },
       status: {
         ready: false,
         version: '1.2.3',
@@ -93,37 +146,41 @@ describe('KubernetesService - Runtime Status', () => {
 
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
-      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
-        kaitoStatusChecks += 1;
-        return {
-          installed: true,
-          crdFound: true,
-          operatorRunning: true,
-          message: 'should not be used',
-        };
-      }),
-      mockServiceMethod(kubernetesService, 'checkDynamoInstallationStatus', async () => {
-        dynamoStatusChecks += 1;
+      mockServiceMethod(kubernetesService as any, 'checkProviderInstallationStatus', async (...args: any[]) => {
+        providerStatusChecks.push(args);
         return {
           installed: false,
           crdFound: false,
           operatorRunning: false,
-          message: 'Dynamo CRD not found',
+          message: 'DynamoGraphDeployment CRD not found',
         };
       }),
+      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => {
+        throw new Error('getRuntimesStatus should not use KAITO-specific status checks');
+      }),
+      mockServiceMethod(kubernetesService, 'checkDynamoInstallationStatus', async () => {
+        throw new Error('getRuntimesStatus should not use Dynamo-specific status checks');
+      }),
     );
-    mockProviderConfigs([nonKaitoConfig]);
+    mockProviderConfigs([dynamoConfig]);
 
     const runtimes = await kubernetesService.getRuntimesStatus();
     const dynamo = runtimes.find((runtime) => runtime.id === 'dynamo');
 
-    expect(kaitoStatusChecks).toBe(0);
-    expect(dynamoStatusChecks).toBe(1);
+    expect(providerStatusChecks).toHaveLength(1);
+    expect(providerStatusChecks[0][0]).toBe('dynamo');
+    expect(providerStatusChecks[0][1]).toEqual(dynamoConfig.status);
+    expect(providerStatusChecks[0][2]).toBe('Dynamo');
+    expect(providerStatusChecks[0][3]).toEqual(dynamoHealth);
     expect(dynamo).toBeDefined();
+    expect(dynamo?.name).toBe('Dynamo');
+    expect(dynamo?.defaultNamespace).toBe('dynamo-system');
+    expect(dynamo?.capabilities?.engines).toEqual(['vllm', 'sglang', 'trtllm']);
+    expect(dynamo?.capabilities?.modes).toEqual(['aggregated', 'disaggregated']);
     expect(dynamo?.installed).toBe(false);
     expect(dynamo?.healthy).toBe(false);
     expect(dynamo?.version).toBe('1.2.3');
-    expect(dynamo?.message).toBe('Dynamo CRD not found');
+    expect(dynamo?.message).toBe('DynamoGraphDeployment CRD not found');
   });
 
   test('reports KAITO as not fully installed when the CRD exists but no ready operator pod is found', async () => {

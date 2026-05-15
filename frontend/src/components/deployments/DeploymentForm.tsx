@@ -86,47 +86,26 @@ interface DeploymentFormProps {
   runtimes?: RuntimeStatus[]
 }
 
-// Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
-type TraditionalEngine = 'vllm' | 'sglang' | 'trtllm'
 type RouterMode = 'default' | 'kv' | 'round-robin'
 type DeploymentMode = 'aggregated' | 'disaggregated'
-type RuntimeId = 'dynamo' | 'kuberay' | 'kaito' | 'llmd'
 type KaitoComputeType = 'cpu' | 'gpu'
 type GgufRunMode = 'build' | 'direct'
 
 const TENSOR_PARALLEL_SIZE_ARG = 'tensor-parallel-size'
 const PIPELINE_PARALLEL_SIZE_ARG = 'pipeline-parallel-size'
+const SUPPORTED_ENGINE_IDS: Engine[] = ['vllm', 'sglang', 'trtllm', 'llamacpp']
 
-// Runtime metadata for display
-const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defaultNamespace: string }> = {
-  dynamo: {
-    name: 'NVIDIA Dynamo',
-    description: 'High-performance inference with KV-cache routing and disaggregated serving',
-    defaultNamespace: 'dynamo-system',
-  },
-  kuberay: {
-    name: 'KubeRay',
-    description: 'Ray-based serving with autoscaling and distributed inference',
-    defaultNamespace: 'kuberay-system',
-  },
-  kaito: {
-    name: 'KAITO',
-    description: 'Flexible inference with GGUF (llama.cpp) and vLLM support',
-    defaultNamespace: 'kaito-workspace',
-  },
-  llmd: {
-    name: 'llm-d',
-    description: 'GPU-accelerated vLLM inference with disaggregated prefill/decode support',
-    defaultNamespace: 'default',
-  },
+function isEngine(value: string): value is Engine {
+  return SUPPORTED_ENGINE_IDS.includes(value as Engine)
 }
 
-// Engine support by runtime (only traditional GPU engines, not llamacpp)
-const RUNTIME_ENGINES: Record<RuntimeId, TraditionalEngine[]> = {
-  dynamo: ['vllm', 'sglang', 'trtllm'],
-  kuberay: ['vllm'], // KubeRay only supports vLLM currently
-  kaito: ['vllm'], // KAITO exposes vLLM in the engine picker; single-engine llama.cpp models bypass it
-  llmd: ['vllm'], // llm-d uses vLLM exclusively
+function getRuntimeEngines(runtime?: RuntimeStatus): Engine[] {
+  return runtime?.capabilities?.engines?.filter(isEngine) ?? []
+}
+
+function isRuntimeCompatible(runtime: RuntimeStatus, modelEngines: Engine[]): boolean {
+  const runtimeEngines = getRuntimeEngines(runtime)
+  return modelEngines.some((engine) => runtimeEngines.includes(engine))
 }
 
 function normalizeGatewayAvailability(
@@ -140,17 +119,6 @@ function normalizeGatewayAvailability(
   const nextConfig = { ...config }
   delete nextConfig.gatewayEnabled
   return nextConfig
-}
-
-// Check if a runtime is compatible with a model based on engine support
-function isRuntimeCompatible(runtimeId: RuntimeId, modelEngines: Engine[]): boolean {
-  // KAITO supports llamacpp (GGUF) AND vllm models
-  if (runtimeId === 'kaito') {
-    return modelEngines.includes('llamacpp') || modelEngines.includes('vllm');
-  }
-  // Other models need at least one matching engine with the runtime
-  const runtimeEngines = RUNTIME_ENGINES[runtimeId];
-  return modelEngines.some(e => runtimeEngines.includes(e as TraditionalEngine));
 }
 
 // Extract nodeCount from providerOverrides structure
@@ -219,33 +187,30 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   const isGatedModel = model.gated === true
   const needsHfAuth = isGatedModel && !hfStatus?.configured
 
-  // Determine default runtime: prefer compatible and installed runtime
-  const getDefaultRuntime = (): RuntimeId => {
-    if (!runtimes || runtimes.length === 0) {
-      // Fallback based on model engines
-      return model.supportedEngines.includes('llamacpp') ? 'kaito' : 'dynamo';
-    }
+  const getRuntimeDefaultNamespace = (runtime: string): string =>
+    runtimes?.find(r => r.id === runtime)?.defaultNamespace || 'default'
 
-    // Find first compatible and installed runtime
-    const compatibleRuntimes: RuntimeId[] = ['dynamo', 'kuberay', 'kaito', 'llmd'];
-    for (const rtId of compatibleRuntimes) {
-      const rt = runtimes.find(r => r.id === rtId);
-      if (rt?.installed && isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId;
-      }
-    }
+  const getRuntimeDisplayName = (runtime: string): string =>
+    runtimes?.find(r => r.id === runtime)?.name || runtime || 'selected runtime'
 
-    // If no compatible installed runtime, return first compatible one
-    for (const rtId of compatibleRuntimes) {
-      if (isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId;
-      }
-    }
+  // Determine default runtime from provider discovery: prefer compatible and installed runtime.
+  const getDefaultRuntime = (): string => {
+    if (!runtimes || runtimes.length === 0) return ''
 
-    return 'dynamo';
+    const compatibleInstalled = runtimes.find(
+      (runtime) => runtime.installed && isRuntimeCompatible(runtime, model.supportedEngines)
+    )
+    if (compatibleInstalled) return compatibleInstalled.id
+
+    const compatible = runtimes.find((runtime) =>
+      isRuntimeCompatible(runtime, model.supportedEngines)
+    )
+    if (compatible) return compatible.id
+
+    return runtimes.find((runtime) => runtime.installed)?.id || runtimes[0]?.id || ''
   }
 
-  const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId>(getDefaultRuntime)
+  const [selectedRuntime, setSelectedRuntime] = useState<string>(getDefaultRuntime)
   const selectedRuntimeStatus = runtimes?.find(r => r.id === selectedRuntime)
   const isRuntimeInstalled = selectedRuntimeStatus?.installed ?? false
 
@@ -304,25 +269,20 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
     }
   }, [ggufFilesData, ggufFile]);
 
-  // Get supported engines for the selected runtime, filtered by model support
-  const getAvailableEngines = (): TraditionalEngine[] => {
-    const runtimeEngines = RUNTIME_ENGINES[selectedRuntime]
-    // Filter model engines to only those supported by the runtime (excluding llamacpp)
-    return model.supportedEngines.filter(
-      (e): e is TraditionalEngine => runtimeEngines.includes(e as TraditionalEngine)
-    )
+  // Get supported engines for the selected runtime, filtered by model support.
+  const getAvailableEngines = (): Engine[] => {
+    const runtimeEngines = getRuntimeEngines(selectedRuntimeStatus)
+    return model.supportedEngines.filter((engine) => runtimeEngines.includes(engine))
   }
   const availableEngines = getAvailableEngines()
 
-  const getDefaultEngineForRuntime = (runtime: RuntimeId): Engine => {
+  const getDefaultEngineForRuntime = (runtime: string): Engine => {
     if (model.supportedEngines.length === 1) {
       return model.supportedEngines[0]
     }
 
-    const runtimeEngines = RUNTIME_ENGINES[runtime]
-    return model.supportedEngines.find(
-      (e): e is TraditionalEngine => runtimeEngines.includes(e as TraditionalEngine)
-    ) || model.supportedEngines[0] || 'vllm'
+    const runtimeEngines = getRuntimeEngines(runtimes?.find(r => r.id === runtime))
+    return model.supportedEngines.find((engine) => runtimeEngines.includes(engine)) || model.supportedEngines[0] || 'vllm'
   }
 
   const defaultRuntime = getDefaultRuntime()
@@ -330,7 +290,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [config, setConfig] = useState<DeploymentConfig>({
     name: generateDeploymentName(model.id),
-    namespace: RUNTIME_INFO[defaultRuntime].defaultNamespace,
+    namespace: getRuntimeDefaultNamespace(defaultRuntime),
     modelId: model.id,
     engine: getDefaultEngineForRuntime(defaultRuntime),
     mode: 'aggregated',
@@ -352,8 +312,28 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
     },
   })
 
+  // If runtimes arrive after the form initializes, select the best discovered runtime.
+  useEffect(() => {
+    if (!runtimes || runtimes.length === 0 || runtimes.some(r => r.id === selectedRuntime)) return
+
+    const runtime = getDefaultRuntime()
+    if (!runtime) return
+
+    setSelectedRuntime(runtime)
+    setConfig(prev => ({
+      ...prev,
+      provider: runtime,
+      namespace: getRuntimeDefaultNamespace(runtime),
+      engine: getDefaultEngineForRuntime(runtime),
+    }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimes, selectedRuntime])
+
   // Calculate GPU recommendation based on model characteristics
   const gpuRecommendation = calculateGpuRecommendation(model, detailedCapacity)
+  const recommendedMultiNodeNodeCount = gpuRecommendation.multiNode?.nodeCount
+  const recommendedMultiNodeGpusPerNode = gpuRecommendation.multiNode?.gpusPerNode
+  const recommendedMultiNodePipelineParallelSize = gpuRecommendation.multiNode?.pipelineParallelSize
   const currentNodeCount = getNodeCountFromOverrides(config.providerOverrides)
   const currentPipelineParallel = getNumericEngineArg(config.engineArgs, PIPELINE_PARALLEL_SIZE_ARG)
 
@@ -414,15 +394,25 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
         }
       }
 
-      if (gpuRecommendation.multiNode) {
-        const recommendedPipelineParallel = gpuRecommendation.multiNode.pipelineParallelSize
+      if (
+        recommendedMultiNodeNodeCount !== undefined &&
+        recommendedMultiNodeGpusPerNode !== undefined &&
+        recommendedMultiNodePipelineParallelSize !== undefined
+      ) {
+        const recommendedPipelineParallel = recommendedMultiNodePipelineParallelSize
         const gpuCount = prev.resources?.gpu ?? 0
+        const recommendedMultiNode: MultiNodeRecommendation = {
+          nodeCount: recommendedMultiNodeNodeCount,
+          gpusPerNode: recommendedMultiNodeGpusPerNode,
+          totalGpus: recommendedMultiNodeNodeCount * recommendedMultiNodeGpusPerNode,
+          pipelineParallelSize: recommendedMultiNodePipelineParallelSize,
+        }
 
         // Intentionally compare against the previous config inside setState so
         // manual topology edits do not trigger this effect and get snapped back.
         if (
-          prevNodeCount === gpuRecommendation.multiNode.nodeCount &&
-          prevTensorParallel === gpuRecommendation.multiNode.gpusPerNode &&
+          prevNodeCount === recommendedMultiNode.nodeCount &&
+          prevTensorParallel === recommendedMultiNode.gpusPerNode &&
           prevPipelineParallel === recommendedPipelineParallel &&
           gpuCount === gpuRecommendation.recommendedGpus
         ) {
@@ -435,8 +425,8 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
             ...prev.resources,
             gpu: gpuRecommendation.recommendedGpus,
           },
-          providerOverrides: buildDynamoMultiNodeOverrides(gpuRecommendation.multiNode!.nodeCount),
-          engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, gpuRecommendation.multiNode!),
+          providerOverrides: buildDynamoMultiNodeOverrides(recommendedMultiNode.nodeCount),
+          engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, recommendedMultiNode),
         }
       }
 
@@ -451,9 +441,9 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       }
     })
   }, [
-    gpuRecommendation.multiNode?.gpusPerNode,
-    gpuRecommendation.multiNode?.nodeCount,
-    gpuRecommendation.multiNode?.pipelineParallelSize,
+    recommendedMultiNodeGpusPerNode,
+    recommendedMultiNodeNodeCount,
+    recommendedMultiNodePipelineParallelSize,
     gpuRecommendation.recommendedGpus,
     selectedRuntime,
     config.engine,
@@ -479,13 +469,12 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   }, [premadeModels, model.id, selectedPremadeModel])
 
   // Handle runtime change - update namespace and engine
-  const handleRuntimeChange = (runtime: RuntimeId) => {
+  const handleRuntimeChange = (runtime: string) => {
     setTopologyManagedByAIConfig(false)
     setSelectedRuntime(runtime)
-    const newAvailableEngines = model.supportedEngines.filter(
-      (e): e is TraditionalEngine => RUNTIME_ENGINES[runtime].includes(e as TraditionalEngine)
-    )
-    const currentEngineSupported = newAvailableEngines.includes(config.engine as TraditionalEngine)
+    const runtimeEngines = getRuntimeEngines(runtimes?.find(r => r.id === runtime))
+    const newAvailableEngines = model.supportedEngines.filter((engine) => runtimeEngines.includes(engine))
+    const currentEngineSupported = newAvailableEngines.includes(config.engine)
 
     setConfig(prev => {
       const nextEngine = currentEngineSupported ? prev.engine : getDefaultEngineForRuntime(runtime)
@@ -517,7 +506,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
       return {
         ...prev,
         provider: runtime,
-        namespace: RUNTIME_INFO[runtime].defaultNamespace,
+        namespace: getRuntimeDefaultNamespace(runtime),
         // Reset engine if current one isn't supported by new runtime
         engine: nextEngine,
         // Reset router mode if switching away from Dynamo
@@ -694,7 +683,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
         variant: 'destructive',
       })
     }
-  }, [config, createDeployment, navigate, toast, triggerConfetti, selectedRuntime, kaitoComputeType, kaitoResourceType, selectedPremadeModel, isHuggingFaceGgufModel, isVllmModel, model.id, model.gated, ggufFile, ggufRunMode, maxModelLen, gatewayInfo?.available])
+  }, [config, createDeployment, navigate, toast, triggerConfetti, selectedRuntime, kaitoComputeType, kaitoResourceType, selectedPremadeModel, isHuggingFaceGgufModel, isVllmModel, model.id, ggufFile, ggufRunMode, maxModelLen, gatewayInfo?.available])
 
   const updateConfig = <K extends keyof DeploymentConfig>(
     key: K,
@@ -930,27 +919,27 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
           </h3>
           <div className="grid gap-4 sm:grid-cols-2">
             {runtimes.map((runtime) => {
-              const info = RUNTIME_INFO[runtime.id as RuntimeId]
-              if (!info) return null
-
-              const isCompatible = isRuntimeCompatible(runtime.id as RuntimeId, model.supportedEngines)
-              const isSelected = selectedRuntime === runtime.id
+              const runtimeId = runtime.id
+              const isCompatible = isRuntimeCompatible(runtime, model.supportedEngines)
+              const isSelected = selectedRuntime === runtimeId
+              const displayName = runtime.name || runtimeId
+              const description = runtime.description || 'No description available'
 
               return (
                 <div
-                  key={runtime.id}
+                  key={runtimeId}
                   role="radio"
                   aria-checked={isSelected}
                   tabIndex={isCompatible ? 0 : -1}
                   onClick={() => {
                     if (isCompatible) {
-                      handleRuntimeChange(runtime.id as RuntimeId)
+                      handleRuntimeChange(runtimeId)
                     }
                   }}
                   onKeyDown={(e) => {
                     if (isCompatible && (e.key === 'Enter' || e.key === ' ')) {
                       e.preventDefault()
-                      handleRuntimeChange(runtime.id as RuntimeId)
+                      handleRuntimeChange(runtimeId)
                     }
                   }}
                   className={cn(
@@ -984,7 +973,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                           isCompatible ? "cursor-pointer" : "cursor-not-allowed"
                         )}
                       >
-                        {info.name}
+                        {displayName}
                       </span>
                       {!isCompatible ? (
                         <Badge variant="outline" className="text-muted-foreground border-muted text-xs">
@@ -1003,7 +992,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {info.description}
+                      {description}
                     </p>
                     {!isCompatible && (
                       <p className="text-xs text-muted-foreground mt-1">
@@ -1013,7 +1002,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                     {isCompatible && !runtime.installed && isSelected && (
                       <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
                         <Link to="/installation" className="underline hover:no-underline">
-                          Install {info.name}
+                          Install {displayName}
                         </Link>{' '}
                         before deploying.
                       </p>
@@ -1073,7 +1062,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                   id="namespace"
                   value={config.namespace}
                   onChange={(e) => updateConfig('namespace', e.target.value)}
-                  placeholder={RUNTIME_INFO[selectedRuntime].defaultNamespace}
+                  placeholder={getRuntimeDefaultNamespace(selectedRuntime)}
                   required
                 />
               </div>
@@ -1115,7 +1104,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
             </RadioGroup>
           ) : availableEngines.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No compatible engines available for this model with {RUNTIME_INFO[selectedRuntime].name}.
+              No compatible engines available for this model with {getRuntimeDisplayName(selectedRuntime)}.
             </p>
           ) : (
             <div className="space-y-3">
@@ -1157,6 +1146,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                         {engine === 'vllm' && 'vLLM'}
                         {engine === 'sglang' && 'SGLang'}
                         {engine === 'trtllm' && 'TensorRT-LLM'}
+                        {engine === 'llamacpp' && 'llama.cpp'}
                         {isRecommended && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                             <Sparkles className="h-3 w-3" />

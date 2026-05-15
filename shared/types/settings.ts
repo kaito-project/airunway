@@ -2,11 +2,51 @@
  * Settings and Provider types
  */
 
+export interface ProviderCapabilities {
+  engines: string[];
+  modes: string[];
+  modelSources: string[];
+  routerModes: string[];
+  features: Record<string, boolean>;
+}
+
+export interface ProviderDeploymentDefaults {
+  defaultEngine?: string;
+  defaultMode?: string;
+  defaultResources?: Record<string, unknown>;
+}
+
+export interface ProviderHealthConfig {
+  crds?: Array<string | { name: string; displayName?: string }>;
+  operatorPods?: Array<{
+    namespace?: string;
+    selectors: string[];
+  }>;
+  /** @deprecated Use operatorPods instead. Kept for compatibility with older provider annotations. */
+  operator?: {
+    namespace?: string;
+    podSelectors?: string[];
+    fallbackPodSelectors?: string[];
+    crossNamespacePodSelectors?: string[];
+  };
+  status?: {
+    readyPath?: string;
+    conditions?: string[];
+  };
+}
+
 export interface ProviderInfo {
   id: string;
   name: string;
   description: string;
   defaultNamespace: string;
+  documentationUrl?: string;
+  icon?: string;
+  warnings?: string[];
+  installable?: boolean;
+  capabilities?: ProviderCapabilities;
+  deploymentDefaults?: ProviderDeploymentDefaults;
+  health?: ProviderHealthConfig;
 }
 
 export interface CRDConfig {
@@ -34,6 +74,10 @@ export interface HelmChart {
   namespace: string;
   createNamespace?: boolean;
   values?: Record<string, unknown>;
+  skipCrds?: boolean;
+  fetchUrl?: string;
+  preCrdUrls?: string[];
+  preInstallMissingCrds?: boolean;
 }
 
 export interface ProviderDetails extends ProviderInfo {
@@ -75,14 +119,23 @@ export interface Settings {
  * Used to show installation and health status of each runtime
  */
 export interface RuntimeStatus {
-  id: string;           // 'dynamo' | 'kuberay'
-  name: string;         // Display name
-  installed: boolean;   // Runtime is ready to use
-  healthy: boolean;     // Runtime service is running
-  crdFound?: boolean;   // Provider API is available
-  operatorRunning?: boolean; // Runtime service pods are ready
-  version?: string;     // Detected version
-  message?: string;     // Status message
+  id: string;
+  name: string;
+  description?: string;
+  defaultNamespace?: string;
+  documentationUrl?: string;
+  icon?: string;
+  warnings?: string[];
+  installable?: boolean;
+  capabilities?: ProviderCapabilities;
+  deploymentDefaults?: ProviderDeploymentDefaults;
+  health?: ProviderHealthConfig;
+  installed: boolean;
+  healthy: boolean;
+  crdFound?: boolean;
+  operatorRunning?: boolean;
+  version?: string;
+  message?: string;
 }
 
 /**

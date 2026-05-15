@@ -74,33 +74,9 @@ func NewProviderConfigManager(c client.Client, discoveryClients ...discovery.Dis
 	return manager
 }
 
-// GetProviderConfigSpec returns the InferenceProviderConfigSpec for Dynamo
+// GetProviderConfigSpec returns the InferenceProviderConfigSpec for Dynamo.
 func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 	return airunwayv1alpha1.InferenceProviderConfigSpec{
-		Capabilities: &airunwayv1alpha1.ProviderCapabilities{
-			Engines: []airunwayv1alpha1.EngineType{
-				airunwayv1alpha1.EngineTypeVLLM,
-				airunwayv1alpha1.EngineTypeSGLang,
-				airunwayv1alpha1.EngineTypeTRTLLM,
-			},
-			ServingModes: []airunwayv1alpha1.ServingMode{
-				airunwayv1alpha1.ServingModeAggregated,
-				airunwayv1alpha1.ServingModeDisaggregated,
-			},
-			CPUSupport: false,
-			GPUSupport: true,
-			Gateway: &airunwayv1alpha1.GatewayCapabilities{
-				// The Dynamo operator creates the InferencePool as
-				// "{DynamoGraphDeployment.metadata.name}-pool" in the same
-				// namespace as the DGD.
-				InferencePoolNamePattern: "{name}-pool",
-				InferencePoolNamespace:   "{namespace}",
-				// With Dynamo v1.1.0+, the frontendSidecar feature colocates a
-				// frontend on each worker pod, making the InferencePool/EPP
-				// path viable. No need to bypass to the Frontend
-				// Service. Requests route through InferencePool directly.
-			},
-		},
 		SelectionRules: []airunwayv1alpha1.SelectionRule{
 			{
 				Condition: "spec.engine.type == 'trtllm'",
@@ -118,6 +94,33 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 				Condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 0 && spec.engine.type == 'vllm'",
 				Priority:  50,
 			},
+		},
+	}
+}
+
+func getProviderCapabilities() *airunwayv1alpha1.ProviderCapabilities {
+	return &airunwayv1alpha1.ProviderCapabilities{
+		Engines: []airunwayv1alpha1.EngineType{
+			airunwayv1alpha1.EngineTypeVLLM,
+			airunwayv1alpha1.EngineTypeSGLang,
+			airunwayv1alpha1.EngineTypeTRTLLM,
+		},
+		ServingModes: []airunwayv1alpha1.ServingMode{
+			airunwayv1alpha1.ServingModeAggregated,
+			airunwayv1alpha1.ServingModeDisaggregated,
+		},
+		CPUSupport: false,
+		GPUSupport: true,
+		Gateway: &airunwayv1alpha1.GatewayCapabilities{
+			// The Dynamo operator creates the InferencePool as
+			// "{DynamoGraphDeployment.metadata.name}-pool" in the same
+			// namespace as the DGD.
+			InferencePoolNamePattern: "{name}-pool",
+			InferencePoolNamespace:   "{namespace}",
+			// With Dynamo v1.1.0+, the frontendSidecar feature colocates a
+			// frontend on each worker pod, making the InferencePool/EPP
+			// path viable. No need to bypass to the Frontend
+			// Service. Requests route through InferencePool directly.
 		},
 	}
 }
@@ -286,12 +289,47 @@ func (m *ProviderConfigManager) Unregister(ctx context.Context) error {
 }
 
 func buildAnnotations() (map[string]string, error) {
-	installJSON, err := json.Marshal(GetInstallationInfo())
+	installation := GetInstallationInfo()
+	health := map[string]interface{}{
+		"crds": []map[string]string{
+			{"name": "dynamographdeployments.nvidia.com", "displayName": "DynamoGraphDeployment CRD"},
+		},
+		"operatorPods": []map[string]interface{}{
+			{
+				"namespace": "dynamo-system",
+				"selectors": []string{
+					"control-plane=controller-manager,app.kubernetes.io/name=dynamo-operator,app.kubernetes.io/instance=dynamo-platform",
+					"app.kubernetes.io/name=dynamo-operator",
+					"control-plane=controller-manager",
+				},
+			},
+			{
+				"selectors": []string{"app.kubernetes.io/name=dynamo-operator"},
+			},
+		},
+	}
+
+	installJSON, err := json.Marshal(installation)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal installation info: %w", err)
 	}
+	capabilitiesJSON, err := json.Marshal(getProviderCapabilities())
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal capabilities: %w", err)
+	}
+	healthJSON, err := json.Marshal(health)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal health info: %w", err)
+	}
+
 	return map[string]string{
-		airunwayv1alpha1.AnnotationInstallation:  string(installJSON),
-		airunwayv1alpha1.AnnotationDocumentation: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationDisplayName:      "Dynamo",
+		airunwayv1alpha1.AnnotationDescription:      installation.Description,
+		airunwayv1alpha1.AnnotationDefaultNamespace: installation.DefaultNamespace,
+		airunwayv1alpha1.AnnotationDocumentationURL: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationCapabilities:     string(capabilitiesJSON),
+		airunwayv1alpha1.AnnotationHealth:           string(healthJSON),
+		airunwayv1alpha1.AnnotationInstallation:     string(installJSON),
+		airunwayv1alpha1.AnnotationDocumentation:    ProviderDocumentation,
 	}, nil
 }

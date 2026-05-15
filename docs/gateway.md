@@ -254,27 +254,31 @@ When a provider declares gateway capabilities in its `InferenceProviderConfig`, 
 
 ### How It Works
 
-Providers declare gateway capabilities in their `InferenceProviderConfig`:
+Providers declare gateway capabilities in the `airunway.ai/capabilities` annotation on their `InferenceProviderConfig`:
 
 ```yaml
 apiVersion: airunway.ai/v1alpha1
 kind: InferenceProviderConfig
 metadata:
   name: dynamo
+  annotations:
+    airunway.ai/capabilities: |
+      {
+        "engines": ["vllm", "sglang", "trtllm"],
+        "gateway": {
+          "inferencePoolNamePattern": "{namespace}-{name}-pool",
+          "inferencePoolNamespace": "dynamo-system"
+        }
+      }
 spec:
-  capabilities:
-    engines: [vllm, sglang, trtllm]
-    gateway:
-      inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pattern for the pool name
-      inferencePoolNamespace: "dynamo-system"        # Namespace where the pool is created
+  selectionRules: []
 ```
 
-The controller adapts its reconciliation based on these flags:
+The controller adapts reconciliation when the annotation's `gateway` object is present:
 
-| Flag | `true` (provider-managed) | `false` / absent (controller-managed) |
+| Capability | Present (provider-managed) | Absent (controller-managed) |
 |---|---|---|
-| `managesInferencePool` | Controller waits for the provider's InferencePool to exist, then uses it as the HTTPRoute backend. Skips `reconcileInferencePool()` and `labelModelPods()`. | Controller creates and owns the InferencePool (default behavior). |
-| `managesEPP` | Controller does nothing. | Controller deploys the generic upstream EPP. |
+| `gateway` | Controller waits for the provider's `InferencePool`, uses it as the HTTPRoute backend, and skips creating a controller-owned `InferencePool` and generic EPP. | Controller creates and owns the `InferencePool` and deploys the generic upstream EPP. |
 
 The HTTPRoute is **always** managed by the controller regardless of provider capabilities.
 

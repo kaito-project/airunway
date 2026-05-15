@@ -3,100 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import logger from '../lib/logger';
-
-interface ProviderHelmChartDetails {
-  name: string;
-  chart: string;
-  namespace: string;
-  version?: string;
-  createNamespace?: boolean;
-  values?: Record<string, unknown>;
-  preInstallMissingCrds?: boolean;
-  skipCrds?: boolean;
-}
-
-/**
- * Parse the installation annotation (JSON) from an InferenceProviderConfig CRD object.
- */
-function parseInstallationAnnotation(config: any): any {
-  const raw = config.metadata?.annotations?.['airunway.ai/installation'];
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    logger.warn({
-      provider: config.metadata?.name,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    }, 'Failed to parse installation annotation');
-    return {};
-  }
-}
-
-/**
- * Extract provider details from an InferenceProviderConfig CRD object.
- * Installation and documentation metadata are read from metadata.annotations,
- * not from spec (which only contains controller-reconciled fields).
- */
-function extractProviderDetails(config: any) {
-  const name = config.metadata?.name || 'unknown';
-  const installation = parseInstallationAnnotation(config);
-  const capabilities = config.spec?.capabilities || {};
-
-  return {
-    id: name,
-    name: name.charAt(0).toUpperCase() + name.slice(1),
-    description: installation.description || '',
-    defaultNamespace: installation.defaultNamespace || 'default',
-    crdConfig: {
-      apiGroup: capabilities.engines?.length ? '' : '',
-    },
-    helmRepos: (installation.helmRepos || []).map((r: any) => ({
-      name: r.name,
-      url: r.url,
-    })),
-    helmCharts: (installation.helmCharts || []).map((c: any): ProviderHelmChartDetails => {
-      const values = c.values && typeof c.values === 'object' && !Array.isArray(c.values)
-        ? c.values as Record<string, unknown>
-        : undefined;
-      if (c.values !== undefined && values === undefined) {
-        logger.warn({ provider: name, chart: c.name }, 'Ignoring malformed Helm chart values in provider installation metadata');
-      }
-
-      return {
-        name: c.name,
-        chart: c.chart,
-        version: c.version,
-        namespace: c.namespace,
-        createNamespace: c.createNamespace,
-        values,
-      };
-    }),
-    installationSteps: (installation.steps || []).map((s: any) => ({
-      title: s.title,
-      command: s.command,
-      description: s.description,
-    })),
-  };
-}
-
-function shouldPreInstallMissingCrds(providerId: string, chart: ProviderHelmChartDetails) {
-  return (
-    (providerId === 'kaito' && chart.chart === 'kaito/workspace')
-    || (providerId === 'dynamo' && chart.name === 'dynamo-platform')
-  );
-}
-
-function normalizeInstallCharts(providerId: string, charts: ProviderHelmChartDetails[]): ProviderHelmChartDetails[] {
-  return charts.map((chart) => (
-    shouldPreInstallMissingCrds(providerId, chart)
-      ? {
-          ...chart,
-          preInstallMissingCrds: true,
-          skipCrds: true,
-        }
-      : chart
-  ));
-}
+import { extractProviderDetails } from '../lib/providers';
 
 const INSTALLER_PERMISSION_GUIDANCE = 'Automatic installation requires elevated installer permissions. Ask an admin to apply the optional dashboard installer permissions manifest (deploy/dashboard-installer-rbac.yaml) or run the commands manually.';
 
@@ -196,13 +103,14 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
-    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+    const charts = provider.helmCharts;
     const hasInstallMetadata = charts.length > 0;
     const status = config.status || {};
     const installationStatus = await kubernetesService.checkProviderInstallationStatus(
       providerId,
       status,
       provider.name,
+      provider.health,
     );
 
     return c.json({
@@ -229,7 +137,7 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
-    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+    const charts = provider.helmCharts;
 
     return c.json({
       providerId: provider.id,
@@ -247,7 +155,7 @@ const installation = new Hono()
     }
 
     const provider = extractProviderDetails(config);
-    const charts = normalizeInstallCharts(providerId, provider.helmCharts);
+    const charts = provider.helmCharts;
 
     if (charts.length === 0) {
       throw new HTTPException(400, {
@@ -337,7 +245,6 @@ const installation = new Hono()
       throw new HTTPException(404, { message: `Provider not found: ${providerId}` });
     }
 
-    const crdConfig = config.spec?.capabilities || {};
     logger.info({ providerId }, `Removing CRDs for ${providerId}`);
 
     // The CRD name is typically plural.apiGroup — but since we don't store that in

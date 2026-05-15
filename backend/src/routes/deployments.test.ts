@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from 'bun:test';
+import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
 import app from '../hono-app';
 import { kubernetesService } from '../services/kubernetes';
 import { configService } from '../services/config';
@@ -10,7 +10,66 @@ import {
   mockDeploymentWithPendingPod,
   mockDeploymentManifest,
   mockPodFailureReasons,
+  mockInferenceProviderConfig,
 } from '../test/fixtures';
+
+
+function capabilitiesAnnotation(capabilities: Record<string, string[]>) {
+  return JSON.stringify({
+    engines: capabilities.engines ?? [],
+    modes: capabilities.modes ?? capabilities.servingModes ?? [],
+    modelSources: capabilities.modelSources ?? [],
+    routerModes: capabilities.routerModes ?? [],
+  });
+}
+
+function permissiveProviderConfig(providerId: string) {
+  const capabilities = {
+    engines: [],
+    modes: [],
+    modelSources: [],
+    routerModes: [],
+  };
+
+  return {
+    ...mockInferenceProviderConfig,
+    metadata: {
+      ...mockInferenceProviderConfig.metadata,
+      name: providerId,
+      annotations: {
+        ...mockInferenceProviderConfig.metadata.annotations,
+        'airunway.ai/capabilities': capabilitiesAnnotation(capabilities),
+      },
+    },
+    spec: {
+      ...mockInferenceProviderConfig.spec,
+      capabilities,
+    },
+  };
+}
+
+
+function providerConfigWithCapabilities(
+  providerId: string,
+  capabilities: Record<string, string[]>,
+) {
+  const baseConfig = permissiveProviderConfig(providerId);
+
+  return {
+    ...baseConfig,
+    metadata: {
+      ...baseConfig.metadata,
+      annotations: {
+        ...baseConfig.metadata.annotations,
+        'airunway.ai/capabilities': capabilitiesAnnotation(capabilities),
+      },
+    },
+    spec: {
+      ...mockInferenceProviderConfig.spec,
+      capabilities,
+    },
+  };
+}
 
 // Base valid deployment body for reuse in tests
 const validDeploymentBody = {
@@ -29,8 +88,18 @@ const validDeploymentBody = {
 describe('Deployment Routes', () => {
   const restores: Array<() => void> = [];
 
+  beforeEach(() => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+        permissiveProviderConfig(providerId)
+      )),
+    );
+  });
+
   afterEach(() => {
-    restores.forEach((r) => r());
+    for (const restore of [...restores].reverse()) {
+      restore();
+    }
     restores.length = 0;
   });
 
@@ -257,6 +326,59 @@ describe('Deployment Routes', () => {
 
       const data = await res.json();
       expect(data.resources[0].manifest.spec.gateway).toEqual({ enabled: false });
+    });
+  });
+
+
+  describe('provider capability validation', () => {
+    test('POST /api/deployments rejects unsupported provider engine', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+          providerConfigWithCapabilities(providerId, {
+            engines: ['vllm'],
+            modes: ['aggregated'],
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'kaito',
+          engine: 'sglang',
+        }),
+      });
+
+      expect(res.status).toBe(422);
+      const data = await res.json();
+      expect(data.error.message).toContain('does not support engine "sglang"');
+    });
+
+    test('POST /api/deployments/preview rejects unsupported provider mode', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+          providerConfigWithCapabilities(providerId, {
+            engines: ['vllm'],
+            modes: ['aggregated'],
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'kaito',
+          mode: 'disaggregated',
+        }),
+      });
+
+      expect(res.status).toBe(422);
+      const data = await res.json();
+      expect(data.error.message).toContain('does not support mode "disaggregated"');
     });
   });
 

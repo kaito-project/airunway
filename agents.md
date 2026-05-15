@@ -95,9 +95,9 @@ Unified API for deploying ML models. Key fields:
 
 ### InferenceProviderConfig
 Cluster-scoped resource for provider registration:
-- `spec.capabilities.engines` - Supported inference engines
-- `spec.capabilities.servingModes` - Supported serving modes
-- `spec.capabilities.gpuSupport/cpuSupport` - Hardware support
+- `airunway.ai/capabilities` annotation `engines` - Supported inference engines
+- `airunway.ai/capabilities` annotation `servingModes` - Supported serving modes
+- `airunway.ai/capabilities` annotation `gpuSupport/cpuSupport` - Hardware support
 - `spec.selectionRules` - CEL expressions for auto-selection
 - `status.ready` - Provider health status
 

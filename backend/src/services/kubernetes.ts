@@ -1,10 +1,11 @@
 import * as k8s from '@kubernetes/client-node';
 import { configService } from './config';
-import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus } from '@airunway/shared';
+import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus, ProviderHealthConfig } from '@airunway/shared';
 import { toModelDeploymentManifest, toDeploymentStatus, INFERENCE_GATEWAY_LABEL } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
 import { loadKubeConfig } from '../lib/kubeconfig';
 import logger from '../lib/logger';
+import { extractProviderInfo } from '../lib/providers';
 
 // ModelDeployment CRD configuration
 const MODEL_DEPLOYMENT_CRD = {
@@ -12,6 +13,13 @@ const MODEL_DEPLOYMENT_CRD = {
   apiVersion: 'v1alpha1',
   plural: 'modeldeployments',
   kind: 'ModelDeployment',
+};
+
+const INFERENCE_PROVIDER_CONFIG_CRD = {
+  apiGroup: 'airunway.ai',
+  apiVersion: 'v1alpha1',
+  plural: 'inferenceproviderconfigs',
+  kind: 'InferenceProviderConfig',
 };
 
 const GATEWAY_API_CRD_NAME = 'gateways.gateway.networking.k8s.io';
@@ -129,6 +137,109 @@ interface OperatorPodProbeResult {
   selector?: string;
   podName?: string;
   error?: string;
+}
+
+interface HealthCrdProbe {
+  name: string;
+  displayName?: string;
+}
+
+function titleCaseProviderId(providerId: string): string {
+  return providerId.charAt(0).toUpperCase() + providerId.slice(1);
+}
+
+function normalizeHealthCrds(health?: ProviderHealthConfig): HealthCrdProbe[] {
+  return (health?.crds || []).flatMap((crd): HealthCrdProbe[] => {
+    if (typeof crd === 'string') {
+      const name = crd.trim();
+      return name ? [{ name }] : [];
+    }
+
+    const name = crd?.name?.trim();
+    if (!name) return [];
+
+    return [{
+      name,
+      displayName: crd.displayName?.trim() || undefined,
+    }];
+  });
+}
+
+function normalizeHealthOperatorPods(health?: ProviderHealthConfig): NonNullable<ProviderHealthConfig['operatorPods']> {
+  if (health?.operatorPods?.length) {
+    return health.operatorPods.flatMap((probe) => {
+      const selectors = Array.from(new Set((probe.selectors || []).map((selector) => selector.trim()).filter(Boolean)));
+      if (selectors.length === 0) return [];
+      return [{
+        namespace: probe.namespace?.trim() || undefined,
+        selectors,
+      }];
+    });
+  }
+
+  const operator = health?.operator;
+  if (!operator) return [];
+
+  const namespacedSelectors = Array.from(new Set([
+    ...(operator.podSelectors || []),
+    ...(operator.fallbackPodSelectors || []),
+  ].map((selector) => selector.trim()).filter(Boolean)));
+  const crossNamespaceSelectors = Array.from(new Set((operator.crossNamespacePodSelectors || [])
+    .map((selector) => selector.trim())
+    .filter(Boolean)));
+
+  return [
+    ...(namespacedSelectors.length > 0
+      ? [{ namespace: operator.namespace?.trim() || undefined, selectors: namespacedSelectors }]
+      : []),
+    ...(crossNamespaceSelectors.length > 0
+      ? [{ selectors: crossNamespaceSelectors }]
+      : []),
+  ];
+}
+
+function getValueAtPath(value: unknown, path?: string): unknown {
+  const normalizedPath = (path || 'ready').replace(/^status\./, '');
+  return normalizedPath.split('.').reduce<unknown>((current, part) => {
+    if (!part) return current;
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[part];
+  }, value);
+}
+
+function conditionStatusIsTrue(status: unknown): boolean {
+  return status === true || status === 'True' || status === 'true';
+}
+
+function getProviderStatusReady(status?: Record<string, unknown>, health?: ProviderHealthConfig): boolean {
+  const statusHealth = health?.status;
+  const readyValue = getValueAtPath(status || {}, statusHealth?.readyPath);
+  if (readyValue === true) return true;
+
+  const expectedConditions = statusHealth?.conditions || [];
+  if (expectedConditions.length === 0) return false;
+
+  const conditions = Array.isArray(status?.conditions) ? status.conditions : [];
+  return expectedConditions.every((expectedType) => conditions.some((condition: any) => (
+    condition?.type === expectedType && conditionStatusIsTrue(condition?.status)
+  )));
+}
+
+function describeCrd(crd: HealthCrdProbe): string {
+  return crd.displayName || crd.name;
+}
+
+function describeCrdSet(crds: HealthCrdProbe[]): string {
+  if (crds.length === 0) return 'Provider health checks';
+  if (crds.length === 1) return describeCrd(crds[0]);
+  return 'Required CRDs';
+}
+
+function describeOperatorProbeNamespaces(operatorPods: NonNullable<ProviderHealthConfig['operatorPods']>): string {
+  const namespaces = Array.from(new Set(operatorPods.map((probe) => probe.namespace).filter(Boolean))) as string[];
+  if (namespaces.length === 0) return 'matching configured labels';
+  if (namespaces.length === 1) return namespaces[0];
+  return namespaces.join(', ');
 }
 
 function getK8sStatusCode(error: any): number | undefined {
@@ -668,6 +779,32 @@ class KubernetesService {
     return { installed: false };
   }
 
+  async listInferenceProviderConfigs(): Promise<any[]> {
+    try {
+      const response = await withRetry(
+        () => this.customObjectsApi.listClusterCustomObject(
+          INFERENCE_PROVIDER_CONFIG_CRD.apiGroup,
+          INFERENCE_PROVIDER_CONFIG_CRD.apiVersion,
+          INFERENCE_PROVIDER_CONFIG_CRD.plural,
+        ),
+        { operationName: 'listInferenceProviderConfigs', maxRetries: 1 },
+      );
+
+      return ((response as any).body || response)?.items || [];
+    } catch (error: any) {
+      const statusCode = getK8sStatusCode(error);
+      if (statusCode === 404) {
+        return [];
+      }
+
+      logger.warn(
+        { error: getK8sErrorMessage(error) },
+        'Failed to list InferenceProviderConfigs',
+      );
+      return [];
+    }
+  }
+
   /**
    * Get status of all runtimes (providers) in the cluster.
    * Returns installation and health status for each runtime.
@@ -680,43 +817,42 @@ class KubernetesService {
 
     // List InferenceProviderConfig resources to discover registered providers
     if (crdStatus.installed) {
-      try {
-        const response = await withRetry(
-          () => this.customObjectsApi.listClusterCustomObject(
-            MODEL_DEPLOYMENT_CRD.apiGroup,
-            MODEL_DEPLOYMENT_CRD.apiVersion,
-            'inferenceproviderconfigs'
-          ),
-          { operationName: 'listInferenceProviderConfigs', maxRetries: 1 }
-        );
+      const items = await this.listInferenceProviderConfigs();
 
-        const items = (response.body as any)?.items || [];
-        const runtimeEntries = await Promise.all(
-          items.map(async (item: any): Promise<RuntimeStatus> => {
-            const name = item.metadata?.name || 'unknown';
-            const status = item.status || {};
-            const displayName = name.charAt(0).toUpperCase() + name.slice(1);
-            const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName);
+      const runtimeEntries = await Promise.all(
+        items.map(async (item: any): Promise<RuntimeStatus> => {
+          const providerInfo = extractProviderInfo(item);
+          const status = item.status || {};
+          const runtimeStatus = await this.checkProviderInstallationStatus(
+            providerInfo.id,
+            status,
+            providerInfo.name,
+            providerInfo.health,
+          );
 
-            return {
-              id: name,
-              name: displayName,
-              installed: runtimeStatus.installed,
-              healthy: runtimeStatus.operatorRunning ?? false,
-              crdFound: runtimeStatus.crdFound ?? runtimeStatus.installed,
-              operatorRunning: runtimeStatus.operatorRunning ?? false,
-              version: status.version,
-              message: runtimeStatus.message,
-            };
-          })
-        );
-        runtimes.push(...runtimeEntries);
-      } catch (error: any) {
-        const statusCode = error?.statusCode || error?.response?.statusCode;
-        if (statusCode !== 404) {
-          logger.warn({ error: error?.message || error }, 'Failed to list InferenceProviderConfigs');
-        }
-      }
+          return {
+            id: providerInfo.id,
+            name: providerInfo.name,
+            description: providerInfo.description,
+            defaultNamespace: providerInfo.defaultNamespace,
+            documentationUrl: providerInfo.documentationUrl,
+            icon: providerInfo.icon,
+            warnings: providerInfo.warnings,
+            installable: providerInfo.installable,
+            capabilities: providerInfo.capabilities,
+            deploymentDefaults: providerInfo.deploymentDefaults,
+            health: providerInfo.health,
+            installed: runtimeStatus.installed,
+            healthy: runtimeStatus.operatorRunning ?? false,
+            crdFound: runtimeStatus.crdFound ?? runtimeStatus.installed,
+            operatorRunning: runtimeStatus.operatorRunning ?? false,
+            version: status.version,
+            message: runtimeStatus.message,
+          };
+        }),
+      );
+
+      runtimes.push(...runtimeEntries);
     }
 
     return runtimes;
@@ -730,9 +866,9 @@ class KubernetesService {
     try {
       const response = await withRetry(
         () => this.customObjectsApi.getClusterCustomObject(
-          MODEL_DEPLOYMENT_CRD.apiGroup,
-          MODEL_DEPLOYMENT_CRD.apiVersion,
-          'inferenceproviderconfigs',
+          INFERENCE_PROVIDER_CONFIG_CRD.apiGroup,
+          INFERENCE_PROVIDER_CONFIG_CRD.apiVersion,
+          INFERENCE_PROVIDER_CONFIG_CRD.plural,
           name
         ),
         { operationName: `getInferenceProviderConfig:${name}`, maxRetries: 1 }
@@ -885,29 +1021,98 @@ class KubernetesService {
 
   async checkProviderInstallationStatus(
     providerId: string,
-    status?: { ready?: boolean },
+    status?: Record<string, unknown>,
     providerName?: string,
+    health?: ProviderHealthConfig,
   ): Promise<InstallationStatus> {
-    switch (providerId) {
-      case 'kaito':
-        return this.checkKaitoInstallationStatus();
-      case 'dynamo':
-        return this.checkDynamoInstallationStatus();
-      case 'kuberay':
-        return this.checkKubeRayInstallationStatus();
-      default: {
-        const installed = status?.ready === true;
-        const displayName = providerName || providerId.charAt(0).toUpperCase() + providerId.slice(1);
-        return {
-          installed,
-          crdFound: installed,
-          operatorRunning: installed,
-          message: installed
-            ? `${displayName} is installed and running`
-            : `${displayName} is registered but not ready`,
-        };
-      }
+    const displayName = providerName || titleCaseProviderId(providerId);
+    const statusReady = getProviderStatusReady(status, health);
+    const crds = normalizeHealthCrds(health);
+    const operatorPods = normalizeHealthOperatorPods(health);
+
+    if (crds.length === 0 && operatorPods.length === 0) {
+      return {
+        installed: statusReady,
+        crdFound: statusReady,
+        operatorRunning: statusReady,
+        message: statusReady
+          ? `${displayName} is installed and running`
+          : `${displayName} is registered but not ready`,
+      };
     }
+
+    return this.checkAnnotationDrivenProviderInstallationStatus(
+      displayName,
+      statusReady,
+      crds,
+      operatorPods,
+    );
+  }
+
+  private async checkAnnotationDrivenProviderInstallationStatus(
+    providerName: string,
+    statusReady: boolean,
+    crds: HealthCrdProbe[],
+    operatorPods: NonNullable<ProviderHealthConfig['operatorPods']>,
+  ): Promise<InstallationStatus> {
+    const [crdResults, operatorProbe] = await Promise.all([
+      Promise.all(crds.map(async (crd) => ({
+        ...crd,
+        found: await this.checkCRDExists(crd.name),
+      }))),
+      operatorPods.length > 0
+        ? this.findReadyConfiguredOperatorPod(operatorPods)
+        : Promise.resolve<OperatorPodProbeResult>({ ready: false }),
+    ]);
+
+    const crdFound = crdResults.length > 0
+      ? crdResults.every((crd) => crd.found)
+      : statusReady;
+    const operatorRunning = operatorPods.length > 0
+      ? operatorProbe.ready
+      : (crdResults.length > 0 ? crdFound : statusReady);
+    const installed = crdResults.length > 0 && operatorPods.length > 0
+      ? crdFound && operatorRunning
+      : crdResults.length > 0
+        ? crdFound
+        : operatorRunning;
+
+    const crdLabel = describeCrdSet(crds);
+    let message: string;
+
+    if (crdResults.length > 0 && !crdFound) {
+      const missingCrds = crdResults.filter((crd) => !crd.found).map(describeCrd);
+      message = missingCrds.length === 1
+        ? `${missingCrds[0]} not found`
+        : `Required CRDs not found: ${missingCrds.join(', ')}`;
+    } else if (operatorPods.length > 0 && operatorRunning) {
+      const location = operatorProbe.namespace
+        ? ` in ${operatorProbe.namespace}`
+        : '';
+      message = crdResults.length > 0
+        ? `${crdLabel} found and ${providerName} operator pods are ready${location}`
+        : `${providerName} operator pods are ready${location}`;
+    } else if (operatorPods.length > 0 && operatorProbe.error) {
+      message = crdResults.length > 0
+        ? `${crdLabel} found but ${providerName} operator pods could not be checked: ${operatorProbe.error}`
+        : `${providerName} operator pods could not be checked: ${operatorProbe.error}`;
+    } else if (operatorPods.length > 0) {
+      const namespaces = describeOperatorProbeNamespaces(operatorPods);
+      message = crdResults.length > 0
+        ? `${crdLabel} found but no ready ${providerName} operator pods were detected in ${namespaces}`
+        : `No ready ${providerName} operator pods were detected in ${namespaces}`;
+    } else if (statusReady) {
+      message = `${crdLabel} found and ${providerName} is ready`;
+    } else {
+      message = `${crdLabel} found`;
+    }
+
+    return {
+      installed,
+      crdFound,
+      operatorRunning,
+      message,
+    };
   }
 
   private async checkOperatorBackedInstallationStatus(providerId: keyof typeof RUNTIME_INSTALLATION_PROBES): Promise<InstallationStatus> {
@@ -946,6 +1151,63 @@ class KubernetesService {
       operatorRunning,
       message,
     };
+  }
+
+  private async findReadyConfiguredOperatorPod(
+    operatorPods: NonNullable<ProviderHealthConfig['operatorPods']>,
+  ): Promise<OperatorPodProbeResult> {
+    let firstError: string | undefined;
+
+    for (const probe of operatorPods) {
+      const selectors = Array.from(new Set(probe.selectors));
+
+      for (const selector of selectors) {
+        try {
+          const pods = probe.namespace
+            ? await withRetry(
+                () => this.coreV1Api.listNamespacedPod(
+                  probe.namespace!,
+                  undefined,
+                  undefined,
+                  undefined,
+                  undefined,
+                  selector,
+                ),
+                { operationName: `checkProviderOperatorPods:${probe.namespace}`, maxRetries: 1 },
+              )
+            : await withRetry(
+                () => this.coreV1Api.listPodForAllNamespaces(
+                  undefined,
+                  undefined,
+                  undefined,
+                  selector,
+                ),
+                { operationName: 'checkProviderOperatorPods:all-namespaces', maxRetries: 1 },
+              );
+
+          const readyPod = pods.body.items.find((pod) => isRunningAndReadyPod(pod));
+          if (readyPod) {
+            return {
+              ready: true,
+              namespace: readyPod.metadata?.namespace || probe.namespace,
+              selector,
+              podName: readyPod.metadata?.name,
+            };
+          }
+        } catch (error: any) {
+          const statusCode = getK8sStatusCode(error);
+          if (statusCode !== 404 && !firstError) {
+            firstError = getK8sErrorMessage(error);
+            logger.warn(
+              { error: firstError, namespace: probe.namespace, selector },
+              'Unable to check provider operator pods from provider health metadata',
+            );
+          }
+        }
+      }
+    }
+
+    return { ready: false, error: firstError };
   }
 
   private async findReadyOperatorPod(
@@ -1757,9 +2019,9 @@ class KubernetesService {
       logger.info({ name }, 'Deleting InferenceProviderConfig');
       await withRetry(
         () => this.customObjectsApi.deleteClusterCustomObject(
-          MODEL_DEPLOYMENT_CRD.apiGroup,
-          MODEL_DEPLOYMENT_CRD.apiVersion,
-          'inferenceproviderconfigs',
+          INFERENCE_PROVIDER_CONFIG_CRD.apiGroup,
+          INFERENCE_PROVIDER_CONFIG_CRD.apiVersion,
+          INFERENCE_PROVIDER_CONFIG_CRD.plural,
           name
         ),
         { operationName: `deleteInferenceProviderConfig:${name}`, maxRetries: 2 }

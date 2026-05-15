@@ -2,6 +2,7 @@ package kaito
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -12,34 +13,6 @@ import (
 
 func TestGetProviderConfigSpec(t *testing.T) {
 	spec := GetProviderConfigSpec()
-
-	if spec.Capabilities == nil {
-		t.Fatal("capabilities should not be nil")
-	}
-
-	expectedEngines := []airunwayv1alpha1.EngineType{
-		airunwayv1alpha1.EngineTypeVLLM,
-		airunwayv1alpha1.EngineTypeLlamaCpp,
-	}
-	if len(spec.Capabilities.Engines) != len(expectedEngines) {
-		t.Fatalf("expected %d engines, got %d", len(expectedEngines), len(spec.Capabilities.Engines))
-	}
-	for i, e := range expectedEngines {
-		if spec.Capabilities.Engines[i] != e {
-			t.Errorf("engine[%d]: expected %s, got %s", i, e, spec.Capabilities.Engines[i])
-		}
-	}
-
-	if len(spec.Capabilities.ServingModes) != 1 || spec.Capabilities.ServingModes[0] != airunwayv1alpha1.ServingModeAggregated {
-		t.Errorf("expected only aggregated serving mode")
-	}
-
-	if !spec.Capabilities.CPUSupport {
-		t.Error("expected CPU support to be true")
-	}
-	if !spec.Capabilities.GPUSupport {
-		t.Error("expected GPU support to be true")
-	}
 
 	if len(spec.SelectionRules) != 2 {
 		t.Fatalf("expected 2 selection rules, got %d", len(spec.SelectionRules))
@@ -84,6 +57,74 @@ func TestProviderConstants(t *testing.T) {
 	}
 	if ProviderVersion != "kaito-provider:v0.1.0" {
 		t.Errorf("expected provider version 'kaito-provider:v0.1.0', got %s", ProviderVersion)
+	}
+}
+
+func TestBuildAnnotations(t *testing.T) {
+	annotations, err := buildAnnotations()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	requiredKeys := []string{
+		airunwayv1alpha1.AnnotationDisplayName,
+		airunwayv1alpha1.AnnotationDescription,
+		airunwayv1alpha1.AnnotationDefaultNamespace,
+		airunwayv1alpha1.AnnotationDocumentationURL,
+		airunwayv1alpha1.AnnotationCapabilities,
+		airunwayv1alpha1.AnnotationHealth,
+		airunwayv1alpha1.AnnotationInstallation,
+		airunwayv1alpha1.AnnotationDocumentation,
+	}
+	for _, key := range requiredKeys {
+		if annotations[key] == "" {
+			t.Fatalf("expected annotation %s to be set", key)
+		}
+	}
+	if annotations[airunwayv1alpha1.AnnotationDocumentationURL] != ProviderDocumentation {
+		t.Fatalf("expected documentation-url annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentationURL])
+	}
+	if annotations[airunwayv1alpha1.AnnotationDocumentation] != ProviderDocumentation {
+		t.Fatalf("expected legacy documentation annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentation])
+	}
+	if annotations[airunwayv1alpha1.AnnotationDefaultNamespace] != "kaito-workspace" {
+		t.Fatalf("expected default namespace kaito-workspace, got %q", annotations[airunwayv1alpha1.AnnotationDefaultNamespace])
+	}
+
+	var installation airunwayv1alpha1.InstallationInfo
+	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationInstallation]), &installation); err != nil {
+		t.Fatalf("failed to decode installation annotation: %v", err)
+	}
+	if installation.DefaultNamespace != "kaito-workspace" {
+		t.Fatalf("expected installation default namespace kaito-workspace, got %q", installation.DefaultNamespace)
+	}
+
+	var capabilities airunwayv1alpha1.ProviderCapabilities
+	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationCapabilities]), &capabilities); err != nil {
+		t.Fatalf("failed to decode capabilities annotation: %v", err)
+	}
+	if len(capabilities.Engines) == 0 || len(capabilities.ServingModes) == 0 {
+		t.Fatalf("expected non-empty annotated capabilities, got %+v", capabilities)
+	}
+
+	var health struct {
+		CRDs []struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		} `json:"crds"`
+		OperatorPods []struct {
+			Namespace string   `json:"namespace"`
+			Selectors []string `json:"selectors"`
+		} `json:"operatorPods"`
+	}
+	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationHealth]), &health); err != nil {
+		t.Fatalf("failed to decode health annotation: %v", err)
+	}
+	if len(health.CRDs) != 1 || health.CRDs[0].Name != "workspaces.kaito.sh" || health.CRDs[0].DisplayName != "KAITO workspace CRD" {
+		t.Fatalf("unexpected CRD health metadata: %+v", health.CRDs)
+	}
+	if len(health.OperatorPods) != 1 || health.OperatorPods[0].Namespace != "kaito-workspace" || len(health.OperatorPods[0].Selectors) != 2 {
+		t.Fatalf("unexpected operator pod health metadata: %+v", health.OperatorPods)
 	}
 }
 

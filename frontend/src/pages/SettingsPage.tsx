@@ -50,7 +50,6 @@ import { cn } from '@/lib/utils'
 import { useSearchParams } from 'react-router-dom'
 
 type SettingsTab = 'general' | 'runtimes' | 'integrations'
-type RuntimeId = 'dynamo' | 'kuberay' | 'kaito' | 'llmd'
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -77,9 +76,9 @@ export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>(tabFromUrl || 'general')
   
   // Runtime installation state
-  const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId | null>(null)
+  const [selectedRuntime, setSelectedRuntime] = useState<string | null>(null)
   const [isInstalling, setIsInstalling] = useState(false)
-  const [pendingInstallRuntime, setPendingInstallRuntime] = useState<RuntimeId | null>(null)
+  const [pendingInstallRuntime, setPendingInstallRuntime] = useState<string | null>(null)
   const [isUninstalling, setIsUninstalling] = useState(false)
   const [showUninstallDialog, setShowUninstallDialog] = useState(false)
 
@@ -91,13 +90,9 @@ export function SettingsPage() {
   useEffect(() => {
     if (runtimesStatus?.runtimes && selectedRuntime === null) {
       const installedRuntime = runtimesStatus.runtimes.find(r => r.installed)
-      if (installedRuntime) {
-        setSelectedRuntime(installedRuntime.id as RuntimeId)
-      } else {
-        setSelectedRuntime('dynamo')
-      }
+      setSelectedRuntime(installedRuntime?.id || runtimesStatus.runtimes[0]?.id || null)
     }
-  }, [runtimesStatus, selectedRuntime])
+  }, [runtimesStatus?.runtimes, selectedRuntime])
 
   // Update URL when tab changes
   useEffect(() => {
@@ -108,7 +103,7 @@ export function SettingsPage() {
     }
   }, [activeTab, setSearchParams])
 
-  const effectiveRuntime = selectedRuntime || 'dynamo'
+  const effectiveRuntime = selectedRuntime || runtimes.find(r => r.installed)?.id || runtimes[0]?.id || ''
 
   const {
     data: installationStatus,
@@ -119,7 +114,8 @@ export function SettingsPage() {
   const installProvider = useInstallProvider()
   const uninstallProvider = useUninstallProvider()
 
-  const handleInstall = async (providerId: RuntimeId) => {
+  const handleInstall = async (providerId: string) => {
+    if (!providerId) return
     setIsInstalling(true)
     try {
       const result = await installProvider.mutateAsync(providerId)
@@ -138,7 +134,8 @@ export function SettingsPage() {
     }
   }
 
-  const handleUninstall = async (providerId: RuntimeId) => {
+  const handleUninstall = async (providerId: string) => {
+    if (!providerId) return
     setIsUninstalling(true)
     setShowUninstallDialog(false)
     try {
@@ -453,7 +450,7 @@ export function SettingsPage() {
                       ? 'ring-2 ring-cyan-400'
                       : 'hover:border-white/10'
                   )}
-                  onClick={() => setSelectedRuntime(runtime.id as RuntimeId)}
+                  onClick={() => setSelectedRuntime(runtime.id)}
                 >
                   <div className="mb-3">
                     <div className="flex items-center justify-between">
@@ -476,13 +473,7 @@ export function SettingsPage() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
-                      {runtime.id === 'kaito'
-                        ? 'KAITO for simplified model deployment'
-                        : runtime.id === 'dynamo'
-                          ? 'NVIDIA Dynamo for high-performance GPU inference'
-                          : runtime.id === 'llmd'
-                        ? 'LLM-D for distributed inference'
-                          : 'Ray Serve via KubeRay for distributed Ray-based model serving with vLLM'}
+                      {runtime.description || 'No description available'}
                     </p>
                   </div>
                   <div>
@@ -578,7 +569,7 @@ export function SettingsPage() {
                     {!isInstalled && (
                       <Button
                         onClick={() => handleInstall(effectiveRuntime)}
-                        disabled={isInstalling || isWaitingForInstall || !helmAvailable || !clusterStatus?.connected}
+                        disabled={!effectiveRuntime || isInstalling || isWaitingForInstall || !helmAvailable || !clusterStatus?.connected}
                         className="flex items-center gap-2"
                       >
                         {isInstalling ? (
@@ -604,7 +595,7 @@ export function SettingsPage() {
                       <Button
                         variant="destructive"
                         onClick={() => setShowUninstallDialog(true)}
-                        disabled={isUninstalling || !helmAvailable || !clusterStatus?.connected}
+                        disabled={!effectiveRuntime || isUninstalling || !helmAvailable || !clusterStatus?.connected}
                         className="flex items-center gap-2"
                       >
                         {isUninstalling ? (
@@ -1176,7 +1167,7 @@ export function SettingsPage() {
             <Button variant="outline" onClick={() => setShowUninstallDialog(false)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => handleUninstall(effectiveRuntime)}>
+            <Button variant="destructive" onClick={() => handleUninstall(effectiveRuntime)} disabled={!effectiveRuntime}>
               Uninstall
             </Button>
           </DialogFooter>

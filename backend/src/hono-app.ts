@@ -20,6 +20,7 @@ import {
   health,
   models,
   settings,
+  providers,
   deployments,
   installation,
   oauth,
@@ -73,6 +74,7 @@ const PUBLIC_ROUTES = [
   '/api/health',
   '/api/cluster/status',
   '/api/settings',  // Settings is public (read-only auth config needed by frontend)
+  '/api/providers',  // Provider discovery aliases mirror public settings provider endpoints
   '/api/oauth',     // OAuth routes must be public for initial authentication
 ];
 
@@ -124,6 +126,7 @@ app.route('/api/health', health);
 app.route('/api/cluster', health);
 app.route('/api/models', models);
 app.route('/api/settings', settings);
+app.route('/api/providers', providers);
 app.route('/api/deployments', deployments);
 app.route('/api/installation', installation);
 app.route('/api/oauth', oauth);

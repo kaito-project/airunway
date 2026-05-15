@@ -154,11 +154,47 @@ export const mockInferenceProviderConfig = {
   metadata: {
     name: 'kaito',
     annotations: {
+      'airunway.ai/display-name': 'KAITO',
+      'airunway.ai/description': 'KAITO - Kubernetes AI Toolchain Operator',
+      'airunway.ai/default-namespace': 'kaito-workspace',
+      'airunway.ai/documentation-url': 'https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md',
+      'airunway.ai/capabilities': JSON.stringify({
+        engines: ['vllm', 'llamacpp'],
+        servingModes: ['aggregated'],
+      }),
+      'airunway.ai/health': JSON.stringify({
+        crds: [
+          {
+            name: 'workspaces.kaito.sh',
+            displayName: 'KAITO Workspace CRD',
+          },
+        ],
+        operatorPods: [
+          {
+            namespace: 'kaito-workspace',
+            selectors: [
+              'app.kubernetes.io/name=kaito',
+              'app=kaito',
+              'control-plane=controller-manager',
+            ],
+          },
+        ],
+      }),
       'airunway.ai/installation': JSON.stringify({
         description: 'KAITO - Kubernetes AI Toolchain Operator',
         defaultNamespace: 'kaito-workspace',
         helmRepos: [{ name: 'kaito', url: 'https://kaito-project.github.io/kaito/charts/kaito' }],
-        helmCharts: [{ name: 'workspace', chart: 'kaito/workspace', version: '0.10.0', namespace: 'kaito-workspace', createNamespace: true }],
+        helmCharts: [
+          {
+            name: 'workspace',
+            chart: 'kaito/workspace',
+            version: '0.10.0',
+            namespace: 'kaito-workspace',
+            createNamespace: true,
+            preInstallMissingCrds: true,
+            skipCrds: true,
+          },
+        ],
         steps: [{ title: 'Install KAITO', command: 'helm install kaito-workspace kaito/workspace', description: 'Install KAITO operator' }],
       }),
       'airunway.ai/documentation': 'https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md',

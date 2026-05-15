@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -58,9 +59,23 @@ func (r *InferenceProviderConfigResolver) GetGatewayCapabilities(ctx context.Con
 		return nil
 	}
 
-	if ipc.Spec.Capabilities == nil {
+	capabilitiesAnnotation := ipc.Annotations[airunwayv1alpha1.AnnotationCapabilities]
+	if capabilitiesAnnotation == "" {
+		logger.V(1).Info("InferenceProviderConfig does not declare capabilities annotation", "provider", providerName)
 		return nil
 	}
 
-	return ipc.Spec.Capabilities.Gateway
+	var capabilities airunwayv1alpha1.ProviderCapabilities
+	if err := json.Unmarshal([]byte(capabilitiesAnnotation), &capabilities); err != nil {
+		logger.V(1).Info("Could not decode InferenceProviderConfig capabilities annotation",
+			"provider", providerName, "error", err)
+		return nil
+	}
+
+	if capabilities.Gateway == nil {
+		logger.V(1).Info("InferenceProviderConfig does not declare gateway capabilities", "provider", providerName)
+		return nil
+	}
+
+	return capabilities.Gateway
 }

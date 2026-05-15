@@ -238,6 +238,20 @@ func isNoMatchError(err error) bool {
 		strings.Contains(errStr, "no kind is registered for the type")
 }
 
+func providerCapabilitiesFromAnnotations(pc airunwayv1alpha1.InferenceProviderConfig) (*airunwayv1alpha1.ProviderCapabilities, error) {
+	capabilitiesAnnotation := strings.TrimSpace(pc.Annotations[airunwayv1alpha1.AnnotationCapabilities])
+	if capabilitiesAnnotation == "" {
+		return nil, fmt.Errorf("missing %s annotation", airunwayv1alpha1.AnnotationCapabilities)
+	}
+
+	var capabilities airunwayv1alpha1.ProviderCapabilities
+	if err := json.Unmarshal([]byte(capabilitiesAnnotation), &capabilities); err != nil {
+		return nil, fmt.Errorf("invalid %s annotation: %w", airunwayv1alpha1.AnnotationCapabilities, err)
+	}
+
+	return &capabilities, nil
+}
+
 // validateSpec performs validation on the ModelDeployment spec
 func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunwayv1alpha1.ModelDeployment) error {
 	spec := &md.Spec
@@ -354,11 +368,16 @@ func (r *ModelDeploymentReconciler) selectEngine(ctx context.Context, md *airunw
 	availableEngines := make(map[airunwayv1alpha1.EngineType]string) // engine -> provider name
 
 	for _, pc := range providerConfigs.Items {
-		if !pc.Status.Ready || pc.Spec.Capabilities == nil {
+		if !pc.Status.Ready {
 			continue
 		}
 
-		caps := pc.Spec.Capabilities
+		caps, err := providerCapabilitiesFromAnnotations(pc)
+		if err != nil {
+			logger.V(1).Info("Skipping provider with missing or malformed capabilities annotation",
+				"provider", pc.Name, "error", err)
+			continue
+		}
 
 		// Filter by GPU/CPU compatibility
 		if hasGPU && !caps.GPUSupport {
@@ -462,7 +481,7 @@ func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airu
 	}
 
 	// Run selection algorithm
-	selectedProvider, reason, err := r.runSelectionAlgorithm(md, readyProviders)
+	selectedProvider, reason, err := r.runSelectionAlgorithmWithContext(ctx, md, readyProviders)
 	if err != nil {
 		return fmt.Errorf("provider selection failed: %w", err)
 	}
@@ -481,8 +500,13 @@ func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airu
 	return nil
 }
 
-// runSelectionAlgorithm implements the provider selection algorithm
+// runSelectionAlgorithm implements the provider selection algorithm.
 func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.ModelDeployment, providers []airunwayv1alpha1.InferenceProviderConfig) (string, string, error) {
+	return r.runSelectionAlgorithmWithContext(context.Background(), md, providers)
+}
+
+func (r *ModelDeploymentReconciler) runSelectionAlgorithmWithContext(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, providers []airunwayv1alpha1.InferenceProviderConfig) (string, string, error) {
+	logger := log.FromContext(ctx)
 	spec := &md.Spec
 	engineType := md.ResolvedEngineType()
 
@@ -510,8 +534,10 @@ func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.M
 	var candidates []candidate
 
 	for _, pc := range providers {
-		caps := pc.Spec.Capabilities
-		if caps == nil {
+		caps, err := providerCapabilitiesFromAnnotations(pc)
+		if err != nil {
+			logger.V(1).Info("Skipping provider with missing or malformed capabilities annotation",
+				"provider", pc.Name, "error", err)
 			continue
 		}
 
@@ -615,7 +641,8 @@ func providerConfigChangePredicate() predicate.Predicate {
 				return false
 			}
 			return oldConfig.Status.Ready != newConfig.Status.Ready ||
-				!apiequality.Semantic.DeepEqual(oldConfig.Spec, newConfig.Spec)
+				!apiequality.Semantic.DeepEqual(oldConfig.Spec, newConfig.Spec) ||
+				!apiequality.Semantic.DeepEqual(oldConfig.Annotations, newConfig.Annotations)
 		},
 		GenericFunc: func(event.GenericEvent) bool {
 			return false

@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,19 +37,34 @@ func newTestScheme() *runtime.Scheme {
 	return s
 }
 
-func TestGetGatewayCapabilities_ProviderWithGateway(t *testing.T) {
-	scheme := newTestScheme()
-	ipc := &airunwayv1alpha1.InferenceProviderConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "dynamo"},
-		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
-			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
-				Gateway: &airunwayv1alpha1.GatewayCapabilities{
-					InferencePoolNamePattern: "{namespace}-{name}-pool",
-					InferencePoolNamespace:   "dynamo-system",
-				},
-			},
+func newProviderConfigWithCapabilities(t *testing.T, name string, capabilities *airunwayv1alpha1.ProviderCapabilities) *airunwayv1alpha1.InferenceProviderConfig {
+	t.Helper()
+
+	annotations := map[string]string{}
+	if capabilities != nil {
+		data, err := json.Marshal(capabilities)
+		if err != nil {
+			t.Fatalf("failed to marshal capabilities: %v", err)
+		}
+		annotations[airunwayv1alpha1.AnnotationCapabilities] = string(data)
+	}
+
+	return &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Annotations: annotations,
 		},
 	}
+}
+
+func TestGetGatewayCapabilities_ProviderWithGateway(t *testing.T) {
+	scheme := newTestScheme()
+	ipc := newProviderConfigWithCapabilities(t, "dynamo", &airunwayv1alpha1.ProviderCapabilities{
+		Gateway: &airunwayv1alpha1.GatewayCapabilities{
+			InferencePoolNamePattern: "{namespace}-{name}-pool",
+			InferencePoolNamespace:   "dynamo-system",
+		},
+	})
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
@@ -78,10 +94,7 @@ func TestGetGatewayCapabilities_ProviderNotFound(t *testing.T) {
 
 func TestGetGatewayCapabilities_ProviderWithNilCapabilities(t *testing.T) {
 	scheme := newTestScheme()
-	ipc := &airunwayv1alpha1.InferenceProviderConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "kaito"},
-		Spec:       airunwayv1alpha1.InferenceProviderConfigSpec{},
-	}
+	ipc := newProviderConfigWithCapabilities(t, "kaito", nil)
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
@@ -94,14 +107,9 @@ func TestGetGatewayCapabilities_ProviderWithNilCapabilities(t *testing.T) {
 
 func TestGetGatewayCapabilities_ProviderWithNoGateway(t *testing.T) {
 	scheme := newTestScheme()
-	ipc := &airunwayv1alpha1.InferenceProviderConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "kaito"},
-		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
-			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
-				GPUSupport: true,
-			},
-		},
-	}
+	ipc := newProviderConfigWithCapabilities(t, "kaito", &airunwayv1alpha1.ProviderCapabilities{
+		GPUSupport: true,
+	})
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)

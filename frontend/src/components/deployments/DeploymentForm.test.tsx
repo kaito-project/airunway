@@ -102,8 +102,16 @@ function createRuntime(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {
     id: 'installed-runtime',
     name: 'Installed Runtime',
     installed: true,
+    healthy: true,
+    capabilities: {
+      engines: ['vllm', 'sglang', 'trtllm', 'llamacpp'],
+      modes: ['aggregated', 'disaggregated'],
+      modelSources: ['huggingface'],
+      routerModes: ['none'],
+      features: {},
+    },
     ...overrides,
-  } as RuntimeStatus
+  }
 }
 
 describe('DeploymentForm', () => {
@@ -120,7 +128,7 @@ describe('DeploymentForm', () => {
         <DeploymentForm
           model={createModel()}
           detailedCapacity={createCapacity()}
-          runtimes={[createRuntime()]}
+          runtimes={[createRuntime({ id: 'dynamo', name: 'NVIDIA Dynamo' })]}
         />
       </MemoryRouter>
     )
