@@ -507,14 +507,52 @@ function getDeploymentConfiguredChatModel(deployment: DeploymentStatus): string 
   return undefined;
 }
 
+function createRequestScopedTimeoutSignal(
+  requestSignal: AbortSignal,
+  timeoutMs: number
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  if (requestSignal.aborted) {
+    abort();
+  } else {
+    requestSignal.addEventListener('abort', abort, { once: true });
+    timeout = setTimeout(abort, timeoutMs);
+
+    if (requestSignal.aborted) {
+      abort();
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      requestSignal.removeEventListener('abort', abort);
+    },
+  };
+}
+
 async function discoverUpstreamChatModel(
   deployment: DeploymentStatus,
   serviceName: string,
   namespace: string,
-  servicePort: number
+  servicePort: number,
+  requestSignal: AbortSignal
 ): Promise<string | undefined> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CHAT_MODEL_DISCOVERY_TIMEOUT_MS);
+  const scopedSignal = createRequestScopedTimeoutSignal(
+    requestSignal,
+    CHAT_MODEL_DISCOVERY_TIMEOUT_MS
+  );
 
   try {
     const modelsText = await kubernetesService.proxyServiceGet(
@@ -522,7 +560,7 @@ async function discoverUpstreamChatModel(
       namespace,
       servicePort,
       'v1/models',
-      { accept: CHAT_MODEL_DISCOVERY_ACCEPT_HEADER, signal: controller.signal }
+      { accept: CHAT_MODEL_DISCOVERY_ACCEPT_HEADER, signal: scopedSignal.signal }
     );
     return extractFirstModelId(JSON.parse(modelsText));
   } catch (error) {
@@ -532,7 +570,7 @@ async function discoverUpstreamChatModel(
     );
     return undefined;
   } finally {
-    clearTimeout(timeout);
+    scopedSignal.cleanup();
   }
 }
 
@@ -540,15 +578,21 @@ async function resolveDeploymentChatModel(
   deployment: DeploymentStatus,
   serviceName: string,
   namespace: string,
-  servicePort: number
+  servicePort: number,
+  requestSignal: AbortSignal
 ): Promise<string> {
   const configuredModel = getDeploymentConfiguredChatModel(deployment);
   if (configuredModel) {
     return configuredModel;
   }
 
-  return (await discoverUpstreamChatModel(deployment, serviceName, namespace, servicePort))
-    || deployment.modelId;
+  return (await discoverUpstreamChatModel(
+    deployment,
+    serviceName,
+    namespace,
+    servicePort,
+    requestSignal
+  )) || deployment.modelId;
 }
 
 async function resolveDirectChatModel(
@@ -556,22 +600,36 @@ async function resolveDirectChatModel(
   serviceName: string,
   namespace: string,
   servicePort: number,
+  requestSignal: AbortSignal,
   requestedModel?: string
 ): Promise<string> {
   if (requestedModel) {
     return requestedModel;
   }
 
-  return resolveDeploymentChatModel(deployment, serviceName, namespace, servicePort);
+  return resolveDeploymentChatModel(
+    deployment,
+    serviceName,
+    namespace,
+    servicePort,
+    requestSignal
+  );
 }
 
 async function resolveGatewayChatModel(
   deployment: DeploymentStatus,
   serviceName: string,
   namespace: string,
-  servicePort: number
+  servicePort: number,
+  requestSignal: AbortSignal
 ): Promise<string> {
-  return resolveDeploymentChatModel(deployment, serviceName, namespace, servicePort);
+  return resolveDeploymentChatModel(
+    deployment,
+    serviceName,
+    namespace,
+    servicePort,
+    requestSignal
+  );
 }
 
 async function handleDeploymentChat(
@@ -609,6 +667,7 @@ async function handleDeploymentChat(
     frontendService.serviceName,
     resolvedNamespace,
     frontendServicePort,
+    signal,
     body.model
   );
 
@@ -634,7 +693,8 @@ async function handleDeploymentChat(
         deployment,
         frontendService.serviceName,
         resolvedNamespace,
-        frontendServicePort
+        frontendServicePort,
+        signal
       );
       const gatewayResponse = await proxyGatewayChatPostStream(
         deployment.gateway.endpoint,

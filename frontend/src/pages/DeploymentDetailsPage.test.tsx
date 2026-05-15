@@ -128,6 +128,16 @@ describe('DeploymentDetailsPage chat panel', () => {
     expect(screen.queryByRole('heading', { name: 'Chat with model' })).not.toBeInTheDocument()
   })
 
+  it('renders the empty transcript as a hint instead of an input-like box', () => {
+    renderDetailsPage()
+
+    const transcript = screen.getByTestId('chat-transcript')
+
+    expect(screen.getByText('Start a conversation with this model.')).toBeInTheDocument()
+    expect(transcript).not.toHaveClass('border')
+    expect(transcript.className).not.toContain('bg-black/20')
+  })
+
   it('shows readable chat errors instead of raw API JSON', async () => {
     chatMock.mockResolvedValue(new Response(JSON.stringify({
       error: {
@@ -151,11 +161,7 @@ describe('DeploymentDetailsPage chat panel', () => {
     expect(screen.queryByText(/\{"error"/)).not.toBeInTheDocument()
   })
 
-  it('sends the prompt, renders streamed assistant responses, and keeps the chat scrolled', async () => {
-    const scrollIntoViewMock = vi
-      .spyOn(Element.prototype, 'scrollIntoView')
-      .mockImplementation(() => {})
-
+  it('sends the prompt, renders streamed assistant responses, and keeps the transcript scrolled', async () => {
     chatMock.mockResolvedValue(streamResponse([
       'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n',
       'data: {"choices":[{"delta":{"content":"from model"}}]}\n\n',
@@ -163,7 +169,12 @@ describe('DeploymentDetailsPage chat panel', () => {
     ]))
 
     renderDetailsPage()
-    scrollIntoViewMock.mockClear()
+    const transcript = screen.getByTestId('chat-transcript')
+    Object.defineProperty(transcript, 'scrollHeight', {
+      configurable: true,
+      value: 4321,
+    })
+    transcript.scrollTop = 0
 
     await userEvent.type(screen.getByLabelText('Message'), 'Hello')
     await userEvent.click(screen.getByRole('button', { name: /send/i }))
@@ -180,9 +191,7 @@ describe('DeploymentDetailsPage chat panel', () => {
     })
     expect(await screen.findByText('Hello from model')).toBeInTheDocument()
     await waitFor(() => {
-      expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'end' })
+      expect(transcript.scrollTop).toBe(4321)
     })
-
-    scrollIntoViewMock.mockRestore()
   })
 })

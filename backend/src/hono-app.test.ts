@@ -391,6 +391,108 @@ describe('Hono Routes', () => {
       ]);
     });
 
+    test('POST /api/deployments/:name/chat aborts KAITO llama.cpp model discovery when the client aborts', async () => {
+      let capturedModelLookupSignal: AbortSignal | undefined;
+      let capturedChatProxyArgs: unknown[] | undefined;
+      let resolveModelLookupStarted!: () => void;
+      let resolveModelLookupAborted!: () => void;
+      const modelLookupStarted = new Promise<void>((resolve) => {
+        resolveModelLookupStarted = resolve;
+      });
+      const modelLookupAborted = new Promise<void>((resolve) => {
+        resolveModelLookupAborted = resolve;
+      });
+      const upstreamSse = 'data: [DONE]\n\n';
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'kaito',
+          engine: 'llamacpp',
+          modelId: 'deployment-model-id',
+          servedModelName: 'incorrect-served-model-name',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServiceGet', async (...args: unknown[]) => {
+          const modelLookupOptions = args[4] as { signal?: AbortSignal } | undefined;
+          capturedModelLookupSignal = modelLookupOptions?.signal;
+          resolveModelLookupStarted();
+
+          return new Promise<string>((_resolve, reject) => {
+            const signal = modelLookupOptions?.signal;
+            if (!signal) {
+              reject(new Error('missing model discovery signal'));
+              return;
+            }
+
+            const rejectAsAborted = () => {
+              resolveModelLookupAborted();
+              reject(new Error('aborted'));
+            };
+
+            if (signal.aborted) {
+              rejectAsAborted();
+              return;
+            }
+
+            signal.addEventListener('abort', rejectAsAborted, { once: true });
+          });
+        }),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async (...args: unknown[]) => {
+          capturedChatProxyArgs = args;
+          return new Response(upstreamSse, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          });
+        }),
+      );
+
+      const clientController = new AbortController();
+      const requestPromise = app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: clientController.signal,
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      await modelLookupStarted;
+      expect(capturedModelLookupSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedModelLookupSignal?.aborted).toBe(false);
+
+      clientController.abort();
+      await modelLookupAborted;
+
+      const res = await requestPromise;
+
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(upstreamSse);
+      expect(capturedModelLookupSignal?.aborted).toBe(true);
+      expectChatProxyCall(capturedChatProxyArgs, [
+        'test-deploy-frontend',
+        'default',
+        8080,
+        'v1/chat/completions',
+        {
+          messages: [{ role: 'user', content: 'Hello' }],
+          model: 'deployment-model-id',
+          stream: true,
+        },
+      ]);
+      const chatProxyOptions = capturedChatProxyArgs?.[6] as { signal?: AbortSignal } | undefined;
+      expect(chatProxyOptions?.signal?.aborted).toBe(true);
+    });
+
     test('POST /api/deployments/:name/chat skips KAITO llama.cpp servedModelName and falls back to modelId', async () => {
       let capturedChatProxyArgs: unknown[] | undefined;
       const upstreamSse = 'data: [DONE]\n\n';

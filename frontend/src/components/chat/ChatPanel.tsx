@@ -88,7 +88,6 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
   const [isStreaming, setIsStreaming] = useState(false)
   const mountedRef = useRef(false)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -105,7 +104,10 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return
 
-    messagesEndRef.current?.scrollIntoView({ block: 'end' })
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    container.scrollTop = container.scrollHeight
   }, [messages, isStreaming])
 
   const handleMessagesScroll = () => {
@@ -251,6 +253,13 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
     }
   }
 
+  const hasMessages = messages.length > 0
+  const transcriptClassName = `mb-4 max-h-80 overflow-y-auto rounded-xl ${
+    hasMessages
+      ? 'space-y-3 border border-white/10 bg-black/20 p-3'
+      : 'px-3 py-6'
+  }`
+
   return (
     <div className={`glass-panel ${className ?? ''}`} style={style}>
       <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -263,7 +272,7 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
           variant="outline"
           size="sm"
           onClick={clearConversation}
-          disabled={messages.length === 0 || isStreaming}
+          disabled={!hasMessages || isStreaming}
         >
           <Trash2 className="mr-2 h-4 w-4" />
           Clear conversation
@@ -276,13 +285,15 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
       <div
         ref={messagesContainerRef}
         aria-live="polite"
-        className="mb-4 max-h-80 space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-3"
+        data-testid="chat-transcript"
+        className={transcriptClassName}
         onScroll={handleMessagesScroll}
       >
-        {messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Start a conversation with this model.
-          </p>
+        {!hasMessages ? (
+          <div className="flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+            <Bot className="h-5 w-5 opacity-70" />
+            <p>Start a conversation with this model.</p>
+          </div>
         ) : (
           messages.map((message) => (
             <div
@@ -303,7 +314,6 @@ export function ChatPanel({ deploymentName, namespace, className, style }: ChatP
             </div>
           ))
         )}
-        <div ref={messagesEndRef} aria-hidden="true" />
       </div>
 
       {error && (
