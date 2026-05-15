@@ -18,6 +18,7 @@ package kaito
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"time"
@@ -48,6 +49,9 @@ const (
 
 	// FieldManager is the server-side apply field manager name
 	FieldManager = "kaito-provider"
+
+	// lastAppliedWorkspaceAnnotation stores the resource/inference fields last written by this controller.
+	lastAppliedWorkspaceAnnotation = "airunway.ai/kaito-last-applied"
 
 	// RequeueInterval is the default requeue interval for periodic reconciliation
 	RequeueInterval = 30 * time.Second
@@ -239,6 +243,10 @@ func verifyOwnerReference(existing *unstructured.Unstructured, mdUID types.UID) 
 func (r *KaitoProviderReconciler) createOrUpdateResource(ctx context.Context, resource *unstructured.Unstructured, md *airunwayv1alpha1.ModelDeployment) error {
 	logger := log.FromContext(ctx)
 
+	if err := setLastAppliedManagedFields(resource); err != nil {
+		return err
+	}
+
 	// Check if resource exists
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(resource.GroupVersionKind())
@@ -262,54 +270,260 @@ func (r *KaitoProviderReconciler) createOrUpdateResource(ctx context.Context, re
 		return err
 	}
 
-	// Update existing resource if resource or inference has changed. Compare only the fields we manage.
+	// Update existing resource if managed fields or desired metadata have changed. Compare only the fields we manage.
 	// Comparing full maps would cause an infinite update loop.
 	existingResource, _, _ := unstructured.NestedMap(existing.Object, "resource")
 	newResource, _, _ := unstructured.NestedMap(resource.Object, "resource")
 	existingInference, _, _ := unstructured.NestedMap(existing.Object, "inference")
 	newInference, _, _ := unstructured.NestedMap(resource.Object, "inference")
+	lastAppliedResource, lastAppliedInference := lastAppliedManagedFields(existing)
 
-	if !managedFieldsSubset(newResource, existingResource) || !managedFieldsSubset(newInference, existingInference) {
+	resourceMatches := managedFieldsMatch(newResource, existingResource, lastAppliedResource, "resource")
+	inferenceMatches := managedFieldsMatch(newInference, existingInference, lastAppliedInference, "inference")
+	metadataMatches := desiredMetadataMatches(resource, existing)
+	if !resourceMatches || !inferenceMatches || !metadataMatches {
 		logger.Info("Updating resource", "kind", resource.GetKind(), "name", resource.GetName())
-		resource.SetResourceVersion(existing.GetResourceVersion())
-		return r.Update(ctx, resource)
+		return r.updateManagedWorkspaceFields(ctx, existing, resource, lastAppliedResource, lastAppliedInference)
 	}
 
 	return nil
 }
 
-// managedFieldsSubset returns true if every key in desired exists in existing
-// with the same value (via DeepEqual). Extra keys in existing (e.g. operator
-// defaults like presetOptions, accessMode) are ignored. This prevents infinite
-// update loops when the upstream operator adds defaulted fields we don't manage.
-//
-// Known limitation: this comparison is one-directional and does NOT detect
-// field DELETIONS. If a user removes a previously-set field from the
-// ModelDeployment spec (e.g. drops a provider.overrides key), the existing
-// Workspace still carries the stale value, this function returns true, and the
-// reconciler skips the update — so stale provider configuration can be left on
-// the Workspace indefinitely.
-//
-// TODO(airunway): replace this whole comparison with server-side apply using
-// a fixed FieldOwner. SSA solves both this deletion-blindness issue and the
-// pre-existing infinite-update-loop bug DeepEqual was working around. See
-// issue #264 for the full proposal.
-func managedFieldsSubset(desired, existing map[string]interface{}) bool {
+func desiredMetadataMatches(desired, existing *unstructured.Unstructured) bool {
+	return stringMapContains(existing.GetLabels(), desired.GetLabels()) &&
+		stringMapContains(existing.GetAnnotations(), desired.GetAnnotations())
+}
+
+func stringMapContains(base, desired map[string]string) bool {
+	for key, desiredValue := range desired {
+		baseValue, found := base[key]
+		if !found || baseValue != desiredValue {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *KaitoProviderReconciler) updateManagedWorkspaceFields(ctx context.Context, existing, desired *unstructured.Unstructured, lastAppliedResource, lastAppliedInference map[string]interface{}) error {
+	base := existing.DeepCopy()
+	updated := existing.DeepCopy()
+
+	if err := mergeManagedTopLevelMap(updated, desired, lastAppliedResource, "resource"); err != nil {
+		return err
+	}
+	if err := mergeManagedTopLevelMap(updated, desired, lastAppliedInference, "inference"); err != nil {
+		return err
+	}
+	mergeDesiredMetadata(updated, desired)
+
+	return r.Patch(ctx, updated, client.MergeFrom(base))
+}
+
+func mergeManagedTopLevelMap(target, desired *unstructured.Unstructured, lastApplied map[string]interface{}, field string) error {
+	desiredMap, desiredFound, err := unstructured.NestedMap(desired.Object, field)
+	if err != nil {
+		return fmt.Errorf("failed to read desired Workspace %s: %w", field, err)
+	}
+	existingMap, existingFound, err := unstructured.NestedMap(target.Object, field)
+	if err != nil {
+		return fmt.Errorf("failed to read existing Workspace %s: %w", field, err)
+	}
+
+	if desiredFound {
+		if !existingFound {
+			existingMap = map[string]interface{}{}
+		}
+		merged := mergeManagedMap(existingMap, desiredMap, lastApplied, field)
+		if err := unstructured.SetNestedField(target.Object, merged, field); err != nil {
+			return fmt.Errorf("failed to update Workspace %s: %w", field, err)
+		}
+		return nil
+	}
+
+	if lastApplied != nil {
+		unstructured.RemoveNestedField(target.Object, field)
+	}
+	return nil
+}
+
+func mergeManagedMap(existing, desired, lastApplied map[string]interface{}, path ...string) map[string]interface{} {
+	merged := runtime.DeepCopyJSON(existing)
+	if merged == nil {
+		merged = map[string]interface{}{}
+	}
+
+	for key, desiredValue := range desired {
+		desiredMap, desiredIsMap := desiredValue.(map[string]interface{})
+		existingMap, existingIsMap := merged[key].(map[string]interface{})
+		if desiredIsMap && existingIsMap {
+			merged[key] = mergeManagedMap(existingMap, desiredMap, nestedLastAppliedMap(lastApplied, key), append(path, key)...)
+			continue
+		}
+		if desiredIsMap {
+			merged[key] = runtime.DeepCopyJSON(desiredMap)
+			continue
+		}
+
+		merged[key] = runtime.DeepCopyJSONValue(desiredValue)
+	}
+
+	for key := range merged {
+		if _, desiredHasKey := desired[key]; desiredHasKey {
+			continue
+		}
+		if lastAppliedHasKey(lastApplied, key) {
+			delete(merged, key)
+			continue
+		}
+		if lastApplied == nil && treatsUnknownExtraAsManaged(path, key) {
+			delete(merged, key)
+		}
+	}
+
+	return merged
+}
+
+func mergeDesiredMetadata(target, desired *unstructured.Unstructured) {
+	target.SetLabels(mergeStringMap(target.GetLabels(), desired.GetLabels()))
+	target.SetAnnotations(mergeStringMap(target.GetAnnotations(), desired.GetAnnotations()))
+}
+
+func mergeStringMap(base, overlay map[string]string) map[string]string {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]string, len(base)+len(overlay))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range overlay {
+		merged[key] = value
+	}
+	return merged
+}
+
+// setLastAppliedManagedFields records the desired Workspace fields that Airunway owns.
+// The annotation lets future reconciles distinguish provider/operator defaults from
+// fields that Airunway wrote previously and must delete when they disappear from the
+// desired ModelDeployment-derived Workspace.
+func setLastAppliedManagedFields(resource *unstructured.Unstructured) error {
+	managedFields := map[string]interface{}{}
+	if resourceSpec, found, _ := unstructured.NestedMap(resource.Object, "resource"); found {
+		managedFields["resource"] = resourceSpec
+	}
+	if inference, found, _ := unstructured.NestedMap(resource.Object, "inference"); found {
+		managedFields["inference"] = inference
+	}
+
+	data, err := json.Marshal(managedFields)
+	if err != nil {
+		return fmt.Errorf("failed to marshal last-applied Workspace fields: %w", err)
+	}
+
+	annotations := resource.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[lastAppliedWorkspaceAnnotation] = string(data)
+	resource.SetAnnotations(annotations)
+	return nil
+}
+
+// lastAppliedManagedFields returns the resource and inference maps that this
+// controller wrote on its previous create/update. A missing or malformed annotation
+// means the resource predates the annotation scheme, so callers fall back to a
+// conservative comparison for known Airunway-owned maps.
+func lastAppliedManagedFields(existing *unstructured.Unstructured) (map[string]interface{}, map[string]interface{}) {
+	annotation := existing.GetAnnotations()[lastAppliedWorkspaceAnnotation]
+	if annotation == "" {
+		return nil, nil
+	}
+
+	var managedFields map[string]interface{}
+	if err := json.Unmarshal([]byte(annotation), &managedFields); err != nil {
+		return nil, nil
+	}
+
+	resourceSpec, _ := managedFields["resource"].(map[string]interface{})
+	inference, _ := managedFields["inference"].(map[string]interface{})
+	return resourceSpec, inference
+}
+
+// managedFieldsMatch returns true when existing still matches the desired fields
+// managed by Airunway. Extra existing keys are ignored only when they were not part
+// of the last-applied desired state, which lets operator defaults such as
+// inference.preset.accessMode coexist without preventing deletion of fields that
+// Airunway wrote in an earlier reconcile.
+func managedFieldsMatch(desired, existing, lastApplied map[string]interface{}, path ...string) bool {
+	if desired == nil {
+		desired = map[string]interface{}{}
+	}
+	if existing == nil {
+		existing = map[string]interface{}{}
+	}
+
 	for k, dv := range desired {
 		ev, ok := existing[k]
 		if !ok {
 			return false
 		}
-		// Recurse into nested maps
+
 		dMap, dIsMap := dv.(map[string]interface{})
 		eMap, eIsMap := ev.(map[string]interface{})
 		if dIsMap && eIsMap {
-			if !managedFieldsSubset(dMap, eMap) {
+			if !managedFieldsMatch(dMap, eMap, nestedLastAppliedMap(lastApplied, k), append(path, k)...) {
 				return false
 			}
 			continue
 		}
+
 		if !equality.Semantic.DeepEqual(dv, ev) {
+			return false
+		}
+	}
+
+	for k := range existing {
+		if _, desiredHasKey := desired[k]; desiredHasKey {
+			continue
+		}
+		if lastAppliedHasKey(lastApplied, k) {
+			return false
+		}
+		if lastApplied == nil && treatsUnknownExtraAsManaged(path, k) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func nestedLastAppliedMap(lastApplied map[string]interface{}, key string) map[string]interface{} {
+	if lastApplied == nil {
+		return nil
+	}
+	nested, _ := lastApplied[key].(map[string]interface{})
+	return nested
+}
+
+func lastAppliedHasKey(lastApplied map[string]interface{}, key string) bool {
+	if lastApplied == nil {
+		return false
+	}
+	_, ok := lastApplied[key]
+	return ok
+}
+
+func treatsUnknownExtraAsManaged(path []string, key string) bool {
+	return pathMatches(path, "resource", "labelSelector") || pathMatches(path, "resource", "labelSelector", "matchLabels")
+}
+
+func pathMatches(path []string, segments ...string) bool {
+	if len(path) != len(segments) {
+		return false
+	}
+	for i, segment := range segments {
+		if path[i] != segment {
 			return false
 		}
 	}
