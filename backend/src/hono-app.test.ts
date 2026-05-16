@@ -31,6 +31,33 @@ function expectSseHeaders(res: Response): void {
   expect(res.headers.get('Content-Encoding')).toBe('identity');
 }
 
+function createChunkedErrorStream(chunks: string[]): {
+  stream: ReadableStream<Uint8Array>;
+  wasCancelled: () => boolean;
+} {
+  const encoder = new TextEncoder();
+  let nextChunk = 0;
+  let cancelCalled = false;
+
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (nextChunk < chunks.length) {
+          controller.enqueue(encoder.encode(chunks[nextChunk]!));
+          nextChunk += 1;
+          return;
+        }
+
+        controller.close();
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    }),
+    wasCancelled: () => cancelCalled,
+  };
+}
+
 describe('Hono Routes', () => {
   describe('Health Routes', () => {
     test('GET /api/health returns healthy status', async () => {
@@ -79,6 +106,13 @@ describe('Hono Routes', () => {
   });
 
   describe('Settings Routes', () => {
+    const restores: Array<() => void> = [];
+
+    afterEach(() => {
+      restores.forEach((restore) => restore());
+      restores.length = 0;
+    });
+
     test('GET /api/settings returns settings', async () => {
       const res = await app.request('/api/settings');
       expect(res.status).toBe(200);
@@ -92,6 +126,51 @@ describe('Hono Routes', () => {
       const data = await res.json();
       expect(data.auth).toBeDefined();
       expect(typeof data.auth.enabled).toBe('boolean');
+    });
+
+    test('PUT /api/settings marks missing token auth failures as Airunway auth errors', async () => {
+      restores.push(
+        mockServiceMethod(authService, 'isAuthEnabled', () => true),
+      );
+
+      const res = await app.request('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultNamespace: 'default' }),
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)).toBe('true');
+      const data = await res.json();
+      expect(data.error.message).toBe('Authentication required');
+      expect(data.error.statusCode).toBe(401);
+    });
+
+    test('PUT /api/settings marks invalid token auth failures as Airunway auth errors', async () => {
+      restores.push(
+        mockServiceMethod(authService, 'isAuthEnabled', () => true),
+      );
+      restores.push(
+        mockServiceMethod(authService, 'validateToken', async () => ({
+          valid: false,
+          error: 'Token expired',
+        })),
+      );
+
+      const res = await app.request('/api/settings', {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Bearer invalid-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ defaultNamespace: 'default' }),
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)).toBe('true');
+      const data = await res.json();
+      expect(data.error.message).toBe('Token expired');
+      expect(data.error.statusCode).toBe(401);
     });
   });
 
@@ -840,6 +919,72 @@ describe('Hono Routes', () => {
       expect(data.error.details).toBe(gatewayError);
     });
 
+    test('POST /api/deployments/:name/chat truncates and cancels large gateway error bodies', async () => {
+      const originalFetch = globalThis.fetch;
+      const missingServiceDetails = JSON.stringify({
+        kind: 'Status',
+        apiVersion: 'v1',
+        status: 'Failure',
+        message: 'services "test-deploy-frontend" not found',
+        reason: 'NotFound',
+        details: { name: 'test-deploy-frontend', kind: 'services' },
+        code: 404,
+      });
+      const gatewayError = createChunkedErrorStream([
+        'A'.repeat(400),
+        'B'.repeat(400),
+        'C'.repeat(400),
+        'D'.repeat(400),
+      ]);
+
+      restores.push(() => {
+        globalThis.fetch = originalFetch;
+      });
+      globalThis.fetch = (async () => (
+        new Response(gatewayError.stream, {
+          status: 502,
+          headers: { 'Content-Type': 'text/plain' },
+        })
+      )) as typeof fetch;
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'dynamo',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+          gateway: { endpoint: '20.92.155.15', modelName: 'served-from-gateway' },
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async () => (
+          new Response(missingServiceDetails, {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(res.status).toBe(502);
+      const data = await res.json();
+      expect(data.error.details.length).toBe(1000);
+      expect(data.error.details.endsWith('…')).toBe(true);
+      expect(data.error.details.includes('D')).toBe(false);
+      expect(gatewayError.wasCancelled()).toBe(true);
+    });
+
     test('POST /api/deployments/:name/chat preserves upstream 401s without marking them as Airunway auth errors', async () => {
       const upstreamError = JSON.stringify({
         error: {
@@ -884,6 +1029,52 @@ describe('Hono Routes', () => {
       expect(data.error.message).toBe('Invalid upstream API key');
       expect(data.error.statusCode).toBe(401);
       expect(data.error.details).toBe(upstreamError);
+    });
+
+    test('POST /api/deployments/:name/chat truncates and cancels large upstream error bodies', async () => {
+      const upstreamError = createChunkedErrorStream([
+        'A'.repeat(400),
+        'B'.repeat(400),
+        'C'.repeat(400),
+        'D'.repeat(400),
+      ]);
+
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDeployment', async () => ({
+          ...mockDeployment,
+          phase: 'Running',
+          provider: 'dynamo',
+          replicas: { desired: 1, ready: 1, available: 1 },
+          frontendService: 'test-deploy-frontend:8080',
+          servedModelName: 'served-from-status',
+        } as never)),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'proxyServicePostStream', async () => (
+          new Response(upstreamError.stream, {
+            status: 500,
+            headers: { 'Content-Type': 'text/plain' },
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/test-deploy/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error.details.length).toBe(1000);
+      expect(data.error.details.endsWith('…')).toBe(true);
+      expect(data.error.details.includes('D')).toBe(false);
+      expect(upstreamError.wasCancelled()).toBe(true);
     });
 
     test('POST /api/deployments/:name/chat returns a readable message when the model endpoint is missing', async () => {

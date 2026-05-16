@@ -399,6 +399,58 @@ function sanitizeUpstreamErrorDetails(details: string): string | undefined {
     : normalized;
 }
 
+async function readUpstreamErrorDetails(
+  response: Response,
+  maxBytes = UPSTREAM_CHAT_ERROR_DETAILS_MAX_LENGTH + 1
+): Promise<string> {
+  if (!response.body) {
+    return '';
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytesRead = 0;
+  let reachedLimit = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+
+      const remaining = maxBytes - bytesRead;
+      if (remaining <= 0) {
+        reachedLimit = true;
+        break;
+      }
+
+      const chunk = value.byteLength > remaining
+        ? value.slice(0, remaining)
+        : value;
+      bytesRead += chunk.byteLength;
+      chunks.push(decoder.decode(chunk, { stream: true }));
+
+      if (value.byteLength >= remaining) {
+        reachedLimit = true;
+        break;
+      }
+    }
+
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } finally {
+    if (reachedLimit) {
+      await reader.cancel().catch(() => undefined);
+    }
+    reader.releaseLock();
+  }
+}
+
 function getUpstreamChatErrorMessage(
   statusCode: number,
   details: string,
@@ -694,7 +746,7 @@ async function handleDeploymentChat(
   );
 
   if (!upstreamResponse.ok) {
-    const details = await upstreamResponse.text();
+    const details = await readUpstreamErrorDetails(upstreamResponse);
 
     if (deployment.gateway?.endpoint && isMissingServiceProxyResponse(upstreamResponse.status, details)) {
       const gatewayModel = await resolveGatewayChatModel(
@@ -735,7 +787,7 @@ async function handleDeploymentChat(
         });
       }
 
-      const gatewayDetails = await gatewayResponse.text();
+      const gatewayDetails = await readUpstreamErrorDetails(gatewayResponse);
       const statusCode = toUpstreamChatErrorStatusCode(gatewayResponse.status);
       const sanitizedDetails = sanitizeUpstreamErrorDetails(gatewayDetails);
 
