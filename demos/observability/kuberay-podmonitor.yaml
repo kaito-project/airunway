@@ -26,7 +26,7 @@ spec:
         operator: In
         values: ["head"]
   podMetricsEndpoints:
-    - port: serve
+    - portNumber: 8000
       path: /metrics
       interval: 30s
       scrapeTimeout: 10s
