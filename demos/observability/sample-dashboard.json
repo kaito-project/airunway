@@ -329,7 +329,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum by (provider) (airunway_reconciliation_duration_seconds_count)",
+          "expr": "sum by (provider) (airunway_provider_selection_total)",
           "legendFormat": "{{provider}}",
           "refId": "A"
         }
