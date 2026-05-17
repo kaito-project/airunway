@@ -661,7 +661,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "(sum(rate(airunway_deployment_phase_transitions_total{to_phase=\"Failed\"}[$__rate_interval])) or vector(0)) / ((sum(rate(airunway_deployment_phase_transitions_total{to_phase=\"Deploying\"}[$__rate_interval])) > 0) or vector(1)) * 100",
+          "expr": "(sum(rate(airunway_deployment_phase_transitions_total{to_phase=\"Failed\"}[$__rate_interval])) or vector(0)) / clamp_min((sum(rate(airunway_deployment_phase_transitions_total{to_phase=\"Deploying\"}[$__rate_interval])) or vector(0)), 1e-9) * 100",
           "legendFormat": "Failure %",
           "refId": "A"
         }
