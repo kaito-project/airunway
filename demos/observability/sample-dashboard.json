@@ -768,7 +768,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Infrastructure provisioning time - measures how long the provider takes from resource creation to ready (GPU scheduling, image pull, model download).",
+      "description": "Infrastructure provisioning time - measures how long it takes from the Deploying phase to the Running phase (GPU scheduling, image pull, model download).",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -802,7 +802,7 @@
         "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
-      "title": "Provision Duration - ResourceCreated to Ready (p50 / p95 / p99)",
+      "title": "Provision Duration - Deploying to Running (p50 / p95 / p99)",
       "type": "timeseries",
       "targets": [
         {

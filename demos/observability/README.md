@@ -207,9 +207,9 @@ The AI Runway controller exposes the following Prometheus metrics:
 
 | Metric                                           | Type      | Labels                               | Description                                                                           |
 | ------------------------------------------------ | --------- | ------------------------------------ | ------------------------------------------------------------------------------------- |
-| `airunway_deployment_phase_transitions_total`    | Counter   | `provider`, `from_phase`, `to_phase` | Phase transition events — use to compute deployment frequency and change failure rate |
+| `airunway_deployment_phase_transitions_total`    | Counter   | `provider`, `from_phase`, `to_phase` | Phase transition events - use to compute deployment frequency and change failure rate |
 | `airunway_deployment_ready_duration_seconds`     | Histogram | `provider`                           | Time from ModelDeployment creation to Running phase                                   |
-| `airunway_deployment_provision_duration_seconds` | Histogram | `provider`                           | Time from ResourceCreated to Ready condition (infrastructure provisioning)            |
+| `airunway_deployment_provision_duration_seconds` | Histogram | `provider`                           | Time from first controller-observed Deploying phase to Running phase                  |
 
 ### Useful PromQL queries
 

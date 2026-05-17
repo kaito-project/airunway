@@ -87,11 +87,11 @@ var (
 		[]string{"provider"},
 	)
 
-	// ProvisionDurationSeconds measures infrastructure provisioning time (ResourceCreated to Ready condition).
+	// ProvisionDurationSeconds measures infrastructure provisioning time (Deploying to Running phase).
 	ProvisionDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "airunway_deployment_provision_duration_seconds",
-			Help:    "Duration from ResourceCreated to Ready condition in seconds (provider infrastructure provisioning).",
+			Help:    "Time from Deploying phase to Running phase in seconds (provider infrastructure provisioning).",
 			Buckets: []float64{10, 30, 60, 120, 300, 600, 1200, 1800, 3600},
 		},
 		[]string{"provider"},
