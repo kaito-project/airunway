@@ -211,6 +211,6 @@ verify-versions:
 	  { echo "❌ controller/go.mod GAIE version != $(GAIE_VERSION) (from versions.env)"; exit 1; }
 	@# 2. generated TS must be up to date with versions.env
 	@cd shared && (command -v bun >/dev/null 2>&1 && bun run generate-versions || node --experimental-strip-types scripts/generate-versions.ts) >/dev/null
-	@git diff --exit-code shared/types/versions.generated.ts >/dev/null || \
+	@git diff --exit-code HEAD -- shared/types/versions.generated.ts >/dev/null || \
 	  { echo "❌ shared/types/versions.generated.ts is stale — commit the regenerated file"; exit 1; }
 	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION))"

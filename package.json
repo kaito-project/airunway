@@ -13,7 +13,7 @@
     "dev": "bun run --filter '@airunway/frontend' dev & bun run --filter '@airunway/backend' dev",
     "dev:frontend": "bun run --filter '@airunway/frontend' dev",
     "dev:backend": "bun run --filter '@airunway/backend' dev",
-    "verify-versions": "bun run --filter '@airunway/shared' generate-versions && git diff --exit-code shared/types/versions.generated.ts",
+    "verify-versions": "bun run --filter '@airunway/shared' generate-versions && git diff --exit-code HEAD -- shared/types/versions.generated.ts",
     "prebuild": "bun run verify-versions",
     "build": "bun run build:shared && bun run build:frontend && bun run build:backend",
     "build:shared": "bun run --filter '@airunway/shared' build",
