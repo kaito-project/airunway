@@ -50,8 +50,10 @@ const (
 //	-ldflags "-X github.com/kaito-project/airunway/controller/internal/gateway.DefaultGAIEVersion=$(GAIE_VERSION)"
 //
 // (see controller/Makefile). The string literal below is a fallback for
-// `go run` / `go test` invocations that bypass the Makefile, and can also be
-// overridden at runtime via the --epp-image flag.
+// `go run` / `go test` invocations that bypass the Makefile. To use a
+// different EPP image at runtime without rebuilding, pass the fully-qualified
+// image reference via the --epp-image flag (which bypasses this version
+// entirely rather than overriding it).
 var DefaultGAIEVersion = "v1.5.0"
 
 // GatewayConfig holds the resolved gateway configuration
