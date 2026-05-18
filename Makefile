@@ -132,7 +132,7 @@ clean:
 
 # Build the controller binary
 controller-build: verify-versions
-	cd controller && go build -o bin/manager ./cmd/main.go
+	cd controller && $(MAKE) build
 	@echo "✅ Controller binary built: controller/bin/manager"
 
 # Build controller Docker image
