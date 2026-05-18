@@ -137,7 +137,7 @@ controller-build: verify-versions
 
 # Build controller Docker image
 controller-docker-build: verify-versions
-	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) -f controller/Dockerfile -t $(CONTROLLER_IMG) .
+	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) --build-arg GAIE_VERSION=$(GAIE_VERSION) -f controller/Dockerfile -t $(CONTROLLER_IMG) .
 	@echo "✅ Controller image built: $(CONTROLLER_IMG) ($(PLATFORM), $(if $(PUSH_ENABLED),pushed,loaded locally))"
 
 # Generate CRD manifests and deep copy code
