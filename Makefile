@@ -205,15 +205,21 @@ model-downloader-docker-build:
 # Verify all version references are in sync with versions.env.
 # Wired as a prerequisite of every build/test target so drift is caught
 # the moment it is introduced.
+#
+# Note: Escape dots so version literals are matched as fixed strings inside
+# regexes, preventing e.g. "1.5.0" from also matching "1X5Y0".
+GAIE_VERSION_RE := $(subst .,\.,$(GAIE_VERSION))
+DYNAMO_VERSION_RE := $(subst .,\.,$(DYNAMO_VERSION))
+
 verify-versions:
 	@# 1. controller/go.mod must pin GAIE_VERSION
-	@grep -qE "gateway-api-inference-extension v?$(GAIE_VERSION)([[:space:]]|$$)" controller/go.mod || \
+	@grep -qE "gateway-api-inference-extension v?$(GAIE_VERSION_RE)([[:space:]]|$$)" controller/go.mod || \
 	  { echo "❌ controller/go.mod GAIE version != $(GAIE_VERSION) (from versions.env)"; exit 1; }
 	@# 2. providers/dynamo/config.go fallback literal must match DYNAMO_VERSION
-	@grep -qE '^var DynamoVersion = "$(DYNAMO_VERSION)"' providers/dynamo/config.go || \
+	@grep -qE '^var DynamoVersion = "$(DYNAMO_VERSION_RE)"$$' providers/dynamo/config.go || \
 	  { echo "❌ providers/dynamo/config.go DynamoVersion fallback != $(DYNAMO_VERSION) (from versions.env)"; exit 1; }
 	@# 3. controller/internal/gateway/detection.go fallback literal must match GAIE_VERSION
-	@grep -qE '^var DefaultGAIEVersion = "$(GAIE_VERSION)"' controller/internal/gateway/detection.go || \
+	@grep -qE '^var DefaultGAIEVersion = "$(GAIE_VERSION_RE)"$$' controller/internal/gateway/detection.go || \
 	  { echo "❌ controller/internal/gateway/detection.go DefaultGAIEVersion fallback != $(GAIE_VERSION) (from versions.env)"; exit 1; }
 	@# 4. generated TS must be up to date with versions.env
 	@cd shared && if command -v bun >/dev/null 2>&1; then \
