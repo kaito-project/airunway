@@ -50,22 +50,22 @@ var (
 		[]string{"provider", "reason"},
 	)
 
-	// DeploymentReplicas tracks the number of replicas by name, namespace, and state.
+	// DeploymentReplicas tracks aggregate replica counts by provider and state.
 	DeploymentReplicas = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "airunway_deployment_replicas",
-			Help: "Number of deployment replicas by state (desired, ready, available).",
+			Help: "Aggregate replica count across all ModelDeployments by provider and state (desired, ready, available).",
 		},
-		[]string{"name", "namespace", "state"},
+		[]string{"provider", "state"},
 	)
 
-	// DeploymentPhase tracks the current phase of each deployment (1 for active phase, 0 otherwise).
-	DeploymentPhase = prometheus.NewGaugeVec(
+	// DeploymentStatus tracks ModelDeployment counts by provider and phase.
+	DeploymentStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "airunway_deployment_phase",
-			Help: "Current phase of each ModelDeployment (1 = active, 0 = inactive).",
+			Name: "airunway_deployment_status",
+			Help: "Number of ModelDeployments by provider and phase.",
 		},
-		[]string{"name", "namespace", "phase"},
+		[]string{"provider", "phase"},
 	)
 
 	// PhaseTransitionsTotal counts phase transitions for tracking deployment frequency and change failure rate.
@@ -104,7 +104,7 @@ func init() {
 		ReconciliationErrorsTotal,
 		ProviderSelection,
 		DeploymentReplicas,
-		DeploymentPhase,
+		DeploymentStatus,
 		PhaseTransitionsTotal,
 		ReadyDurationSeconds,
 		ProvisionDurationSeconds,

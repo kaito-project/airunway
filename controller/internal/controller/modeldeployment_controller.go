@@ -71,6 +71,10 @@ type ModelDeploymentReconciler struct {
 type phaseEntry struct {
 	// Phase is the last observed deployment phase.
 	Phase airunwayv1alpha1.DeploymentPhase
+	// Provider is the provider name for this deployment, used to aggregate metrics.
+	Provider string
+	// Replicas holds the last observed replica counts (desired, ready, available).
+	Replicas [3]int32
 	// DeployingTimestamp records when the Deploying phase was first observed.
 	// Used to compute provision duration (Deploying→Running wall-clock time).
 	DeployingTimestamp time.Time
@@ -673,23 +677,17 @@ func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDepl
 
 	// Update deployment phase gauge (set 1 for current phase, 0 for others)
 	phases := []string{"Pending", "Deploying", "Running", "Failed", "Terminating"}
-	for _, p := range phases {
-		val := float64(0)
-		if string(currentPhase) == p {
-			val = 1
-		}
-		airmetrics.DeploymentPhase.WithLabelValues(md.Name, md.Namespace, p).Set(val)
-	}
-
-	// Update replica gauges
-	if md.Status.Replicas != nil {
-		airmetrics.DeploymentReplicas.WithLabelValues(md.Name, md.Namespace, "desired").Set(float64(md.Status.Replicas.Desired))
-		airmetrics.DeploymentReplicas.WithLabelValues(md.Name, md.Namespace, "ready").Set(float64(md.Status.Replicas.Ready))
-		airmetrics.DeploymentReplicas.WithLabelValues(md.Name, md.Namespace, "available").Set(float64(md.Status.Replicas.Available))
-	}
 
 	// Build the updated phase entry. Start from the previous entry to preserve timestamps.
 	entry := previous
+
+	// Update replica counts and provider in the entry for aggregate computation
+	if md.Status.Replicas != nil {
+		entry.Replicas = [3]int32{md.Status.Replicas.Desired, md.Status.Replicas.Ready, md.Status.Replicas.Available}
+	} else {
+		entry.Replicas = [3]int32{}
+	}
+	entry.Provider = providerName
 
 	// Pre-initialize DORA metric label combinations so Prometheus has a zero
 	// baseline before any real observations. Without this, metrics created
@@ -754,26 +752,37 @@ func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDepl
 		entry.RunningMetricsRecorded = false
 	}
 
-	// Update the phase cache
+	// Update the phase cache and recompute aggregate gauges.
 	entry.Phase = currentPhase
 	r.phaseCacheMu.Lock()
 	r.phaseCache[key] = entry
+	r.recomputeAggregateGaugesLocked()
 	r.phaseCacheMu.Unlock()
+}
+
+// recomputeAggregateGaugesLocked resets and recomputes the aggregate phase and
+// replica gauges from the entire phase cache. Must be called while holding
+// phaseCacheMu.
+func (r *ModelDeploymentReconciler) recomputeAggregateGaugesLocked() {
+	airmetrics.DeploymentStatus.Reset()
+	airmetrics.DeploymentReplicas.Reset()
+
+	replicaStates := []string{"desired", "ready", "available"}
+	for _, e := range r.phaseCache {
+		if e.Phase != "" {
+			airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Inc()
+		}
+		for i, s := range replicaStates {
+			airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Add(float64(e.Replicas[i]))
+		}
+	}
 }
 
 // cleanupMetrics removes stale gauge values and phase cache for a deleted ModelDeployment.
 func (r *ModelDeploymentReconciler) cleanupMetrics(key k8stypes.NamespacedName) {
-	// Remove phase gauges
-	for _, p := range []string{"Pending", "Deploying", "Running", "Failed", "Terminating"} {
-		airmetrics.DeploymentPhase.DeleteLabelValues(key.Name, key.Namespace, p)
-	}
-	// Remove replica gauges
-	for _, s := range []string{"desired", "ready", "available"} {
-		airmetrics.DeploymentReplicas.DeleteLabelValues(key.Name, key.Namespace, s)
-	}
-	// Remove from phase cache
 	r.phaseCacheMu.Lock()
 	delete(r.phaseCache, key)
+	r.recomputeAggregateGaugesLocked()
 	r.phaseCacheMu.Unlock()
 }
 
