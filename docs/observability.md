@@ -5,7 +5,7 @@ AI Runway exposes Prometheus metrics from both the controller and inference prov
 ## What's tracked
 
 - **Controller metrics** - reconciliation duration, errors, provider selection events
-- **Deployment state** - per-deployment phase gauge, replica counts
+- **Deployment state** - aggregate deployment phase counts by provider/phase, replica counts
 - **Platform engineering indicators** - phase transitions (deployment frequency, change failure rate), lead time (creation → ready), infrastructure provisioning duration
 - **Inference engine metrics** - vLLM request queues, time-to-first-token, KV-cache utilization, token throughput (via provider PodMonitors)
 
