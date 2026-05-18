@@ -682,7 +682,7 @@ func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDepl
 	currentPhase := md.Status.Phase
 	key := k8stypes.NamespacedName{Name: md.Name, Namespace: md.Namespace}
 
-	// Recompute aggregate deployment phase gauge values from the phase cache for all known phases.
+	// Known phases used to zero-initialize all label combinations for this provider.
 	phases := []string{"Pending", "Deploying", "Running", "Failed", "Terminating"}
 
 	// Build the updated phase entry. Start from the previous entry to preserve timestamps.
@@ -764,37 +764,44 @@ func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDepl
 		entry.RunningMetricsRecorded = false
 	}
 
-	// Update the phase cache and recompute aggregate gauges.
+	// Update the phase cache and apply gauge deltas (decrement old, increment new).
 	entry.Phase = currentPhase
 	r.phaseCacheMu.Lock()
+	decrementPhaseEntryGauges(previous)
+	incrementPhaseEntryGauges(entry)
 	r.phaseCache[key] = entry
-	r.recomputeAggregateGaugesLocked()
 	r.phaseCacheMu.Unlock()
 }
 
-// recomputeAggregateGaugesLocked resets and recomputes the aggregate phase and
-// replica gauges from the entire phase cache. Must be called while holding
-// phaseCacheMu.
-func (r *ModelDeploymentReconciler) recomputeAggregateGaugesLocked() {
-	airmetrics.DeploymentStatus.Reset()
-	airmetrics.DeploymentReplicas.Reset()
-
+// decrementPhaseEntryGauges subtracts a phaseEntry's contributions from the aggregate gauges.
+func decrementPhaseEntryGauges(e phaseEntry) {
 	replicaStates := []string{"desired", "ready", "available"}
-	for _, e := range r.phaseCache {
-		if e.Phase != "" {
-			airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Inc()
-		}
-		for i, s := range replicaStates {
-			airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Add(float64(e.Replicas[i]))
-		}
+	if e.Phase != "" {
+		airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Dec()
+	}
+	for i, s := range replicaStates {
+		airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Sub(float64(e.Replicas[i]))
 	}
 }
 
-// cleanupMetrics removes stale gauge values and phase cache for a deleted ModelDeployment.
+// incrementPhaseEntryGauges adds a phaseEntry's contributions to the aggregate gauges.
+func incrementPhaseEntryGauges(e phaseEntry) {
+	replicaStates := []string{"desired", "ready", "available"}
+	if e.Phase != "" {
+		airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Inc()
+	}
+	for i, s := range replicaStates {
+		airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Add(float64(e.Replicas[i]))
+	}
+}
+
+// cleanupMetrics decrements aggregate gauges and removes the phase cache entry for a deleted ModelDeployment.
 func (r *ModelDeploymentReconciler) cleanupMetrics(key k8stypes.NamespacedName) {
 	r.phaseCacheMu.Lock()
-	delete(r.phaseCache, key)
-	r.recomputeAggregateGaugesLocked()
+	if old, ok := r.phaseCache[key]; ok {
+		decrementPhaseEntryGauges(old)
+		delete(r.phaseCache, key)
+	}
 	r.phaseCacheMu.Unlock()
 }
 
