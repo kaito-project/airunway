@@ -123,13 +123,11 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	var md airunwayv1alpha1.ModelDeployment
 
-	// Record reconciliation duration on all exit paths.
+	// Record reconciliation duration when a provider is known.
 	defer func() {
-		providerName := ""
 		if md.Status.Provider != nil {
-			providerName = md.Status.Provider.Name
+			airmetrics.ReconciliationDurationSeconds.WithLabelValues(md.Status.Provider.Name).Observe(time.Since(reconcileStart).Seconds())
 		}
-		airmetrics.ReconciliationDurationSeconds.WithLabelValues(providerName).Observe(time.Since(reconcileStart).Seconds())
 	}()
 
 	// Fetch the ModelDeployment
@@ -806,12 +804,12 @@ func (r *ModelDeploymentReconciler) cleanupMetrics(key k8stypes.NamespacedName) 
 }
 
 // recordReconcileError records a reconciliation error metric.
+// Skipped when no provider is assigned to avoid empty-label series.
 func (r *ModelDeploymentReconciler) recordReconcileError(md *airunwayv1alpha1.ModelDeployment, errorType string) {
-	providerName := ""
-	if md.Status.Provider != nil {
-		providerName = md.Status.Provider.Name
+	if md.Status.Provider == nil {
+		return
 	}
-	airmetrics.ReconciliationErrorsTotal.WithLabelValues(providerName, errorType).Inc()
+	airmetrics.ReconciliationErrorsTotal.WithLabelValues(md.Status.Provider.Name, errorType).Inc()
 }
 
 func providerConfigChangePredicate() predicate.Predicate {
