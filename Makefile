@@ -210,7 +210,20 @@ verify-versions:
 	@grep -qE "gateway-api-inference-extension v?$(GAIE_VERSION)([[:space:]]|$$)" controller/go.mod || \
 	  { echo "❌ controller/go.mod GAIE version != $(GAIE_VERSION) (from versions.env)"; exit 1; }
 	@# 2. generated TS must be up to date with versions.env
-	@cd shared && (command -v bun >/dev/null 2>&1 && bun run generate-versions || node --experimental-strip-types scripts/generate-versions.ts) >/dev/null
+	@cd shared && if command -v bun >/dev/null 2>&1; then \
+	  bun run generate-versions >/dev/null; \
+	elif command -v node >/dev/null 2>&1; then \
+	  node_major=$$(node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.stdout.write(maj + "." + min)'); \
+	  node_ok=$$(node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.stdout.write(maj > 22 || (maj === 22 && min >= 6) ? "1" : "0")'); \
+	  if [ "$$node_ok" != "1" ]; then \
+	    echo "❌ bun not found and Node $$node_major is too old (need ≥ 22.6 for --experimental-strip-types). Install bun (https://bun.sh) — it is the project standard."; \
+	    exit 1; \
+	  fi; \
+	  node --experimental-strip-types scripts/generate-versions.ts >/dev/null; \
+	else \
+	  echo "❌ Neither bun nor node found. Install bun (https://bun.sh) — it is the project standard."; \
+	  exit 1; \
+	fi
 	@git diff --exit-code HEAD -- shared/types/versions.generated.ts >/dev/null || \
 	  { echo "❌ shared/types/versions.generated.ts is stale — commit the regenerated file"; exit 1; }
 	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION))"
