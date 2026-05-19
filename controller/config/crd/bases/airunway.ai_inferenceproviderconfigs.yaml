@@ -74,6 +74,26 @@ spec:
                   gateway:
                     description: gateway defines the provider's gateway-related capabilities.
                     properties:
+                      endpointPicker:
+                        description: |-
+                          endpointPicker, when set, customizes the EPP image and plugin
+                          configuration that the controller deploys alongside the default
+                          InferencePool. Ignored when InferencePoolNamePattern is set (the provider
+                          is then expected to manage the EPP itself).
+                        properties:
+                          configData:
+                            description: |-
+                              configData is the raw YAML body of the EndpointPickerConfig that will be
+                              written into the EPP ConfigMap under the key "default-plugins.yaml" and
+                              mounted at /config/default-plugins.yaml. When empty, the controller's
+                              default (empty) EndpointPickerConfig is used.
+                            type: string
+                          image:
+                            description: |-
+                              image is the container image for the EPP. When empty, the controller
+                              uses its built-in default GAIE EPP image.
+                            type: string
+                        type: object
                       inferencePoolNamePattern:
                         description: |-
                           inferencePoolNamePattern is the naming pattern for provider-created pools.

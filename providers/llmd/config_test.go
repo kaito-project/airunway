@@ -57,11 +57,30 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Error("expected disaggregated serving mode")
 	}
 
+	// Gateway capabilities: llm-d delegates only the EPP image/config to the
+	// provider; the controller still creates the InferencePool and EPP
+	// scaffolding. InferencePoolNamePattern must remain empty.
+	if spec.Capabilities.Gateway == nil {
+		t.Fatal("expected non-nil Gateway capabilities")
+	}
+	if spec.Capabilities.Gateway.InferencePoolNamePattern != "" {
+		t.Errorf("expected empty InferencePoolNamePattern (llm-d does not delegate pool creation), got %q", spec.Capabilities.Gateway.InferencePoolNamePattern)
+	}
+	epp := spec.Capabilities.Gateway.EndpointPicker
+	if epp == nil {
+		t.Fatal("expected EndpointPicker capabilities to be set for llm-d")
+	}
+	if epp.Image != LLMDSchedulerImage {
+		t.Errorf("expected EPP image %q, got %q", LLMDSchedulerImage, epp.Image)
+	}
+	if epp.ConfigData != LLMDSchedulerDefaultConfig {
+		t.Error("expected EPP ConfigData to match LLMDSchedulerDefaultConfig")
+	}
+
 	// No auto-selection rules
 	if len(spec.SelectionRules) != 0 {
 		t.Errorf("expected no selection rules (never auto-selected), got %d", len(spec.SelectionRules))
 	}
-
 }
 
 func TestGetInstallationInfo(t *testing.T) {

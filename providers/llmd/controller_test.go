@@ -107,7 +107,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated without prefill is incompatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Decode: &airunwayv1alpha1.ComponentScalingSpec{
@@ -123,7 +123,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated without decode is incompatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Prefill: &airunwayv1alpha1.ComponentScalingSpec{
@@ -139,7 +139,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated with both prefill and decode is compatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Prefill: &airunwayv1alpha1.ComponentScalingSpec{
@@ -159,7 +159,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated without GPU on prefill is incompatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Prefill: &airunwayv1alpha1.ComponentScalingSpec{
@@ -178,7 +178,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated without GPU on decode is incompatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Prefill: &airunwayv1alpha1.ComponentScalingSpec{
@@ -197,7 +197,7 @@ func TestValidateCompatibility(t *testing.T) {
 			name: "disaggregated without top-level resources is compatible",
 			md: &airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
-					Engine: airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Engine:  airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
 					Serving: &airunwayv1alpha1.ServingSpec{Mode: airunwayv1alpha1.ServingModeDisaggregated},
 					Scaling: &airunwayv1alpha1.ScalingSpec{
 						Prefill: &airunwayv1alpha1.ComponentScalingSpec{
@@ -240,7 +240,6 @@ func TestReconcileIgnoresOtherProviders(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-model"},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +264,6 @@ func TestReconcileIgnoresNoProvider(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-model"},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

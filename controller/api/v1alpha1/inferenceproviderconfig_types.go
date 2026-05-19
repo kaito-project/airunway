@@ -58,6 +58,25 @@ type ProviderCapabilities struct {
 }
 
 // GatewayCapabilities defines gateway-related capabilities for a specific provider.
+//
+// There are two independent extension points:
+//
+//  1. Full InferencePool + EPP delegation. When InferencePoolNamePattern is set,
+//     the controller assumes the provider's upstream operator creates both the
+//     InferencePool and the Endpoint Picker (EPP) downstream (e.g. NVIDIA Dynamo
+//     creates them from a DynamoGraphDeployment). The controller waits for the
+//     named pool, reads its EndpointPickerRef, and wires HTTPRoute/ReferenceGrant
+//     accordingly. The controller does not create an InferencePool or EPP itself.
+//
+//  2. Endpoint Picker customization. When EndpointPicker is set, the controller
+//     still creates the default InferencePool and the EPP scaffolding
+//     (ServiceAccount, Role, RoleBinding, ConfigMap, Deployment, Service), but
+//     substitutes the provider-supplied EPP image and plugin config. This lets a
+//     provider ship its own scheduler (e.g. the llm-d Endpoint Picker with its
+//     own scoring plugins) without re-implementing the surrounding RBAC and
+//     plumbing.
+//
+// The two fields are independent. A provider may set either, both, or neither.
 type GatewayCapabilities struct {
 	// inferencePoolNamePattern is the naming pattern for provider-created pools.
 	// Supports {name} and {namespace} placeholders.
@@ -70,6 +89,31 @@ type GatewayCapabilities struct {
 	// controller creates a ReferenceGrant for cross-namespace HTTPRoute routing.
 	// +optional
 	InferencePoolNamespace string `json:"inferencePoolNamespace,omitempty"`
+
+	// endpointPicker, when set, customizes the EPP image and plugin
+	// configuration that the controller deploys alongside the default
+	// InferencePool. Ignored when InferencePoolNamePattern is set (the provider
+	// is then expected to manage the EPP itself).
+	// +optional
+	EndpointPicker *EndpointPickerCapabilities `json:"endpointPicker,omitempty"`
+}
+
+// EndpointPickerCapabilities lets a provider override the EPP image and plugin
+// configuration used by the controller-managed Endpoint Picker. All other EPP
+// resources (ServiceAccount, Role, RoleBinding, ConfigMap, Deployment, Service)
+// are still created by the controller using the same shape as the default EPP.
+type EndpointPickerCapabilities struct {
+	// image is the container image for the EPP. When empty, the controller
+	// uses its built-in default GAIE EPP image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// configData is the raw YAML body of the EndpointPickerConfig that will be
+	// written into the EPP ConfigMap under the key "default-plugins.yaml" and
+	// mounted at /config/default-plugins.yaml. When empty, the controller's
+	// default (empty) EndpointPickerConfig is used.
+	// +optional
+	ConfigData string `json:"configData,omitempty"`
 }
 
 // HelmRepo defines a Helm repository needed for installation

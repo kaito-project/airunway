@@ -43,6 +43,32 @@ const (
 
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
+
+	// LLMDSchedulerImage is the llm-d Router Endpoint Picker (formerly known
+	// as the llm-d Inference Scheduler) image used as the EPP for all llm-d
+	// ModelDeployments. The image source is github.com/llm-d/llm-d-router.
+	LLMDSchedulerImage = "ghcr.io/llm-d/llm-d-router-endpoint-picker:0.0.3"
+
+	// LLMDSchedulerDefaultConfig is the default EndpointPickerConfig shipped
+	// with the llm-d provider. It mirrors deploy/config/epp-config.yaml from
+	// the upstream llm-d-router repository: a heuristic prefix-cache scorer
+	// combined with a decode filter and max-score picker. It does NOT require
+	// any special vLLM flags (--kv-events-config / precise prefix cache).
+	LLMDSchedulerDefaultConfig = `apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefix-cache-scorer
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
 )
 
 // ProviderConfigManager handles registration and heartbeat for the llm-d provider
@@ -73,6 +99,18 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 			CPUSupport:  false,
 			GPUSupport:  true,
 			RequiresCRD: &requiresCRD,
+			Gateway: &airunwayv1alpha1.GatewayCapabilities{
+				// llm-d does not delegate InferencePool creation to its own
+				// operator. Instead it provides a custom EPP image (the llm-d
+				// Router Endpoint Picker) with llm-d-specific scoring plugins.
+				// The controller still creates the InferencePool and EPP
+				// scaffolding; only the EPP image and plugin config come from
+				// the provider.
+				EndpointPicker: &airunwayv1alpha1.EndpointPickerCapabilities{
+					Image:      LLMDSchedulerImage,
+					ConfigData: LLMDSchedulerDefaultConfig,
+				},
+			},
 		},
 		SelectionRules: []airunwayv1alpha1.SelectionRule{},
 	}
