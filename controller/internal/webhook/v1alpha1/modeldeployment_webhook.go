@@ -277,7 +277,7 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 				))
 			} else {
 				// Check serving mode support
-				if !caps.SupportsServingMode(engineType, servingMode) {
+				if !engineCap.SupportsServingMode(servingMode) {
 					allErrs = append(allErrs, field.Invalid(
 						specPath.Child("serving", "mode"),
 						string(servingMode),

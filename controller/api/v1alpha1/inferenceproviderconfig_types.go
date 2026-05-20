@@ -99,18 +99,22 @@ func (c *ProviderCapabilities) GetEngineCapability(engine EngineType) *EngineCap
 	return nil
 }
 
-// SupportsServingMode returns true if the given engine supports the specified serving mode
-func (c *ProviderCapabilities) SupportsServingMode(engine EngineType, mode ServingMode) bool {
-	ec := c.GetEngineCapability(engine)
-	if ec == nil {
+// SupportsServingMode returns true if this engine supports the specified serving mode.
+func (e *EngineCapability) SupportsServingMode(mode ServingMode) bool {
+	if e == nil {
 		return false
 	}
-	for _, sm := range ec.ServingModes {
+	for _, sm := range e.ServingModes {
 		if sm == mode {
 			return true
 		}
 	}
 	return false
+}
+
+// SupportsServingMode returns true if the given engine supports the specified serving mode
+func (c *ProviderCapabilities) SupportsServingMode(engine EngineType, mode ServingMode) bool {
+	return c.GetEngineCapability(engine).SupportsServingMode(mode)
 }
 
 // SupportsGPU returns true if the given engine supports GPU inference

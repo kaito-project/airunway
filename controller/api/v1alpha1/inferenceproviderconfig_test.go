@@ -133,6 +133,23 @@ func TestSupportsServingMode(t *testing.T) {
 	}
 }
 
+func TestEngineCapability_SupportsServingMode(t *testing.T) {
+	ec := &EngineCapability{
+		Name:         EngineTypeVLLM,
+		ServingModes: []ServingMode{ServingModeAggregated},
+	}
+	if !ec.SupportsServingMode(ServingModeAggregated) {
+		t.Error("expected aggregated to be supported")
+	}
+	if ec.SupportsServingMode(ServingModeDisaggregated) {
+		t.Error("expected disaggregated to NOT be supported")
+	}
+	var nilEC *EngineCapability
+	if nilEC.SupportsServingMode(ServingModeAggregated) {
+		t.Error("expected nil receiver to return false")
+	}
+}
+
 func TestSupportsGPU(t *testing.T) {
 	caps := &ProviderCapabilities{
 		Engines: []EngineCapability{
