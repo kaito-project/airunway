@@ -329,7 +329,7 @@ func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunw
 			if engineCap == nil {
 				return fmt.Errorf("provider %s does not support engine %s", spec.Provider.Name, engineType)
 			}
-			if !caps.SupportsServingMode(engineType, servingMode) {
+			if !engineCap.SupportsServingMode(servingMode) {
 				return fmt.Errorf("provider %s does not support %s mode for engine %s", spec.Provider.Name, servingMode, engineType)
 			}
 			break
@@ -434,7 +434,7 @@ func (r *ModelDeploymentReconciler) selectEngine(ctx context.Context, md *airunw
 			}
 
 			// Filter by serving mode compatibility at the engine level
-			if !caps.SupportsServingMode(engineCap.Name, servingMode) {
+			if !engineCap.SupportsServingMode(servingMode) {
 				continue
 			}
 
@@ -587,7 +587,7 @@ func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.M
 		if spec.Serving != nil && spec.Serving.Mode != "" {
 			servingMode = spec.Serving.Mode
 		}
-		if !caps.SupportsServingMode(engineType, servingMode) {
+		if !engineCap.SupportsServingMode(servingMode) {
 			continue
 		}
 
