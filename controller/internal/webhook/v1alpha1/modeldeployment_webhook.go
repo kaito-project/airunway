@@ -52,7 +52,7 @@ var modeldeploymentlog = logf.Log.WithName("modeldeployment-resource")
 // SetupModelDeploymentWebhookWithManager registers the webhook for ModelDeployment in the manager.
 func SetupModelDeploymentWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &airunwayv1alpha1.ModelDeployment{}).
-		WithValidator(&ModelDeploymentCustomValidator{Reader: mgr.GetClient()}).
+		WithValidator(&ModelDeploymentCustomValidator{Reader: mgr.GetAPIReader()}).
 		WithDefaulter(&ModelDeploymentCustomDefaulter{}).
 		Complete()
 }
@@ -353,6 +353,66 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 	// Validate storage configuration
 	allErrs = append(allErrs, v.validateStorage(obj)...)
 
+	// Enforce resource ceilings to prevent runaway resource requests at admission time.
+	allErrs = append(allErrs, validateResourceCeilings(spec, specPath)...)
+
+	return allErrs
+}
+
+// validateResourceCeilings enforces the Max* limits on resource and scaling fields.
+func validateResourceCeilings(spec *airunwayv1alpha1.ModelDeploymentSpec, specPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+
+	if spec.Resources != nil {
+		resPath := specPath.Child("resources")
+		if spec.Resources.GPU != nil && spec.Resources.GPU.Count > MaxGPUCount {
+			allErrs = append(allErrs, field.Invalid(
+				resPath.Child("gpu", "count"),
+				spec.Resources.GPU.Count,
+				fmt.Sprintf("exceeds maximum allowed (%d)", MaxGPUCount),
+			))
+		}
+		allErrs = append(allErrs, validateResourceQuantity(spec.Resources.CPU, MaxCPU, resPath.Child("cpu"))...)
+		allErrs = append(allErrs, validateResourceQuantity(spec.Resources.Memory, MaxMemory, resPath.Child("memory"))...)
+	}
+
+	if spec.Scaling != nil {
+		scalingPath := specPath.Child("scaling")
+		if spec.Scaling.Replicas > MaxReplicas {
+			allErrs = append(allErrs, field.Invalid(
+				scalingPath.Child("replicas"),
+				spec.Scaling.Replicas,
+				fmt.Sprintf("exceeds maximum allowed (%d)", MaxReplicas),
+			))
+		}
+		allErrs = append(allErrs, validateComponentCeilings(spec.Scaling.Prefill, scalingPath.Child("prefill"))...)
+		allErrs = append(allErrs, validateComponentCeilings(spec.Scaling.Decode, scalingPath.Child("decode"))...)
+	}
+
+	return allErrs
+}
+
+// validateComponentCeilings enforces ceilings on a prefill/decode component.
+func validateComponentCeilings(comp *airunwayv1alpha1.ComponentScalingSpec, compPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	if comp == nil {
+		return allErrs
+	}
+	if comp.Replicas > MaxReplicas {
+		allErrs = append(allErrs, field.Invalid(
+			compPath.Child("replicas"),
+			comp.Replicas,
+			fmt.Sprintf("exceeds maximum allowed (%d)", MaxReplicas),
+		))
+	}
+	if comp.GPU != nil && comp.GPU.Count > MaxGPUCount {
+		allErrs = append(allErrs, field.Invalid(
+			compPath.Child("gpu", "count"),
+			comp.GPU.Count,
+			fmt.Sprintf("exceeds maximum allowed (%d)", MaxGPUCount),
+		))
+	}
+	allErrs = append(allErrs, validateResourceQuantity(comp.Memory, MaxMemory, compPath.Child("memory"))...)
 	return allErrs
 }
 
