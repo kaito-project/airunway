@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
+	"errors"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,8 +29,24 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// flakyReader is a client.Reader stub used to simulate transient API errors
+// (timeouts, connection refused) from the InferenceProviderConfig lookup in
+// the validating webhook. Get returns the configured error; List is unused.
+type flakyReader struct {
+	err error
+}
+
+func (r *flakyReader) Get(_ context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	return r.err
+}
+
+func (r *flakyReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return r.err
+}
 
 var _ = Describe("ModelDeployment Webhook", func() {
 	var (
@@ -1278,6 +1296,22 @@ var _ = Describe("ModelDeployment Webhook", func() {
 			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 1}}
 			_, err := noCRDValidator.ValidateCreate(ctx, obj)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should surface a warning when provider lookup fails transiently", func() {
+			flakyReader := &flakyReader{err: errors.New("etcdserver: request timed out")}
+			flakyValidator := ModelDeploymentCustomValidator{Reader: flakyReader}
+
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "dynamo"}
+			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 1}}
+			warnings, err := flakyValidator.ValidateCreate(ctx, obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).NotTo(BeEmpty())
+			joined := strings.Join(warnings, "|")
+			Expect(joined).To(ContainSubstring("dynamo"))
+			Expect(joined).To(ContainSubstring("controller will re-validate"))
 		})
 
 		It("Should reject vllm with gpu.count=0 on dynamo (no CPU support)", func() {
