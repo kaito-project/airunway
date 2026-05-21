@@ -1298,6 +1298,23 @@ var _ = Describe("ModelDeployment Webhook", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("Should skip provider lookup when Reader is nil", func() {
+			// A validator constructed without a Reader (e.g. in unit tests that
+			// don't wire up the manager) must not panic and must not run the
+			// provider/engine compatibility lookup — the guard at
+			// modeldeployment_webhook.go ensures the Get is short-circuited.
+			nilReaderValidator := ModelDeploymentCustomValidator{Reader: nil}
+
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "dynamo"}
+			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 1}}
+
+			warnings, err := nilReaderValidator.ValidateCreate(ctx, obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).To(BeEmpty())
+		})
+
 		It("Should surface a warning when provider lookup fails transiently", func() {
 			flakyReader := &flakyReader{err: errors.New("etcdserver: request timed out")}
 			flakyValidator := ModelDeploymentCustomValidator{Reader: flakyReader}

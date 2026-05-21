@@ -100,8 +100,6 @@ spec:
                           description: |-
                             requiresCRD indicates if this engine needs an upstream CRD/operator installation.
                             When omitted, clients should treat this as true for backward compatibility.
-                            Prefer the RequiresInstallation() helper over reading this pointer directly
-                            so the nil-means-true convention stays centralized.
                           type: boolean
                         servingModes:
                           description: servingModes is the list of serving modes this
