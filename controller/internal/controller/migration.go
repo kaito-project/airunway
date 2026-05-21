@@ -129,14 +129,33 @@ func MigrateLegacyProviderConfigs(ctx context.Context, c client.Client) error {
 	// actual mutation must operate on a freshly-Get'd object so that retries
 	// after a 409 use an up-to-date resourceVersion (rather than spinning on
 	// the stale copy returned by List).
+	//
+	// Per-object failures are logged but do NOT abort the whole migration:
+	// returning an error here would (a) leave previously-migrated objects
+	// committed while later ones are skipped, and (b) bubble up to the manager
+	// and crashloop the controller. The migration is idempotent, so on the
+	// next leader election the unfinished objects get another attempt.
+	var migrated, failed int
 	for i := range list.Items {
 		name := list.Items[i].GetName()
 		key := client.ObjectKey{Namespace: list.Items[i].GetNamespace(), Name: name}
 		if err := migrateAndUpdate(ctx, c, key); err != nil {
-			return fmt.Errorf("failed to update migrated InferenceProviderConfig %s: %w", name, err)
+			failed++
+			logger.Error(err, "failed to migrate InferenceProviderConfig; leaving object untouched and continuing",
+				"name", name)
+			continue
 		}
+		migrated++
 	}
 
+	logger.Info("legacy InferenceProviderConfig migration finished",
+		"total", len(list.Items), "succeeded", migrated, "failed", failed)
+	if failed > 0 {
+		// Return a summary error so callers/tests can detect partial migration,
+		// but the manager Runnable swallows it (see Start) to avoid crashlooping
+		// the controller on a single bad object.
+		return fmt.Errorf("legacy InferenceProviderConfig migration completed with %d failure(s) of %d object(s)", failed, len(list.Items))
+	}
 	return nil
 }
 
@@ -244,7 +263,11 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 		for i, e := range engines {
 			eng, ok := e.(map[string]interface{})
 			if !ok {
-				continue
+				// A malformed entry inside an otherwise object-form engines
+				// list should NOT be silently dropped: writing back the
+				// truncated list would discard the operator's data. Fail
+				// loudly so an operator can fix the source CR.
+				return false, "", fmt.Errorf("malformed engine entry at spec.capabilities.engines[%d]: expected object, got %T", i, e)
 			}
 			if _, set := eng["gpuSupport"]; !set {
 				eng["gpuSupport"] = legacy.gpuSupport
@@ -285,10 +308,13 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 	legacy := readLegacyFlatValues(capabilities)
 
 	newEngines := make([]interface{}, 0, len(engines))
-	for _, e := range engines {
+	for i, e := range engines {
 		engineName, ok := e.(string)
 		if !ok {
-			continue
+			// String-form branch: a non-string entry here means the source CR
+			// is malformed. Returning an error preserves the original list
+			// instead of writing back a silently-truncated one.
+			return false, "", fmt.Errorf("malformed engine entry at spec.capabilities.engines[%d]: expected string, got %T", i, e)
 		}
 
 		engineCap := map[string]interface{}{
@@ -384,10 +410,27 @@ func (m *LegacyProviderConfigMigrator) NeedLeaderElection() bool { return true }
 // Start performs the migration and returns. Returning nil from a Runnable is
 // fine: the manager simply considers this runnable finished and continues
 // running the others (the reconciler, the webhook server, etc.).
+//
+// Per-object migration failures are deliberately NOT propagated as Start
+// errors. A non-nil return from a manager Runnable terminates the manager,
+// which would (a) crashloop the controller because of one bad object on disk,
+// and (b) leave earlier successfully-migrated objects committed while the
+// remaining ones never get a retry. Instead, we log a summary and return nil
+// so the controller stays up; the migration is idempotent and the next leader
+// will retry the unmigrated objects.
 func (m *LegacyProviderConfigMigrator) Start(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName("migration")
 	c, err := client.New(m.Config, client.Options{Scheme: m.Scheme})
 	if err != nil {
 		return fmt.Errorf("migration: build direct client: %w", err)
 	}
-	return MigrateLegacyProviderConfigs(ctx, c)
+	if err := MigrateLegacyProviderConfigs(ctx, c); err != nil {
+		// Summary error from MigrateLegacyProviderConfigs (partial failure):
+		// log but do not propagate — the manager would otherwise tear down
+		// the controller. List/setup errors are also folded into the same
+		// log; if listing failed there is nothing to migrate anyway and the
+		// reconciler can still serve traffic.
+		logger.Error(err, "legacy InferenceProviderConfig migration completed with errors; controller will continue and retry on next leader election")
+	}
+	return nil
 }

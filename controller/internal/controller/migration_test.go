@@ -619,7 +619,11 @@ func TestMigrateLegacyProviderConfigs_PropagatesListErrors(t *testing.T) {
 }
 
 // TestMigrateLegacyProviderConfigs_UpdateErrorPropagates ensures non-conflict
-// Update failures during migration are surfaced rather than swallowed. (Conflict
+// Update failures during migration are surfaced as a summary error rather than
+// silently swallowed. The migration now keeps going on per-object failure (so
+// one bad object doesn't crashloop the controller and doesn't strand other
+// objects un-migrated), but the summary error is still returned to callers so
+// tests and the Runnable's log line can detect partial completion. (Conflict
 // errors are handled separately — see TestMigrateLegacyProviderConfigs_UpdateConflictTreatedAsSuccess.)
 func TestMigrateLegacyProviderConfigs_UpdateErrorPropagates(t *testing.T) {
 	legacy := &unstructured.Unstructured{}
@@ -663,10 +667,194 @@ func TestMigrateLegacyProviderConfigs_UpdateErrorPropagates(t *testing.T) {
 
 	err := MigrateLegacyProviderConfigs(context.Background(), c)
 	if err == nil {
-		t.Fatalf("expected update error to propagate, got nil")
+		t.Fatalf("expected update error to surface as a summary error, got nil")
 	}
-	if !containsString(err.Error(), "failed to update migrated InferenceProviderConfig kaito") {
-		t.Errorf("expected wrapped update error, got %q", err.Error())
+	if !containsString(err.Error(), "completed with 1 failure(s)") {
+		t.Errorf("expected partial-failure summary error, got %q", err.Error())
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_ContinuesAfterPerObjectFailure verifies the
+// fix for issue #6: a per-object failure must not abort the whole migration
+// run. Two legacy objects exist; Update on the first returns an internal
+// error, but the second must still be attempted (and succeed), and the
+// summary error reports 1 failure of 2.
+func TestMigrateLegacyProviderConfigs_ContinuesAfterPerObjectFailure(t *testing.T) {
+	makeLegacy := func(name string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "airunway.ai",
+			Version: "v1alpha1",
+			Kind:    "InferenceProviderConfig",
+		})
+		u.SetName(name)
+		u.SetResourceVersion("1")
+		if err := unstructured.SetNestedField(u.Object, map[string]interface{}{
+			"engines": []interface{}{"vllm"},
+		}, "spec", "capabilities"); err != nil {
+			t.Fatalf("failed to set capabilities for %s: %v", name, err)
+		}
+		return u
+	}
+	bad := makeLegacy("bad-update")
+	good := makeLegacy("good-update")
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+	updateCalls := map[string]int{}
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*bad, *good}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			if key.Name == "bad-update" {
+				bad.DeepCopyInto(u)
+			} else {
+				good.DeepCopyInto(u)
+			}
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			updateCalls[obj.GetName()]++
+			if obj.GetName() == "bad-update" {
+				return apierrors.NewInternalError(errors.New("boom"))
+			}
+			return nil
+		},
+	})
+
+	err := MigrateLegacyProviderConfigs(context.Background(), c)
+	if err == nil {
+		t.Fatalf("expected summary error reporting partial failure, got nil")
+	}
+	if !containsString(err.Error(), "completed with 1 failure(s) of 2") {
+		t.Errorf("expected summary error to report 1/2 failure, got %q", err.Error())
+	}
+	if updateCalls["good-update"] == 0 {
+		t.Errorf("expected good-update to be attempted despite earlier failure on bad-update; calls=%v", updateCalls)
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedStringEngine verifies
+// the fix for issue #3: a malformed entry inside a legacy string-form engines
+// list (e.g. an integer where a string is expected) must NOT be silently
+// dropped. The migration must leave the object untouched (no Update) and
+// return a partial-failure summary error so an operator notices.
+func TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedStringEngine(t *testing.T) {
+	bad := &unstructured.Unstructured{}
+	bad.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	bad.SetName("malformed-string-engine")
+	bad.SetResourceVersion("1")
+	// First entry is a valid string, second is a non-string — under the old
+	// behavior the second was silently dropped and the truncated list was
+	// written back.
+	if err := unstructured.SetNestedField(bad.Object, map[string]interface{}{
+		"engines": []interface{}{"vllm", int64(42)},
+	}, "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set engines: %v", err)
+	}
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*bad}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			bad.DeepCopyInto(u)
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			t.Errorf("unexpected Update call on malformed-string-engine %q — list would be silently truncated", obj.GetName())
+			return nil
+		},
+	})
+
+	err := MigrateLegacyProviderConfigs(context.Background(), c)
+	if err == nil {
+		t.Fatalf("expected partial-failure summary error for malformed engine entry, got nil")
+	}
+	if !containsString(err.Error(), "completed with 1 failure(s)") {
+		t.Errorf("expected summary error mentioning failure count, got %q", err.Error())
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedObjectEngine is the
+// object-form counterpart to FailsLoudlyOnMalformedStringEngine: a non-object
+// entry inside an otherwise object-form engines list must not be silently
+// dropped during the hoist branch.
+func TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedObjectEngine(t *testing.T) {
+	bad := &unstructured.Unstructured{}
+	bad.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	bad.SetName("malformed-object-engine")
+	bad.SetResourceVersion("1")
+	// engines[0] is a proper object, engines[1] is a string — and there's a
+	// legacy flat key present so the hoist branch is exercised. Under the old
+	// behavior engines[1] was silently dropped.
+	if err := unstructured.SetNestedField(bad.Object, map[string]interface{}{
+		"engines": []interface{}{
+			map[string]interface{}{"name": "vllm"},
+			"sglang", // should be a map; non-object → must error, not be dropped
+		},
+		"gpuSupport": true, // forces hoist branch
+	}, "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set engines: %v", err)
+	}
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*bad}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			bad.DeepCopyInto(u)
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			t.Errorf("unexpected Update call on malformed-object-engine %q — list would be silently truncated", obj.GetName())
+			return nil
+		},
+	})
+
+	err := MigrateLegacyProviderConfigs(context.Background(), c)
+	if err == nil {
+		t.Fatalf("expected partial-failure summary error for malformed engine entry, got nil")
+	}
+	if !containsString(err.Error(), "completed with 1 failure(s)") {
+		t.Errorf("expected summary error mentioning failure count, got %q", err.Error())
 	}
 }
 
