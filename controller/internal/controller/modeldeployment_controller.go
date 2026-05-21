@@ -614,7 +614,13 @@ func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.M
 	return best.name, best.reason, nil
 }
 
-// setCondition updates a condition on the ModelDeployment
+// setCondition updates a condition on the ModelDeployment.
+//
+// LastTransitionTime is passed as metav1.Now() here, but
+// meta.SetStatusCondition only adopts that timestamp when the condition's
+// Status actually changes; on no-op updates (same Status) it preserves the
+// previously stored LastTransitionTime. So this helper does not clobber the
+// transition timestamp on repeated reconciles of an unchanged status.
 func (r *ModelDeploymentReconciler) setCondition(md *airunwayv1alpha1.ModelDeployment, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
