@@ -833,6 +833,114 @@ func TestMigrateLegacyProviderConfigs_RetriesAfterConflict(t *testing.T) {
 	}
 }
 
+// TestLegacyProviderConfigMigrator_NeedLeaderElection pins the leader-elected
+// nature of the migrator. With multiple replicas, only the leader may perform
+// the rewrites — followers would otherwise race the leader's Update and
+// crashloop on 409 Conflict. A future refactor must not silently flip this to
+// false.
+func TestLegacyProviderConfigMigrator_NeedLeaderElection(t *testing.T) {
+	m := &LegacyProviderConfigMigrator{}
+	if !m.NeedLeaderElection() {
+		t.Error("expected LegacyProviderConfigMigrator.NeedLeaderElection() = true")
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_MalformedCapabilities pins the log-and-skip
+// behavior in applyMigration when spec.capabilities cannot be read as a map
+// (e.g. someone hand-wrote it as a string). The migration must not crash and
+// must not write back to the object.
+func TestMigrateLegacyProviderConfigs_MalformedCapabilities(t *testing.T) {
+	bad := &unstructured.Unstructured{}
+	bad.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	bad.SetName("malformed-caps")
+	bad.SetResourceVersion("1")
+	// spec.capabilities is a string instead of a map — NestedMap will error.
+	if err := unstructured.SetNestedField(bad.Object, "not-a-map", "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set malformed capabilities: %v", err)
+	}
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*bad}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			bad.DeepCopyInto(u)
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			t.Errorf("unexpected Update call on malformed object %q", obj.GetName())
+			return nil
+		},
+	})
+
+	if err := MigrateLegacyProviderConfigs(context.Background(), c); err != nil {
+		t.Fatalf("expected malformed input to be skipped without error, got %v", err)
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_MalformedEngines pins the log-and-skip
+// behavior in applyMigration when spec.capabilities.engines cannot be read as
+// a slice (e.g. someone hand-wrote it as a map). The migration must not crash
+// and must not write back.
+func TestMigrateLegacyProviderConfigs_MalformedEngines(t *testing.T) {
+	bad := &unstructured.Unstructured{}
+	bad.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	bad.SetName("malformed-engines")
+	bad.SetResourceVersion("1")
+	// spec.capabilities.engines is a map instead of a slice — NestedSlice will error.
+	if err := unstructured.SetNestedField(bad.Object, map[string]interface{}{
+		"engines": map[string]interface{}{"not": "a slice"},
+	}, "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set malformed engines: %v", err)
+	}
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*bad}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			bad.DeepCopyInto(u)
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			t.Errorf("unexpected Update call on malformed-engines object %q", obj.GetName())
+			return nil
+		},
+	})
+
+	if err := MigrateLegacyProviderConfigs(context.Background(), c); err != nil {
+		t.Fatalf("expected malformed engines to be skipped without error, got %v", err)
+	}
+}
+
 func containsString(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0))
 }
