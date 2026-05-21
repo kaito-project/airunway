@@ -1254,12 +1254,29 @@ var _ = Describe("ModelDeployment Webhook", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("Should skip check when provider not found in cluster", func() {
+		It("Should reject when provider not found in cluster", func() {
 			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
 			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
 			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "nonexistent"}
 			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 1}}
 			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("InferenceProviderConfig"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+
+		It("Should skip check when InferenceProviderConfig CRD is not installed", func() {
+			// Build a reader whose scheme does NOT register InferenceProviderConfig,
+			// so Get returns a NoKindMatchError (mid-bootstrap cluster).
+			emptyScheme := runtime.NewScheme()
+			noCRDReader := fake.NewClientBuilder().WithScheme(emptyScheme).Build()
+			noCRDValidator := ModelDeploymentCustomValidator{Reader: noCRDReader}
+
+			obj.Spec.Model.ID = "Qwen/Qwen3-0.6B"
+			obj.Spec.Engine.Type = airunwayv1alpha1.EngineTypeVLLM
+			obj.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "dynamo"}
+			obj.Spec.Resources = &airunwayv1alpha1.ResourceSpec{GPU: &airunwayv1alpha1.GPUSpec{Count: 1}}
+			_, err := noCRDValidator.ValidateCreate(ctx, obj)
 			Expect(err).NotTo(HaveOccurred())
 		})
 

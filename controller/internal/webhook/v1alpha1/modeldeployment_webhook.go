@@ -24,6 +24,8 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -263,7 +265,28 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 	if spec.Provider != nil && spec.Provider.Name != "" && spec.Engine.Type != "" && v.Reader != nil {
 		var providerConfig airunwayv1alpha1.InferenceProviderConfig
 		err := v.Reader.Get(ctx, client.ObjectKey{Name: spec.Provider.Name}, &providerConfig)
-		if err == nil && providerConfig.Spec.Capabilities != nil {
+		switch {
+		case apierrors.IsNotFound(err):
+			// Reject obviously-bogus provider names at admission time so the
+			// user gets immediate feedback rather than waiting for reconcile.
+			allErrs = append(allErrs, field.Invalid(
+				specPath.Child("provider", "name"),
+				spec.Provider.Name,
+				fmt.Sprintf("InferenceProviderConfig %q not found", spec.Provider.Name),
+			))
+		case meta.IsNoMatchError(err):
+			// CRD is not installed (cluster mid-bootstrap). Skip — the
+			// controller will catch this during reconciliation.
+		case err != nil:
+			// Transient API error (timeout, connection refused, etc.). Do not
+			// block admission on infra flakes — log and skip so the controller
+			// can re-validate later.
+			logf.FromContext(ctx).Info(
+				"failed to look up InferenceProviderConfig for webhook validation; skipping provider/engine compatibility check",
+				"provider", spec.Provider.Name,
+				"error", err.Error(),
+			)
+		case providerConfig.Spec.Capabilities != nil:
 			caps := providerConfig.Spec.Capabilities
 			engineType := spec.Engine.Type
 
@@ -299,8 +322,6 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 				}
 			}
 		}
-		// If Get fails (CRD not installed, provider not found, etc.), skip —
-		// the controller will catch it during reconciliation.
 	}
 
 	// Validate disaggregated mode configuration
