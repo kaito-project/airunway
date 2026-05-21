@@ -47,14 +47,14 @@ type EngineCapability struct {
 	// +optional
 	CPUSupport bool `json:"cpuSupport,omitempty"`
 
-	// requiresCRD indicates if this provider needs an upstream CRD/operator installation.
+	// requiresCRD indicates if this engine needs an upstream CRD/operator installation.
 	// When omitted, clients should treat this as true for backward compatibility.
 	// Prefer the RequiresInstallation() helper over reading this pointer directly
 	// so the nil-means-true convention stays centralized.
 	// +optional
 	RequiresCRD *bool `json:"requiresCRD,omitempty"`
 
-	// gateway defines the provider's gateway-related capabilities.
+	// gateway defines this engine's gateway-related capabilities.
 	// +optional
 	Gateway *GatewayCapabilities `json:"gateway,omitempty"`
 }
@@ -68,7 +68,7 @@ type ProviderCapabilities struct {
 	Engines []EngineCapability `json:"engines,omitempty"`
 }
 
-// GatewayCapabilities defines gateway-related capabilities for a specific provider.
+// GatewayCapabilities defines gateway-related capabilities for a specific engine.
 type GatewayCapabilities struct {
 	// inferencePoolNamePattern is the naming pattern for provider-created pools.
 	// Supports {name} and {namespace} placeholders.
