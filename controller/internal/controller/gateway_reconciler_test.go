@@ -57,10 +57,12 @@ func newTestReconciler(scheme *runtime.Scheme, detector *gateway.Detector, objs 
 	if len(objs) > 0 {
 		cb = cb.WithObjects(objs...)
 	}
+	c := cb.Build()
 	return &ModelDeploymentReconciler{
-		Client:          cb.Build(),
-		Scheme:          scheme,
-		GatewayDetector: detector,
+		Client:           c,
+		Scheme:           scheme,
+		GatewayDetector:  detector,
+		ProviderResolver: gateway.NewInferenceProviderConfigResolver(c),
 	}
 }
 
@@ -637,8 +639,25 @@ func TestGateway_KaitoLlamaCppServedNameFallsBackToModelID(t *testing.T) {
 	md.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "kaito"}
 	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeLlamaCpp
 	md.Spec.Model.ServedName = "explicit-served"
+	// Provider declares ignoresServedName=true for its llamacpp engine, so
+	// gateway routing should fall back to spec.model.id.
+	ipc := &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "kaito"},
+		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
+			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+				Engines: []airunwayv1alpha1.EngineCapability{
+					{
+						Name: airunwayv1alpha1.EngineTypeLlamaCpp,
+						Gateway: &airunwayv1alpha1.GatewayCapabilities{
+							IgnoresServedName: true,
+						},
+					},
+				},
+			},
+		},
+	}
 	detector := fakeDetector(true, "my-gateway", "gateway-ns")
-	r := newTestReconciler(scheme, detector, md)
+	r := newTestReconciler(scheme, detector, md, ipc)
 	ctx := context.Background()
 
 	name := r.resolveModelName(ctx, md)
@@ -685,7 +704,7 @@ type mockProviderResolver struct {
 	caps map[string]*airunwayv1alpha1.GatewayCapabilities
 }
 
-func (m *mockProviderResolver) GetGatewayCapabilities(_ context.Context, providerName string) *airunwayv1alpha1.GatewayCapabilities {
+func (m *mockProviderResolver) GetGatewayCapabilities(_ context.Context, providerName string, _ airunwayv1alpha1.EngineType) *airunwayv1alpha1.GatewayCapabilities {
 	if m.caps == nil {
 		return nil
 	}
@@ -790,9 +809,15 @@ func TestGateway_ResolveProviderCapabilities_ProviderWithNoGatewayCapabilities(t
 	r := newTestReconciler(scheme, nil, md)
 	r.ProviderResolver = resolver
 
-	_, err := r.resolveProviderGatewayCapabilities(context.Background(), md)
-	if err == nil {
-		t.Error("expected error when provider has no gateway capabilities")
+	// A provider that declares no gateway capabilities is a legitimate
+	// no-op state, not an error: callers proceed with the default
+	// InferencePool/EPP path. The resolver should return (nil, nil).
+	caps, err := r.resolveProviderGatewayCapabilities(context.Background(), md)
+	if err != nil {
+		t.Fatalf("unexpected error for provider without gateway capabilities: %v", err)
+	}
+	if caps != nil {
+		t.Errorf("expected nil capabilities for provider with no gateway capabilities, got %+v", caps)
 	}
 }
 

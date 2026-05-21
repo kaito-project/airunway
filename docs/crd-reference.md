@@ -98,13 +98,20 @@ metadata:
       }
 spec:
   capabilities:
-    engines: [vllm, sglang, trtllm]
-    servingModes: [aggregated, disaggregated]
-    gpuSupport: true
-    cpuSupport: false
-    gateway:                                         # Optional: provider gateway capabilities
-      inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pool naming pattern ({name}, {namespace} accepted)
-      inferencePoolNamespace: "dynamo-system"         # Namespace for provider's InferencePool
+    engines:
+      - name: vllm
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        requiresCRD: true                            # Optional; nil is treated as true for backward compatibility
+        gateway:                                     # Optional: per-engine gateway capabilities
+          inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pool naming pattern ({name}, {namespace} accepted)
+          inferencePoolNamespace: "dynamo-system"             # Namespace for provider's InferencePool
+      - name: sglang
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+      - name: trtllm
+        servingModes: [aggregated]
+        gpuSupport: true
   selectionRules:
     - condition: "spec.serving.mode == 'disaggregated'"
       priority: 100
