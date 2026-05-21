@@ -5,7 +5,7 @@ import { toModelDeploymentManifest, toDeploymentStatus, INFERENCE_GATEWAY_LABEL 
 import { withRetry } from '../lib/retry';
 import { loadKubeConfig } from '../lib/kubeconfig';
 import logger from '../lib/logger';
-import { getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
+import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
 
 // ModelDeployment CRD configuration
 const MODEL_DEPLOYMENT_CRD = {
@@ -757,7 +757,7 @@ class KubernetesService {
             const annotations = item.metadata?.annotations;
             const displayName = getProviderDisplayName(name, annotations);
             const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
-            const requiresCRD = providerRequiresRuntimeCRD(name, item.spec?.capabilities?.requiresCRD, annotatedDisplayName);
+            const requiresCRD = providerRequiresRuntimeCRD(name, aggregateRequiresCRDFromCapabilities(item.spec?.capabilities), annotatedDisplayName);
             const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName, requiresCRD);
 
             return {
