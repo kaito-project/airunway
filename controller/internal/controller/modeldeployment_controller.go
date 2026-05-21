@@ -178,16 +178,14 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	// Step 2: Resolve the engine type for downstream use (CEL evaluation, validation).
-	// Use a local variable instead of mutating md.Spec to avoid any risk of
-	// corrupting the shared informer cache's backing data.
+	// Step 3: Resolve the engine type once for downstream use (validation, CEL
+	// evaluation, provider selection). We pass it through explicitly rather than
+	// mutating md.Spec to avoid any risk of corrupting the shared informer
+	// cache's backing data.
 	resolvedEngineType := md.ResolvedEngineType()
-	if md.Spec.Engine.Type == "" && resolvedEngineType != "" {
-		md.Spec.Engine.Type = resolvedEngineType
-	}
 
 	// Step 4: Validate the spec (uses resolved engine type)
-	if err := r.validateSpec(ctx, &md, providerConfigs); err != nil {
+	if err := r.validateSpec(ctx, &md, providerConfigs, resolvedEngineType); err != nil {
 		logger.Error(err, "Validation failed", "name", md.Name)
 		r.setCondition(&md, airunwayv1alpha1.ConditionTypeValidated, metav1.ConditionFalse, "ValidationFailed", err.Error())
 		md.Status.Phase = airunwayv1alpha1.DeploymentPhaseFailed
@@ -198,7 +196,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Step 5: Run provider selection if needed
 	if r.EnableProviderSelector {
-		if err := r.selectProvider(ctx, &md, providerConfigs); err != nil {
+		if err := r.selectProvider(ctx, &md, providerConfigs, resolvedEngineType); err != nil {
 			logger.Error(err, "Provider selection failed", "name", md.Name)
 			r.setCondition(&md, airunwayv1alpha1.ConditionTypeProviderSelected, metav1.ConditionFalse, "SelectionFailed", err.Error())
 			md.Status.Message = fmt.Sprintf("Provider selection failed: %s", err.Error())
@@ -277,7 +275,7 @@ func isNoMatchError(err error) bool {
 }
 
 // validateSpec performs validation on the ModelDeployment spec
-func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, providerConfigs []airunwayv1alpha1.InferenceProviderConfig) error {
+func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, providerConfigs []airunwayv1alpha1.InferenceProviderConfig, engineType airunwayv1alpha1.EngineType) error {
 	spec := &md.Spec
 
 	// Validate model.id is required for huggingface source
@@ -287,8 +285,6 @@ func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunw
 		}
 	}
 
-	// Resolve engine type (from spec or auto-selected in status)
-	engineType := md.ResolvedEngineType()
 	if engineType == "" {
 		return fmt.Errorf("engine.type must be specified or auto-selected from provider capabilities")
 	}
@@ -487,7 +483,7 @@ func (r *ModelDeploymentReconciler) selectEngine(ctx context.Context, md *airunw
 }
 
 // selectProvider runs the provider selection algorithm
-func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, providerConfigs []airunwayv1alpha1.InferenceProviderConfig) error {
+func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, providerConfigs []airunwayv1alpha1.InferenceProviderConfig, resolvedEngineType airunwayv1alpha1.EngineType) error {
 	logger := log.FromContext(ctx)
 
 	// Skip if provider is already selected (either in spec or status)
@@ -515,7 +511,7 @@ func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airu
 	}
 
 	// Run selection algorithm
-	selectedProvider, reason, err := r.runSelectionAlgorithm(md, readyProviders)
+	selectedProvider, reason, err := r.runSelectionAlgorithm(md, readyProviders, resolvedEngineType)
 	if err != nil {
 		return fmt.Errorf("provider selection failed: %w", err)
 	}
@@ -535,9 +531,8 @@ func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airu
 }
 
 // runSelectionAlgorithm implements the provider selection algorithm
-func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.ModelDeployment, providers []airunwayv1alpha1.InferenceProviderConfig) (string, string, error) {
+func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.ModelDeployment, providers []airunwayv1alpha1.InferenceProviderConfig, engineType airunwayv1alpha1.EngineType) (string, string, error) {
 	spec := &md.Spec
-	engineType := md.ResolvedEngineType()
 
 	// Determine GPU requirements
 	hasGPU := false
@@ -548,10 +543,23 @@ func (r *ModelDeploymentReconciler) runSelectionAlgorithm(md *airunwayv1alpha1.M
 		hasGPU = true
 	}
 
-	// Convert spec to map for CEL evaluation
+	// Convert spec to map for CEL evaluation.
 	specMap, err := specToMap(spec)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to convert spec for CEL evaluation: %w", err)
+	}
+
+	// Overlay the resolved engine type so CEL rules like `spec.engine.type == 'vllm'`
+	// see the auto-selected engine even though md.Spec was never mutated.
+	if engineType != "" {
+		engineMap, _ := specMap["engine"].(map[string]any)
+		if engineMap == nil {
+			engineMap = map[string]any{}
+			specMap["engine"] = engineMap
+		}
+		if t, _ := engineMap["type"].(string); t == "" {
+			engineMap["type"] = string(engineType)
+		}
 	}
 
 	// Build candidate list with scores
