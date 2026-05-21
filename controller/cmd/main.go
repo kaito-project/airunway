@@ -365,7 +365,7 @@ func main() {
 			os.Exit(1)
 		}
 		if err := controller.MigrateLegacyProviderConfigs(context.Background(), directClient); err != nil {
-			setupLog.Error(err, "failed to migrate legacy InferenceProviderConfig objects")
+			setupLog.Error(err, "failed to migrate legacy InferenceProviderConfig objects; controller will retry on pod restart")
 			os.Exit(1)
 		}
 	}

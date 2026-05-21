@@ -19,12 +19,14 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -53,15 +55,52 @@ func MigrateLegacyProviderConfigs(ctx context.Context, c client.Client) error {
 		Kind:    gvk.Kind + "List",
 	})
 
-	if err := c.List(ctx, list); err != nil {
-		// CRD not installed yet — nothing to migrate. Any other error
-		// (RBAC forbidden, transient API errors, etc.) must propagate so
-		// startup fails loudly rather than silently skipping the migration.
-		if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
-			logger.Info("InferenceProviderConfig CRD not present; skipping migration")
-			return nil
+	// Retry transient API server errors with a bounded exponential backoff so a
+	// brief apiserver hiccup at pod start doesn't crashloop the controller.
+	// Steps: ~1s, 2s, 4s, 8s, 16s (capped) ≈ 31s total.
+	//
+	// Terminal conditions short-circuit the loop:
+	//   * NoMatch / NotFound — CRD not installed; benign skip.
+	//   * Forbidden / Unauthorized — configuration error; fail fast.
+	// Anything else is treated as transient.
+	backoff := wait.Backoff{
+		Duration: time.Second,
+		Factor:   2.0,
+		Jitter:   0.1,
+		Steps:    5,
+		Cap:      16 * time.Second,
+	}
+	var (
+		crdAbsent bool
+		lastErr   error
+	)
+	waitErr := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
+		err := c.List(ctx, list)
+		switch {
+		case err == nil:
+			return true, nil
+		case meta.IsNoMatchError(err) || apierrors.IsNotFound(err):
+			crdAbsent = true
+			return true, nil
+		case apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err):
+			lastErr = err
+			return false, err
+		default:
+			lastErr = err
+			logger.Info("transient error listing InferenceProviderConfig; will retry", "error", err.Error())
+			return false, nil
 		}
-		return fmt.Errorf("failed to list InferenceProviderConfig for migration: %w", err)
+	})
+	if crdAbsent {
+		logger.Info("InferenceProviderConfig CRD not present; skipping migration")
+		return nil
+	}
+	if waitErr != nil {
+		// Prefer the underlying API error over the generic timeout wrapper.
+		if lastErr == nil {
+			lastErr = waitErr
+		}
+		return fmt.Errorf("failed to list InferenceProviderConfig for migration after retries: %w", lastErr)
 	}
 
 	for _, item := range list.Items {
