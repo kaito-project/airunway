@@ -305,7 +305,15 @@ func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunw
 		// to consult. With no InferenceProviderConfigs registered we cannot
 		// tell whether the engine supports CPU, and rejecting here would
 		// wrongly reject CPU-capable engines like llamacpp.
-		if len(providerConfigs) > 0 && !engineSupportsCPU(providerConfigs, engineType) {
+		//
+		// When spec.provider.name is set, scope the CPU check to that
+		// provider — a different provider advertising CPU support does not
+		// help if the pinned provider cannot serve CPU for this engine.
+		providerName := ""
+		if spec.Provider != nil {
+			providerName = spec.Provider.Name
+		}
+		if len(providerConfigs) > 0 && !engineSupportsCPU(providerConfigs, engineType, providerName) {
 			return fmt.Errorf("%s engine requires GPU (set resources.gpu.count > 0)", engineType)
 		}
 	}
@@ -360,11 +368,17 @@ func (r *ModelDeploymentReconciler) validateSpec(ctx context.Context, md *airunw
 	return nil
 }
 
-// engineSupportsCPU checks if any provider in the given list declares CPU support for the engine type.
+// engineSupportsCPU checks if a provider in the given list declares CPU support for the engine type.
+// When providerName is non-empty, only the config with that name is consulted; this avoids passing
+// validation when spec.provider.name pins a provider that does not advertise CPU support, even if
+// some other registered provider does. When providerName is empty, any provider may satisfy the check.
 // This uses declared capabilities regardless of provider readiness, because validation determines
 // whether a spec is intrinsically valid — not whether a provider is currently available to serve it.
-func engineSupportsCPU(providerConfigs []airunwayv1alpha1.InferenceProviderConfig, engineType airunwayv1alpha1.EngineType) bool {
+func engineSupportsCPU(providerConfigs []airunwayv1alpha1.InferenceProviderConfig, engineType airunwayv1alpha1.EngineType, providerName string) bool {
 	for _, pc := range providerConfigs {
+		if providerName != "" && pc.Name != providerName {
+			continue
+		}
 		if pc.Spec.Capabilities == nil {
 			continue
 		}
