@@ -685,7 +685,7 @@ type mockProviderResolver struct {
 	caps map[string]*airunwayv1alpha1.GatewayCapabilities
 }
 
-func (m *mockProviderResolver) GetGatewayCapabilities(_ context.Context, providerName string) *airunwayv1alpha1.GatewayCapabilities {
+func (m *mockProviderResolver) GetGatewayCapabilities(_ context.Context, providerName string, _ airunwayv1alpha1.EngineType) *airunwayv1alpha1.GatewayCapabilities {
 	if m.caps == nil {
 		return nil
 	}

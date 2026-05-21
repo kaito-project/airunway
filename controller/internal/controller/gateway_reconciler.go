@@ -634,7 +634,7 @@ func (r *ModelDeploymentReconciler) resolveProviderGatewayCapabilities(ctx conte
 		return nil, fmt.Errorf("provider name not specified in ModelDeployment %s/%s", md.Namespace, md.Name)
 	}
 
-	gatewayCapabilities := r.ProviderResolver.GetGatewayCapabilities(ctx, providerName)
+	gatewayCapabilities := r.ProviderResolver.GetGatewayCapabilities(ctx, providerName, md.ResolvedEngineType())
 	if gatewayCapabilities == nil {
 		return nil, fmt.Errorf("failed to resolve provider capabilities for ModelDeployment %s/%s", md.Namespace, md.Name)
 	}

@@ -23,6 +23,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -88,6 +89,8 @@ func MigrateLegacyProviderConfigs(ctx context.Context, c client.Client) error {
 		oldServingModes, _, _ := unstructured.NestedStringSlice(capabilities, "servingModes")
 		oldGPUSupport, _, _ := unstructured.NestedBool(capabilities, "gpuSupport")
 		oldCPUSupport, _, _ := unstructured.NestedBool(capabilities, "cpuSupport")
+		oldRequiresCRD, hasRequiresCRD, _ := unstructured.NestedBool(capabilities, "requiresCRD")
+		oldGateway, hasGateway, _ := unstructured.NestedMap(capabilities, "gateway")
 
 		// Convert each string engine to the new EngineCapability format
 		newEngines := make([]interface{}, 0, len(engines))
@@ -109,16 +112,28 @@ func MigrateLegacyProviderConfigs(ctx context.Context, c client.Client) error {
 				}
 				engineCap["servingModes"] = modes
 			}
+			if hasRequiresCRD {
+				engineCap["requiresCRD"] = oldRequiresCRD
+			}
+			if hasGateway && len(oldGateway) > 0 {
+				// Deep-copy so each engine gets its own map.
+				engineCap["gateway"] = runtime.DeepCopyJSONValue(oldGateway)
+			}
 			newEngines = append(newEngines, engineCap)
 		}
 
-		// Build the new capabilities map (only engines, no top-level flat fields)
-		newCapabilities := map[string]interface{}{
-			"engines": newEngines,
-		}
+		// Replace engines with the new per-engine format and remove the legacy
+		// flat keys. Mutate the existing capabilities map in place so that any
+		// other top-level keys (present today or added in the future) are
+		// preserved rather than silently dropped.
+		capabilities["engines"] = newEngines
+		delete(capabilities, "servingModes")
+		delete(capabilities, "gpuSupport")
+		delete(capabilities, "cpuSupport")
+		delete(capabilities, "requiresCRD")
+		delete(capabilities, "gateway")
 
-		// Overwrite the capabilities field
-		if err := unstructured.SetNestedField(item.Object, newCapabilities, "spec", "capabilities"); err != nil {
+		if err := unstructured.SetNestedField(item.Object, capabilities, "spec", "capabilities"); err != nil {
 			return fmt.Errorf("failed to set migrated capabilities on %s: %w", name, err)
 		}
 
