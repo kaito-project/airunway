@@ -309,6 +309,37 @@ func TestValidateSpec(t *testing.T) {
 			providerConfigs: nil,
 		},
 		{
+			name: "invalid: pinned provider lacks CPU support even when another provider has it",
+			md: airunwayv1alpha1.ModelDeployment{
+				Spec: airunwayv1alpha1.ModelDeploymentSpec{
+					Model:    airunwayv1alpha1.ModelSpec{ID: "Qwen/Qwen3-0.6B", Source: airunwayv1alpha1.ModelSourceHuggingFace},
+					Engine:   airunwayv1alpha1.EngineSpec{Type: airunwayv1alpha1.EngineTypeVLLM},
+					Provider: &airunwayv1alpha1.ProviderSpec{Name: "dynamo"},
+				},
+			},
+			providerConfigs: []airunwayv1alpha1.InferenceProviderConfig{
+				dynamoProvider(), // vllm GPU-only
+				{
+					// Hypothetical provider advertising CPU vLLM. It should not
+					// satisfy the GPU requirement for a deployment pinned to dynamo.
+					ObjectMeta: metav1.ObjectMeta{Name: "cpu-vllm-prov"},
+					Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
+						Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+							Engines: []airunwayv1alpha1.EngineCapability{
+								{
+									Name:         airunwayv1alpha1.EngineTypeVLLM,
+									CPUSupport:   true,
+									ServingModes: []airunwayv1alpha1.ServingMode{airunwayv1alpha1.ServingModeAggregated},
+								},
+							},
+						},
+					},
+					Status: airunwayv1alpha1.InferenceProviderConfigStatus{Ready: true},
+				},
+			},
+			wantErr: "vllm engine requires GPU",
+		},
+		{
 			name: "valid: vllm without GPU and empty provider configs — skips GPU check",
 			md: airunwayv1alpha1.ModelDeployment{
 				Spec: airunwayv1alpha1.ModelDeploymentSpec{
