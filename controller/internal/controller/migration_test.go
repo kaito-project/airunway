@@ -524,6 +524,14 @@ func TestMigrateLegacyProviderConfigs_NoUpdateWhenClean(t *testing.T) {
 			ul.Items = []unstructured.Unstructured{*clean}
 			return nil
 		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			clean.DeepCopyInto(u)
+			return nil
+		},
 		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
 			t.Errorf("unexpected Update call on already-clean object %q", obj.GetName())
 			return nil
@@ -640,6 +648,14 @@ func TestMigrateLegacyProviderConfigs_UpdateErrorPropagates(t *testing.T) {
 			ul.Items = []unstructured.Unstructured{*legacy}
 			return nil
 		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			legacy.DeepCopyInto(u)
+			return nil
+		},
 		Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
 			return apierrors.NewInternalError(errors.New("boom"))
 		},
@@ -686,6 +702,14 @@ func TestMigrateLegacyProviderConfigs_UpdateConflictTreatedAsSuccess(t *testing.
 			ul.Items = []unstructured.Unstructured{*legacy}
 			return nil
 		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			legacy.DeepCopyInto(u)
+			return nil
+		},
 		Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
 			updateCalls++
 			return apierrors.NewConflict(schema.GroupResource{Group: "airunway.ai", Resource: "inferenceproviderconfigs"}, "kaito", errors.New("conflict"))
@@ -697,6 +721,115 @@ func TestMigrateLegacyProviderConfigs_UpdateConflictTreatedAsSuccess(t *testing.
 	}
 	if updateCalls == 0 {
 		t.Errorf("expected at least one Update attempt, got 0")
+	}
+}
+
+// TestMigrateLegacyProviderConfigs_RetriesAfterConflict verifies that a
+// transient 409 Conflict on Update is recovered by re-Getting the object and
+// re-applying the migration against the fresh resourceVersion. Before the
+// fix, the retry closure re-submitted the same stale object captured by
+// List, so every retry deterministically conflicted again and the loop
+// exhausted into the soft-success path even when the conflict was benign.
+func TestMigrateLegacyProviderConfigs_RetriesAfterConflict(t *testing.T) {
+	legacy := &unstructured.Unstructured{}
+	legacy.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	legacy.SetName("kaito")
+	legacy.SetResourceVersion("1")
+	if err := unstructured.SetNestedField(legacy.Object, map[string]interface{}{
+		"engines":    []interface{}{"vllm"},
+		"gpuSupport": true,
+	}, "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set capabilities: %v", err)
+	}
+
+	base := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).Build()
+
+	var (
+		getCalls    int
+		updateCalls int
+		// stored simulates the apiserver's view of the object — its
+		// resourceVersion changes between Get calls to simulate a concurrent
+		// writer bumping it.
+		stored = legacy.DeepCopy()
+	)
+
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			ul, ok := list.(*unstructured.UnstructuredList)
+			if !ok {
+				return fmt.Errorf("unexpected list type %T", list)
+			}
+			ul.Items = []unstructured.Unstructured{*stored}
+			return nil
+		},
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			getCalls++
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("unexpected get target type %T", obj)
+			}
+			// Simulate a concurrent writer bumping resourceVersion before our
+			// second Get returns — that's the signal a correctly-implemented
+			// retry must pick up.
+			if getCalls == 2 {
+				stored.SetResourceVersion("2")
+			}
+			stored.DeepCopyInto(u)
+			return nil
+		},
+		Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+			updateCalls++
+			u := obj.(*unstructured.Unstructured)
+			// First Update: reject with 409 — simulating a stale resourceVersion.
+			if updateCalls == 1 {
+				return apierrors.NewConflict(schema.GroupResource{Group: "airunway.ai", Resource: "inferenceproviderconfigs"}, u.GetName(), errors.New("resourceVersion mismatch"))
+			}
+			// Second Update: must carry the new resourceVersion. If the retry
+			// closure forgot to re-Get, we'd still see "1" here.
+			if rv := u.GetResourceVersion(); rv != "2" {
+				return fmt.Errorf("expected retry to use refreshed resourceVersion=2, got %q", rv)
+			}
+			// Accept the write: persist into our simulated apiserver state.
+			u.DeepCopyInto(stored)
+			return nil
+		},
+	})
+
+	if err := MigrateLegacyProviderConfigs(context.Background(), c); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+	if updateCalls != 2 {
+		t.Errorf("expected exactly 2 Update attempts (1 conflict + 1 success), got %d", updateCalls)
+	}
+	if getCalls < 2 {
+		t.Errorf("expected at least 2 Get attempts (initial + post-conflict re-read), got %d", getCalls)
+	}
+
+	// Verify the final stored object reflects the new per-engine schema.
+	engines, found, err := unstructured.NestedSlice(stored.Object, "spec", "capabilities", "engines")
+	if err != nil || !found {
+		t.Fatalf("stored object missing engines after retry: err=%v found=%v", err, found)
+	}
+	if len(engines) != 1 {
+		t.Fatalf("expected 1 migrated engine, got %d", len(engines))
+	}
+	eng0, ok := engines[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected engine[0] to be a map post-migration, got %T", engines[0])
+	}
+	if eng0["name"] != "vllm" {
+		t.Errorf("expected engine[0].name=vllm, got %v", eng0["name"])
+	}
+	if eng0["gpuSupport"] != true {
+		t.Errorf("expected hoisted gpuSupport=true on engine[0], got %v", eng0["gpuSupport"])
+	}
+	caps, _, _ := unstructured.NestedMap(stored.Object, "spec", "capabilities")
+	if _, exists := caps["gpuSupport"]; exists {
+		t.Error("expected flat gpuSupport to be stripped from capabilities after retried migration")
 	}
 }
 
