@@ -3,7 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import logger from '../lib/logger';
-import { getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
+import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
 
 interface ProviderHelmChartDetails {
   name: string;
@@ -51,7 +51,7 @@ function extractProviderDetails(config: any) {
     name: displayName,
     description: installation.description || '',
     defaultNamespace: installation.defaultNamespace || 'default',
-    requiresCRD: providerRequiresRuntimeCRD(name, capabilities.requiresCRD, annotatedDisplayName),
+    requiresCRD: providerRequiresRuntimeCRD(name, aggregateRequiresCRDFromCapabilities(capabilities), annotatedDisplayName),
     crdConfig: {
       apiGroup: capabilities.engines?.length ? '' : '',
     },

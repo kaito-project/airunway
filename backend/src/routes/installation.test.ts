@@ -179,9 +179,42 @@ describe('Installation Provider Routes', () => {
       spec: {
         ...config.spec,
         capabilities: {
-          ...config.spec.capabilities,
-          requiresCRD: true,
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: true },
+          ],
         },
+      },
+    };
+  }
+
+  function createCustomNoCrdProviderConfigWithPerEngineRequiresCrd() {
+    // Mirrors the post-migration shape: legacy top-level requiresCRD is gone,
+    // each engine carries its own requiresCRD flag. The provider id and
+    // display name are non-canonical, so the canonical fallback in
+    // providerRequiresRuntimeCRD cannot mask a buggy aggregation.
+    const baseInstallation = JSON.parse(mockInferenceProviderConfig.metadata.annotations['airunway.ai/installation']);
+    return {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'mycustom-runtime',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.io/provider-name': 'My Custom Runtime',
+          'airunway.ai/installation': JSON.stringify(baseInstallation),
+        },
+      },
+      spec: {
+        capabilities: {
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+            { name: 'sglang', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+          ],
+        },
+      },
+      status: {
+        ready: true,
+        version: '0.1.0',
       },
     };
   }
@@ -363,6 +396,27 @@ describe('Installation Provider Routes', () => {
       expect(data.installable).toBe(true);
       expect(data.helmCommands.length).toBeGreaterThan(0);
       expect(data.message).toBe('LLM-D is installed and running');
+    });
+
+    test('honors per-engine requiresCRD: false on the migrated schema for custom providers', async () => {
+      restores.push(
+        mockServiceMethod(
+          kubernetesService,
+          'getInferenceProviderConfig',
+          async () => createCustomNoCrdProviderConfigWithPerEngineRequiresCrd(),
+        ),
+      );
+
+      const res = await app.request('/api/installation/providers/mycustom-runtime/status');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.providerId).toBe('mycustom-runtime');
+      expect(data.providerName).toBe('My Custom Runtime');
+      expect(data.requiresCRD).toBe(false);
+      expect(data.installable).toBe(false);
+      expect(data.helmCommands).toHaveLength(0);
+      expect(data.message).toBe('Runtime is ready to use.');
     });
 
     test('returns 404 for unknown provider', async () => {
