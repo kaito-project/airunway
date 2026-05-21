@@ -190,7 +190,9 @@ func (v *ModelDeploymentCustomValidator) ValidateCreate(ctx context.Context, obj
 	}
 
 	// Validate the spec
-	allErrs = append(allErrs, v.validateSpec(ctx, obj)...)
+	specWarnings, specErrs := v.validateSpec(ctx, obj)
+	warnings = append(warnings, specWarnings...)
+	allErrs = append(allErrs, specErrs...)
 
 	// Check for warnings
 	warnings = append(warnings, v.checkWarnings(obj)...)
@@ -209,7 +211,9 @@ func (v *ModelDeploymentCustomValidator) ValidateUpdate(ctx context.Context, old
 	var allErrs field.ErrorList
 
 	// Validate the spec
-	allErrs = append(allErrs, v.validateSpec(ctx, newObj)...)
+	specWarnings, specErrs := v.validateSpec(ctx, newObj)
+	warnings = append(warnings, specWarnings...)
+	allErrs = append(allErrs, specErrs...)
 
 	// Validate immutable fields (identity fields that trigger delete+recreate)
 	allErrs = append(allErrs, v.validateImmutableFields(oldObj, newObj)...)
@@ -232,7 +236,8 @@ func (v *ModelDeploymentCustomValidator) ValidateDelete(_ context.Context, obj *
 }
 
 // validateSpec validates the ModelDeployment spec
-func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *airunwayv1alpha1.ModelDeployment) field.ErrorList {
+func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *airunwayv1alpha1.ModelDeployment) (admission.Warnings, field.ErrorList) {
+	var warnings admission.Warnings
 	var allErrs field.ErrorList
 	spec := &obj.Spec
 	specPath := field.NewPath("spec")
@@ -287,6 +292,10 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 				"provider", spec.Provider.Name,
 				"error", err.Error(),
 			)
+			warnings = append(warnings, fmt.Sprintf(
+				"could not verify provider %q compatibility at admission time (%v); the controller will re-validate during reconciliation",
+				spec.Provider.Name, err,
+			))
 		case providerConfig.Spec.Capabilities != nil:
 			gpuCount := int32(0)
 			if spec.Resources != nil && spec.Resources.GPU != nil {
@@ -363,7 +372,7 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 	// Enforce resource ceilings to prevent runaway resource requests at admission time.
 	allErrs = append(allErrs, validateResourceCeilings(spec, specPath)...)
 
-	return allErrs
+	return warnings, allErrs
 }
 
 // validateResourceCeilings enforces the Max* limits on resource and scaling fields.

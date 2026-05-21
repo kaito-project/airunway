@@ -296,7 +296,7 @@ func TestResourceCeilings_GPUCount(t *testing.T) {
 			},
 		},
 	}
-	errs := v.validateSpec(context.Background(), md)
+	_, errs := v.validateSpec(context.Background(), md)
 	found := false
 	for _, e := range errs {
 		if e.Field == "spec.resources.gpu.count" {
@@ -319,7 +319,7 @@ func TestResourceCeilings_GPUCountValid(t *testing.T) {
 			},
 		},
 	}
-	errs := v.validateSpec(context.Background(), md)
+	_, errs := v.validateSpec(context.Background(), md)
 	for _, e := range errs {
 		if e.Field == "spec.resources.gpu.count" {
 			t.Fatalf("unexpected GPU count error: %v", e)
@@ -394,7 +394,7 @@ func TestResourceCeilings_AggregatedReplicas(t *testing.T) {
 			Scaling: &airunwayv1alpha1.ScalingSpec{Replicas: MaxReplicas + 1},
 		},
 	}
-	errs := v.validateSpec(context.Background(), md)
+	_, errs := v.validateSpec(context.Background(), md)
 	found := false
 	for _, e := range errs {
 		if e.Field == "spec.scaling.replicas" {
@@ -416,7 +416,7 @@ func TestResourceCeilings_PrefillMemory(t *testing.T) {
 			},
 		},
 	}
-	errs := v.validateSpec(context.Background(), md)
+	_, errs := v.validateSpec(context.Background(), md)
 	found := false
 	for _, e := range errs {
 		if e.Field == "spec.scaling.prefill.memory" {
@@ -438,7 +438,7 @@ func TestResourceCeilings_DecodeMemory(t *testing.T) {
 			},
 		},
 	}
-	errs := v.validateSpec(context.Background(), md)
+	_, errs := v.validateSpec(context.Background(), md)
 	found := false
 	for _, e := range errs {
 		if e.Field == "spec.scaling.decode.memory" {
