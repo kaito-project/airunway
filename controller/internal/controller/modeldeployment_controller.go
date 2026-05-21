@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+
 	"strings"
 	"sync"
 
@@ -458,24 +458,11 @@ func (r *ModelDeploymentReconciler) selectEngine(ctx context.Context, md *airunw
 		}
 	}
 
-	// Fallback: pick any available engine deterministically (shouldn't happen if preference list is complete)
-	sortedEngines := make([]airunwayv1alpha1.EngineType, 0, len(availableEngines))
-	for engine := range availableEngines {
-		sortedEngines = append(sortedEngines, engine)
-	}
-	sort.Slice(sortedEngines, func(i, j int) bool { return sortedEngines[i] < sortedEngines[j] })
-	for _, engine := range sortedEngines {
-		providerName := availableEngines[engine]
-		md.Status.Engine = &airunwayv1alpha1.EngineStatus{
-			Type:           engine,
-			SelectedReason: fmt.Sprintf("auto-selected from provider %s capabilities", providerName),
-		}
-		// EngineSelected=True is set in Reconcile after provider-compatibility
-		// validation passes; see comment on the explicit-selection branch above.
-		return nil
-	}
-
-	return fmt.Errorf("no compatible engine found from available providers")
+	// Unreachable in practice: enginePreference enumerates every EngineType
+	// constant and availableEngines is keyed by that same set, so the loop
+	// above always returns when len(availableEngines) > 0. Surface a clear
+	// error if a future EngineType is added without updating enginePreference.
+	return fmt.Errorf("no engine in preference list matches available engines %v (enginePreference may be missing a newly added EngineType)", availableEngines)
 }
 
 // selectProvider runs the provider selection algorithm
