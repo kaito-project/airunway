@@ -115,6 +115,93 @@ func TestMigrateLegacyProviderConfigs_FlatToNested(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacyProviderConfigs_HoistsRequiresCRDAndGateway verifies the
+// fix for the review feedback on PR #214: the migration must hoist legacy
+// top-level requiresCRD and gateway into every per-engine EngineCapability
+// (since those fields have since moved into EngineCapability), and must not
+// silently drop them.
+func TestMigrateLegacyProviderConfigs_HoistsRequiresCRDAndGateway(t *testing.T) {
+	legacy := &unstructured.Unstructured{}
+	legacy.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "airunway.ai",
+		Version: "v1alpha1",
+		Kind:    "InferenceProviderConfig",
+	})
+	legacy.SetName("dynamo")
+	if err := unstructured.SetNestedField(legacy.Object, map[string]interface{}{
+		"engines":      []interface{}{"vllm", "llamacpp"},
+		"servingModes": []interface{}{"aggregated"},
+		"gpuSupport":   true,
+		"requiresCRD":  true,
+		"gateway": map[string]interface{}{
+			"inferencePoolNamePattern": "{name}-pool",
+			"inferencePoolNamespace":   "{namespace}",
+		},
+	}, "spec", "capabilities"); err != nil {
+		t.Fatalf("failed to set capabilities: %v", err)
+	}
+
+	c := fake.NewClientBuilder().WithScheme(newUnstructuredScheme()).WithObjects(legacy).Build()
+
+	if err := MigrateLegacyProviderConfigs(context.Background(), c); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+
+	result := &unstructured.Unstructured{}
+	result.SetGroupVersionKind(legacy.GroupVersionKind())
+	if err := c.Get(context.Background(), client_key("dynamo"), result); err != nil {
+		t.Fatalf("failed to get migrated object: %v", err)
+	}
+
+	engines, found, err := unstructured.NestedSlice(result.Object, "spec", "capabilities", "engines")
+	if err != nil || !found {
+		t.Fatalf("migrated object missing engines: err=%v found=%v", err, found)
+	}
+	if len(engines) != 2 {
+		t.Fatalf("expected 2 engines, got %d", len(engines))
+	}
+
+	// Every engine must carry requiresCRD=true and the full gateway block.
+	for i, e := range engines {
+		eng, ok := e.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected engine[%d] to be a map, got %T", i, e)
+		}
+		if eng["requiresCRD"] != true {
+			t.Errorf("engine[%d] (%v): expected requiresCRD=true, got %v", i, eng["name"], eng["requiresCRD"])
+		}
+		gw, ok := eng["gateway"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("engine[%d] (%v): expected gateway map, got %T", i, eng["name"], eng["gateway"])
+		}
+		if gw["inferencePoolNamePattern"] != "{name}-pool" {
+			t.Errorf("engine[%d] (%v): expected inferencePoolNamePattern=%q, got %v",
+				i, eng["name"], "{name}-pool", gw["inferencePoolNamePattern"])
+		}
+		if gw["inferencePoolNamespace"] != "{namespace}" {
+			t.Errorf("engine[%d] (%v): expected inferencePoolNamespace=%q, got %v",
+				i, eng["name"], "{namespace}", gw["inferencePoolNamespace"])
+		}
+	}
+
+	// The two engines must own distinct gateway maps (deep-copy), otherwise
+	// mutating one would silently affect the other.
+	eng0Gw := engines[0].(map[string]interface{})["gateway"].(map[string]interface{})
+	eng1Gw := engines[1].(map[string]interface{})["gateway"].(map[string]interface{})
+	eng0Gw["inferencePoolNamePattern"] = "mutated"
+	if eng1Gw["inferencePoolNamePattern"] == "mutated" {
+		t.Error("engines share the same gateway map; expected deep-copied per-engine maps")
+	}
+
+	// Legacy top-level keys must be gone.
+	caps, _, _ := unstructured.NestedMap(result.Object, "spec", "capabilities")
+	for _, k := range []string{"servingModes", "gpuSupport", "cpuSupport", "requiresCRD", "gateway"} {
+		if _, exists := caps[k]; exists {
+			t.Errorf("expected top-level %q to be removed from capabilities after migration", k)
+		}
+	}
+}
+
 func TestMigrateLegacyProviderConfigs_AlreadyMigrated(t *testing.T) {
 	// Create an InferenceProviderConfig already in the new format
 	obj := &unstructured.Unstructured{}

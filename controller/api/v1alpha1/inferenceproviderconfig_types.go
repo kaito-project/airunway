@@ -46,15 +46,6 @@ type EngineCapability struct {
 	// cpuSupport indicates if this engine supports CPU-only inference
 	// +optional
 	CPUSupport bool `json:"cpuSupport,omitempty"`
-}
-
-// ProviderCapabilities defines what a provider supports
-type ProviderCapabilities struct {
-	// engines is the list of supported inference engines with per-engine capabilities
-	// +listType=map
-	// +listMapKey=name
-	// +optional
-	Engines []EngineCapability `json:"engines,omitempty"`
 
 	// requiresCRD indicates if this provider needs an upstream CRD/operator installation.
 	// When omitted, clients should treat this as true for backward compatibility.
@@ -64,6 +55,15 @@ type ProviderCapabilities struct {
 	// gateway defines the provider's gateway-related capabilities.
 	// +optional
 	Gateway *GatewayCapabilities `json:"gateway,omitempty"`
+}
+
+// ProviderCapabilities defines what a provider supports
+type ProviderCapabilities struct {
+	// engines is the list of supported inference engines with per-engine capabilities
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Engines []EngineCapability `json:"engines,omitempty"`
 }
 
 // GatewayCapabilities defines gateway-related capabilities for a specific provider.
