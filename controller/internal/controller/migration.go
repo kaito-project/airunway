@@ -239,9 +239,7 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 			return false, "", nil
 		}
 
-		oldServingModes, oldGPUSupport, oldCPUSupport,
-			oldRequiresCRD, hasRequiresCRD,
-			oldGateway, hasGateway := readLegacyFlatValues(capabilities)
+		legacy := readLegacyFlatValues(capabilities)
 
 		for i, e := range engines {
 			eng, ok := e.(map[string]interface{})
@@ -249,24 +247,24 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 				continue
 			}
 			if _, set := eng["gpuSupport"]; !set {
-				eng["gpuSupport"] = oldGPUSupport
+				eng["gpuSupport"] = legacy.gpuSupport
 			}
 			if _, set := eng["cpuSupport"]; !set {
-				eng["cpuSupport"] = oldCPUSupport
+				eng["cpuSupport"] = legacy.cpuSupport
 			}
-			if _, set := eng["servingModes"]; !set && len(oldServingModes) > 0 {
-				modes := make([]interface{}, len(oldServingModes))
-				for j, m := range oldServingModes {
+			if _, set := eng["servingModes"]; !set && len(legacy.servingModes) > 0 {
+				modes := make([]interface{}, len(legacy.servingModes))
+				for j, m := range legacy.servingModes {
 					modes[j] = m
 				}
 				eng["servingModes"] = modes
 			}
-			if _, set := eng["requiresCRD"]; !set && hasRequiresCRD {
-				eng["requiresCRD"] = oldRequiresCRD
+			if _, set := eng["requiresCRD"]; !set && legacy.hasRequiresCRD {
+				eng["requiresCRD"] = legacy.requiresCRD
 			}
-			if _, set := eng["gateway"]; !set && hasGateway && len(oldGateway) > 0 {
+			if _, set := eng["gateway"]; !set && legacy.hasGateway && len(legacy.gateway) > 0 {
 				// Deep-copy so each engine owns its own map.
-				eng["gateway"] = runtime.DeepCopyJSONValue(oldGateway)
+				eng["gateway"] = runtime.DeepCopyJSONValue(legacy.gateway)
 			}
 			engines[i] = eng
 		}
@@ -284,9 +282,7 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 	// Branch 3: string-form engines — the original legacy schema. Convert each
 	// string engine into an EngineCapability object using the flat top-level
 	// values, then strip the legacy keys.
-	oldServingModes, oldGPUSupport, oldCPUSupport,
-		oldRequiresCRD, hasRequiresCRD,
-		oldGateway, hasGateway := readLegacyFlatValues(capabilities)
+	legacy := readLegacyFlatValues(capabilities)
 
 	newEngines := make([]interface{}, 0, len(engines))
 	for _, e := range engines {
@@ -297,22 +293,22 @@ func applyMigration(obj *unstructured.Unstructured, logger logr.Logger) (bool, s
 
 		engineCap := map[string]interface{}{
 			"name":       engineName,
-			"gpuSupport": oldGPUSupport,
-			"cpuSupport": oldCPUSupport,
+			"gpuSupport": legacy.gpuSupport,
+			"cpuSupport": legacy.cpuSupport,
 		}
-		if len(oldServingModes) > 0 {
-			modes := make([]interface{}, len(oldServingModes))
-			for i, m := range oldServingModes {
+		if len(legacy.servingModes) > 0 {
+			modes := make([]interface{}, len(legacy.servingModes))
+			for i, m := range legacy.servingModes {
 				modes[i] = m
 			}
 			engineCap["servingModes"] = modes
 		}
-		if hasRequiresCRD {
-			engineCap["requiresCRD"] = oldRequiresCRD
+		if legacy.hasRequiresCRD {
+			engineCap["requiresCRD"] = legacy.requiresCRD
 		}
-		if hasGateway && len(oldGateway) > 0 {
+		if legacy.hasGateway && len(legacy.gateway) > 0 {
 			// Deep-copy so each engine gets its own map.
-			engineCap["gateway"] = runtime.DeepCopyJSONValue(oldGateway)
+			engineCap["gateway"] = runtime.DeepCopyJSONValue(legacy.gateway)
 		}
 		newEngines = append(newEngines, engineCap)
 	}
@@ -341,21 +337,30 @@ func hasAnyLegacyFlatKey(caps map[string]interface{}) bool {
 	return false
 }
 
+// legacyFlatValues bundles the legacy top-level capability fields read from a
+// capabilities map. The two `has*` flags distinguish "absent" from "present and
+// false" for optional bool/map fields.
+type legacyFlatValues struct {
+	servingModes   []string
+	gpuSupport     bool
+	cpuSupport     bool
+	requiresCRD    bool
+	hasRequiresCRD bool
+	gateway        map[string]interface{}
+	hasGateway     bool
+}
+
 // readLegacyFlatValues extracts the legacy top-level capability fields from a
-// capabilities map. Returned as named values so both the string-engine
-// migration branch and the partial-migration hoist branch can reuse it.
-func readLegacyFlatValues(caps map[string]interface{}) (
-	servingModes []string,
-	gpuSupport, cpuSupport bool,
-	requiresCRD bool, hasRequiresCRD bool,
-	gateway map[string]interface{}, hasGateway bool,
-) {
-	servingModes, _, _ = unstructured.NestedStringSlice(caps, "servingModes")
-	gpuSupport, _, _ = unstructured.NestedBool(caps, "gpuSupport")
-	cpuSupport, _, _ = unstructured.NestedBool(caps, "cpuSupport")
-	requiresCRD, hasRequiresCRD, _ = unstructured.NestedBool(caps, "requiresCRD")
-	gateway, hasGateway, _ = unstructured.NestedMap(caps, "gateway")
-	return
+// capabilities map. Both the string-engine migration branch and the
+// partial-migration hoist branch reuse it.
+func readLegacyFlatValues(caps map[string]interface{}) legacyFlatValues {
+	var v legacyFlatValues
+	v.servingModes, _, _ = unstructured.NestedStringSlice(caps, "servingModes")
+	v.gpuSupport, _, _ = unstructured.NestedBool(caps, "gpuSupport")
+	v.cpuSupport, _, _ = unstructured.NestedBool(caps, "cpuSupport")
+	v.requiresCRD, v.hasRequiresCRD, _ = unstructured.NestedBool(caps, "requiresCRD")
+	v.gateway, v.hasGateway, _ = unstructured.NestedMap(caps, "gateway")
+	return v
 }
 
 // LegacyProviderConfigMigrator runs MigrateLegacyProviderConfigs as a
