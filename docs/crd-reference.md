@@ -106,14 +106,20 @@ spec:
         gpuSupport: true
         requiresCRD: true                            # Optional; nil is treated as true for backward compatibility
         gateway:                                     # Optional: per-engine gateway capabilities
-          inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pool naming pattern ({name}, {namespace} accepted)
-          inferencePoolNamespace: "dynamo-system"             # Namespace for provider's InferencePool
+          inferencePoolNamePattern: "{name}-pool"    # Pool naming pattern ({name}, {namespace} accepted)
+          inferencePoolNamespace: "{namespace}"      # Namespace for provider's InferencePool
       - name: sglang
         servingModes: [aggregated, disaggregated]
         gpuSupport: true
+        gateway:
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
       - name: trtllm
         servingModes: [aggregated]
         gpuSupport: true
+        gateway:
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
   selectionRules:
     - condition: "spec.serving.mode == 'disaggregated'"
       priority: 100
