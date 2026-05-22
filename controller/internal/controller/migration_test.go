@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -669,7 +670,7 @@ func TestMigrateLegacyProviderConfigs_UpdateErrorPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected update error to surface as a summary error, got nil")
 	}
-	if !containsString(err.Error(), "completed with 1 failure(s)") {
+	if !errors.Is(err, errMigrationPartial) || !containsString(err.Error(), "1 of 1 object(s) failed") {
 		t.Errorf("expected partial-failure summary error, got %q", err.Error())
 	}
 }
@@ -735,7 +736,7 @@ func TestMigrateLegacyProviderConfigs_ContinuesAfterPerObjectFailure(t *testing.
 	if err == nil {
 		t.Fatalf("expected summary error reporting partial failure, got nil")
 	}
-	if !containsString(err.Error(), "completed with 1 failure(s) of 2") {
+	if !errors.Is(err, errMigrationPartial) || !containsString(err.Error(), "1 of 2 object(s) failed") {
 		t.Errorf("expected summary error to report 1/2 failure, got %q", err.Error())
 	}
 	if updateCalls["good-update"] == 0 {
@@ -794,7 +795,7 @@ func TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedStringEngine(t *test
 	if err == nil {
 		t.Fatalf("expected partial-failure summary error for malformed engine entry, got nil")
 	}
-	if !containsString(err.Error(), "completed with 1 failure(s)") {
+	if !errors.Is(err, errMigrationPartial) || !containsString(err.Error(), "1 of 1 object(s) failed") {
 		t.Errorf("expected summary error mentioning failure count, got %q", err.Error())
 	}
 }
@@ -853,7 +854,7 @@ func TestMigrateLegacyProviderConfigs_FailsLoudlyOnMalformedObjectEngine(t *test
 	if err == nil {
 		t.Fatalf("expected partial-failure summary error for malformed engine entry, got nil")
 	}
-	if !containsString(err.Error(), "completed with 1 failure(s)") {
+	if !errors.Is(err, errMigrationPartial) || !containsString(err.Error(), "1 of 1 object(s) failed") {
 		t.Errorf("expected summary error mentioning failure count, got %q", err.Error())
 	}
 }
@@ -1140,4 +1141,62 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// TestClassifyMigrationError verifies the Start-time error policy from
+// PR #214 review r3284868255: partial per-object failures must be swallowed
+// (the migration is idempotent and the next leader retries), but list/setup
+// failures must propagate so the manager tears down and the pod restarts —
+// otherwise the controller would start with un-migrated legacy objects on
+// disk and subsequent typed reads could fail to deserialize.
+func TestClassifyMigrationError(t *testing.T) {
+	logger := logr.Discard()
+
+	t.Run("nil passes through", func(t *testing.T) {
+		if err := classifyMigrationError(logger, nil); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("partial per-object failure is swallowed", func(t *testing.T) {
+		in := fmt.Errorf("%w: 1 of 2 object(s) failed", errMigrationPartial)
+		if err := classifyMigrationError(logger, in); err != nil {
+			t.Fatalf("expected nil for partial failure, got %v", err)
+		}
+	})
+
+	t.Run("wrapped partial failure is swallowed", func(t *testing.T) {
+		in := fmt.Errorf("outer: %w", fmt.Errorf("%w: 1 of 1 object(s) failed", errMigrationPartial))
+		if err := classifyMigrationError(logger, in); err != nil {
+			t.Fatalf("expected nil for wrapped partial failure, got %v", err)
+		}
+	})
+
+	t.Run("list failure is propagated", func(t *testing.T) {
+		listErr := fmt.Errorf("failed to list InferenceProviderConfig for migration after retries: %w", errors.New("kaboom"))
+		err := classifyMigrationError(logger, listErr)
+		if err == nil {
+			t.Fatalf("expected list failure to propagate, got nil")
+		}
+		if errors.Is(err, errMigrationPartial) {
+			t.Fatalf("list failure must not be treated as partial: %v", err)
+		}
+		if !containsString(err.Error(), "could not execute") {
+			t.Errorf("expected wrapped error to mention could-not-execute, got %q", err.Error())
+		}
+		if !errors.Is(err, listErr) {
+			t.Errorf("expected wrapped error to keep underlying list error in its chain")
+		}
+	})
+
+	t.Run("forbidden error is propagated", func(t *testing.T) {
+		forbidden := apierrors.NewForbidden(schema.GroupResource{Group: "airunway.ai", Resource: "inferenceproviderconfigs"}, "", errors.New("no access"))
+		err := classifyMigrationError(logger, forbidden)
+		if err == nil {
+			t.Fatalf("expected forbidden error to propagate, got nil")
+		}
+		if errors.Is(err, errMigrationPartial) {
+			t.Fatalf("forbidden must not be treated as partial: %v", err)
+		}
+	})
 }

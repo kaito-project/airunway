@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,6 +58,13 @@ var inferenceProviderConfigGVK = schema.GroupVersionKind{
 // appear in this list, or update both this list and the hoist/cleanup
 // branches in applyMigration to preserve the new field.
 var legacyFlatKeys = []string{"servingModes", "gpuSupport", "cpuSupport", "requiresCRD", "gateway"}
+
+// errMigrationPartial signals that the migration listed objects successfully
+// but failed to migrate one or more of them. Safe to swallow at Start because
+// the migration is idempotent and the next leader election will retry. Any
+// other error returned from MigrateLegacyProviderConfigs (e.g. List/setup
+// failure) does NOT wrap this sentinel and is treated as a hard failure.
+var errMigrationPartial = errors.New("legacy InferenceProviderConfig migration partial failure")
 
 // MigrateLegacyProviderConfigs reads all InferenceProviderConfig resources using
 // an unstructured client and rewrites any that still use the legacy flat engine
@@ -154,7 +162,7 @@ func MigrateLegacyProviderConfigs(ctx context.Context, c client.Client) error {
 		// Return a summary error so callers/tests can detect partial migration,
 		// but the manager Runnable swallows it (see Start) to avoid crashlooping
 		// the controller on a single bad object.
-		return fmt.Errorf("legacy InferenceProviderConfig migration completed with %d failure(s) of %d object(s)", failed, len(list.Items))
+		return fmt.Errorf("%w: %d of %d object(s) failed", errMigrationPartial, failed, len(list.Items))
 	}
 	return nil
 }
@@ -411,13 +419,22 @@ func (m *LegacyProviderConfigMigrator) NeedLeaderElection() bool { return true }
 // fine: the manager simply considers this runnable finished and continues
 // running the others (the reconciler, the webhook server, etc.).
 //
-// Per-object migration failures are deliberately NOT propagated as Start
-// errors. A non-nil return from a manager Runnable terminates the manager,
-// which would (a) crashloop the controller because of one bad object on disk,
-// and (b) leave earlier successfully-migrated objects committed while the
-// remaining ones never get a retry. Instead, we log a summary and return nil
-// so the controller stays up; the migration is idempotent and the next leader
-// will retry the unmigrated objects.
+// Error handling distinguishes two cases:
+//
+//   - Partial per-object failures (errors.Is(err, errMigrationPartial)): the
+//     List succeeded and at least one object migrated, but some did not. This
+//     is logged and swallowed. The migration is idempotent and the next leader
+//     election retries the unmigrated objects; tearing the manager down for
+//     one bad CR would crashloop the controller and prevent it from serving
+//     traffic for objects that already migrated successfully.
+//
+//   - Setup / List failure (any other non-nil error): the migration could not
+//     execute at all (e.g. the bounded backoff in MigrateLegacyProviderConfigs
+//     exhausted retries, or List returned Forbidden/Unauthorized). This is
+//     propagated so the manager tears down, the pod restarts, and the next
+//     leader election retries the migration from scratch. Proceeding silently
+//     would risk subsequent typed reads against un-migrated legacy objects
+//     failing to deserialize.
 func (m *LegacyProviderConfigMigrator) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("migration")
 	c, err := client.New(m.Config, client.Options{Scheme: m.Scheme})
@@ -425,12 +442,26 @@ func (m *LegacyProviderConfigMigrator) Start(ctx context.Context) error {
 		return fmt.Errorf("migration: build direct client: %w", err)
 	}
 	if err := MigrateLegacyProviderConfigs(ctx, c); err != nil {
-		// Summary error from MigrateLegacyProviderConfigs (partial failure):
-		// log but do not propagate — the manager would otherwise tear down
-		// the controller. List/setup errors are also folded into the same
-		// log; if listing failed there is nothing to migrate anyway and the
-		// reconciler can still serve traffic.
-		logger.Error(err, "legacy InferenceProviderConfig migration completed with errors; controller will continue and retry on next leader election")
+		return classifyMigrationError(logger, err)
 	}
 	return nil
+}
+
+// classifyMigrationError applies the Start-time policy that distinguishes
+// partial per-object failures (safe to swallow) from setup/List failures
+// (must propagate). Extracted so it can be unit-tested without standing up
+// a real rest.Config / manager.
+func classifyMigrationError(logger logr.Logger, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, errMigrationPartial) {
+		// Partial per-object failure: idempotent, next leader retries.
+		logger.Error(err, "legacy InferenceProviderConfig migration completed with per-object errors; controller will continue and retry unmigrated objects on next leader election")
+		return nil
+	}
+	// Migration did not execute (List/setup failure). Propagate so the
+	// manager tears down and the pod restarts rather than silently
+	// proceeding with un-migrated legacy objects on disk.
+	return fmt.Errorf("legacy InferenceProviderConfig migration could not execute: %w", err)
 }
