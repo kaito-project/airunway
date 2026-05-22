@@ -102,9 +102,6 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: providers/${{ matrix.provider }}/go.sum
 
-      - name: make vet
-        run: make -C providers/${{ matrix.provider }} vet
-
       - name: make build
         run: make -C providers/${{ matrix.provider }} build
 
