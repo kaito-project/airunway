@@ -270,10 +270,16 @@ spec:
     engines:
       - name: vllm
         gateway:
-          inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pattern for the pool name
-          inferencePoolNamespace: "dynamo-system"              # Namespace where the pool is created
+          inferencePoolNamePattern: "{name}-pool"   # Pattern for the pool name
+          inferencePoolNamespace: "{namespace}"     # Namespace where the pool is created
       - name: sglang
+        gateway:
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
       - name: trtllm
+        gateway:
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
 ```
 
 The controller adapts its reconciliation based on these flags:
