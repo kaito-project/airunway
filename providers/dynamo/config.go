@@ -94,6 +94,7 @@ func NewProviderConfigManager(c client.Client, discoveryClients ...discovery.Dis
 // to the Frontend Service — requests route through InferencePool directly.
 func dynamoGatewayCapabilities() *airunwayv1alpha1.GatewayCapabilities {
 	return &airunwayv1alpha1.GatewayCapabilities{
+		ManagesInferencePool:     true,
 		InferencePoolNamePattern: "{name}-pool",
 		InferencePoolNamespace:   "{namespace}",
 	}

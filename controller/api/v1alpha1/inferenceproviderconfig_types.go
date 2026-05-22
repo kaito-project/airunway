@@ -76,8 +76,19 @@ type ProviderCapabilities struct {
 
 // GatewayCapabilities defines gateway-related capabilities for a specific engine.
 type GatewayCapabilities struct {
+	// managesInferencePool indicates that the provider's operator creates and
+	// owns the GAIE InferencePool (and EPP) for ModelDeployments using this
+	// engine. When true, the airunway controller will not create an
+	// InferencePool itself: it waits for the provider-managed one to appear
+	// and uses it as the HTTPRoute backend. When false (the default), the
+	// controller creates and manages the InferencePool/EPP, even if other
+	// fields on this struct (e.g. ignoresServedName) are set.
+	// +optional
+	ManagesInferencePool bool `json:"managesInferencePool,omitempty"`
+
 	// inferencePoolNamePattern is the naming pattern for provider-created pools.
-	// Supports {name} and {namespace} placeholders.
+	// Supports {name} and {namespace} placeholders. Only consulted when
+	// managesInferencePool is true.
 	// +optional
 	InferencePoolNamePattern string `json:"inferencePoolNamePattern,omitempty"`
 

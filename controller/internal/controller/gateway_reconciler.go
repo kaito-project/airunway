@@ -112,8 +112,8 @@ func (r *ModelDeploymentReconciler) reconcileGateway(ctx context.Context, md *ai
 
 		// Resolve the InferencePool name for the provider.
 		// The provider-managed pool will be configured to be named with the model deployment name and namespace.
-		poolName = resolveProviderInferencePoolName(gatewayCapabilities.InferencePoolNamePattern, md.Name, md.Namespace)
-		poolNamespace = resolveProviderInferencePoolName(gatewayCapabilities.InferencePoolNamespace, md.Name, md.Namespace)
+		poolName = resolveProviderPoolField(gatewayCapabilities.InferencePoolNamePattern, md.Name, md.Namespace, md.Name)
+		poolNamespace = resolveProviderPoolField(gatewayCapabilities.InferencePoolNamespace, md.Name, md.Namespace, md.Namespace)
 
 		// Use provider-managed InferencePool
 		providerEPPName, err := r.reconcileProviderManagedInferencePool(ctx, md, poolName, poolNamespace, gwConfig.GetBBRNamespace())
@@ -132,7 +132,7 @@ func (r *ModelDeploymentReconciler) reconcileGateway(ctx context.Context, md *ai
 		return err
 	}
 
-	if gatewayCapabilities != nil {
+	if gatewayCapabilities != nil && gatewayCapabilities.ManagesInferencePool {
 		logger.Info("Skipping EPP creation, provider manages EPP", "provider", resolvedProviderName(md))
 	} else { // Use default EPP
 		// Create or update EPP (EndPoint Picker) for the InferencePool
@@ -355,12 +355,13 @@ func (r *ModelDeploymentReconciler) reconcileProviderManagedInferencePool(ctx co
 	return eppName, nil
 }
 
-// resolveProviderInferencePoolName applies the provider's naming pattern to produce the
-// concrete InferencePool name for a given ModelDeployment. If the provider has
-// no pattern configured, it falls back to the ModelDeployment name.
-func resolveProviderInferencePoolName(pattern, mdName, mdNamespace string) string {
+// resolveProviderPoolField applies the provider's naming pattern to produce a
+// concrete InferencePool name or namespace for a given ModelDeployment.
+// When pattern is empty, the supplied fallback is used — callers pass
+// md.Name for the pool name and md.Namespace for the pool namespace.
+func resolveProviderPoolField(pattern, mdName, mdNamespace, fallback string) string {
 	if pattern == "" {
-		return mdName
+		return fallback
 	}
 	result := strings.ReplaceAll(pattern, "{name}", mdName)
 	result = strings.ReplaceAll(result, "{namespace}", mdNamespace)
@@ -1087,7 +1088,7 @@ func (r *ModelDeploymentReconciler) cleanupGatewayResources(ctx context.Context,
 	if gatewayCapabilities, err = r.resolveProviderGatewayCapabilities(ctx, md); err != nil {
 		logger.V(1).Info("Could not resolve provider gateway capabilities, proceeding without provider-specific gateway capabilities", "error", err)
 	}
-	providerManagedPool := gatewayCapabilities != nil
+	providerManagedPool := gatewayCapabilities != nil && gatewayCapabilities.ManagesInferencePool
 
 	eppName := md.Name + "-epp"
 
@@ -1176,7 +1177,7 @@ func (r *ModelDeploymentReconciler) cleanupGatewayResources(ctx context.Context,
 func (r *ModelDeploymentReconciler) providerInferencePoolExistsOrCreateDefault(ctx context.Context, md *airunwayv1alpha1.ModelDeployment, gatewayCapabilitities *airunwayv1alpha1.GatewayCapabilities, gwConfig *gateway.GatewayConfig) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	if gatewayCapabilitities != nil {
+	if gatewayCapabilitities != nil && gatewayCapabilitities.ManagesInferencePool {
 		// Provider manages the pool.
 		return true, nil
 	}

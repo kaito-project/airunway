@@ -711,24 +711,63 @@ func (m *mockProviderResolver) GetGatewayCapabilities(_ context.Context, provide
 	return m.caps[providerName]
 }
 
-func TestResolveProviderInferencePoolName_WithPattern(t *testing.T) {
-	name := resolveProviderInferencePoolName("{namespace}-{name}-pool", "llama-70b", "default")
+func TestResolveProviderPoolField_WithPattern(t *testing.T) {
+	name := resolveProviderPoolField("{namespace}-{name}-pool", "llama-70b", "default", "llama-70b")
 	if name != "default-llama-70b-pool" {
 		t.Errorf("expected 'default-llama-70b-pool', got %q", name)
 	}
 }
 
-func TestResolveProviderInferencePoolName_EmptyPattern(t *testing.T) {
-	name := resolveProviderInferencePoolName("", "llama-70b", "default")
+func TestResolveProviderPoolField_EmptyPattern_UsesFallback(t *testing.T) {
+	// Name caller: fallback is md.Name.
+	name := resolveProviderPoolField("", "llama-70b", "default", "llama-70b")
 	if name != "llama-70b" {
 		t.Errorf("expected fallback to md name 'llama-70b', got %q", name)
 	}
+	// Namespace caller: fallback is md.Namespace. This is the regression case —
+	// previously the helper returned md.Name for both, producing a bogus
+	// {Namespace: <md.Name>} lookup.
+	ns := resolveProviderPoolField("", "llama-70b", "default", "default")
+	if ns != "default" {
+		t.Errorf("expected fallback to md namespace 'default', got %q", ns)
+	}
 }
 
-func TestResolveProviderInferencePoolName_NameOnlyPattern(t *testing.T) {
-	name := resolveProviderInferencePoolName("{name}-pool", "llama-70b", "default")
+func TestResolveProviderPoolField_NameOnlyPattern(t *testing.T) {
+	name := resolveProviderPoolField("{name}-pool", "llama-70b", "default", "llama-70b")
 	if name != "llama-70b-pool" {
 		t.Errorf("expected 'llama-70b-pool', got %q", name)
+	}
+}
+
+func TestGateway_CapabilitiesWithoutManagesInferencePoolStillCreatesPool(t *testing.T) {
+	// Regression: a provider may declare GatewayCapabilities purely for
+	// signals like IgnoresServedName (KAITO + llamacpp) without actually
+	// owning the InferencePool. The controller must still create the
+	// InferencePool itself in that case — otherwise it waits forever for a
+	// provider-managed pool that never appears, exactly the e2e-gateway
+	// failure mode prior to this fix.
+	scheme := newTestScheme()
+	md := newModelDeployment("test-model", "default")
+	md.Spec.Provider = &airunwayv1alpha1.ProviderSpec{Name: "kaito"}
+	md.Spec.Engine.Type = airunwayv1alpha1.EngineTypeLlamaCpp
+
+	detector := fakeDetector(true, "my-gateway", "gateway-ns")
+	r := newTestReconciler(scheme, detector, md, newTestGateway("my-gateway", "gateway-ns"))
+	r.ProviderResolver = &mockProviderResolver{
+		caps: map[string]*airunwayv1alpha1.GatewayCapabilities{
+			// KAITO shape: gateway caps present, but ManagesInferencePool false.
+			"kaito": {IgnoresServedName: true},
+		},
+	}
+
+	if err := r.reconcileGateway(context.Background(), md); err != nil {
+		t.Fatalf("reconcileGateway failed: %v", err)
+	}
+
+	var pool inferencev1.InferencePool
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "test-model", Namespace: "default"}, &pool); err != nil {
+		t.Fatalf("expected controller-managed InferencePool 'default/test-model', got error: %v", err)
 	}
 }
 
@@ -869,7 +908,7 @@ func TestGateway_CleanupSkipsProviderManagedResources(t *testing.T) {
 
 	resolver := &mockProviderResolver{
 		caps: map[string]*airunwayv1alpha1.GatewayCapabilities{
-			"dynamo": {},
+			"dynamo": {ManagesInferencePool: true},
 		},
 	}
 

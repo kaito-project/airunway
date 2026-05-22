@@ -82,6 +82,9 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		if engineCap.Gateway == nil {
 			t.Fatalf("expected gateway capabilities for engine %s to not be nil", engineType)
 		}
+		if !engineCap.Gateway.ManagesInferencePool {
+			t.Errorf("engine %s: expected ManagesInferencePool=true", engineType)
+		}
 		if engineCap.Gateway.InferencePoolNamePattern != "{name}-pool" {
 			t.Errorf("engine %s: expected inference pool name pattern '{name}-pool', got %s", engineType, engineCap.Gateway.InferencePoolNamePattern)
 		}
