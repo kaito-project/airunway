@@ -108,7 +108,7 @@ func (r *ModelDeploymentReconciler) reconcileGateway(ctx context.Context, md *ai
 	// Use provider managed inference pool if it exists,
 	// otherwise use the default inference pool.
 	if ok, err := r.providerInferencePoolExistsOrCreateDefault(ctx, md, gatewayCapabilities, gwConfig); ok && err == nil {
-		logger.Info("Skipping InferencePool creation, provider manages InferencePool", "provider", md.Spec.Provider.Name)
+		logger.Info("Skipping InferencePool creation, provider manages InferencePool", "provider", resolvedProviderName(md))
 
 		// Resolve the InferencePool name for the provider.
 		// The provider-managed pool will be configured to be named with the model deployment name and namespace.
@@ -133,7 +133,7 @@ func (r *ModelDeploymentReconciler) reconcileGateway(ctx context.Context, md *ai
 	}
 
 	if gatewayCapabilities != nil {
-		logger.Info("Skipping EPP creation, provider manages EPP", "provider", md.Spec.Provider.Name)
+		logger.Info("Skipping EPP creation, provider manages EPP", "provider", resolvedProviderName(md))
 	} else { // Use default EPP
 		// Create or update EPP (EndPoint Picker) for the InferencePool
 		if err := r.reconcileEPP(ctx, md); err != nil {
