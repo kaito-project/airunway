@@ -19,8 +19,7 @@ spec:
       tlsConfig:
         insecureSkipVerify: true
   namespaceSelector:
-    matchNames:
-      - airunway-system
+    any: true
   selector:
     matchLabels:
       app.kubernetes.io/name: airunway
