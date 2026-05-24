@@ -927,7 +927,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "airunway_deployment_status",
+          "expr": "max by (provider, phase) (airunway_deployment_status)",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -935,6 +935,22 @@
         }
       ],
       "transformations": [
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "fieldName": "Value",
+                "config": {
+                  "id": "greater",
+                  "options": { "value": 0 }
+                }
+              }
+            ],
+            "type": "include",
+            "match": "all"
+          }
+        },
         {
           "id": "organize",
           "options": {
