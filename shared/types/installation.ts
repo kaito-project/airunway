@@ -41,6 +41,12 @@ export interface InstallationStatus {
   installable?: boolean;
   installationSteps: InstallationStep[];
   helmCommands: string[];
+  /** True if the AI Runway provider integration has registered for this provider. */
+  shimRegistered?: boolean;
+  /** True if the AI Runway provider integration is actively heartbeating. */
+  shimConnected?: boolean;
+  /** ISO timestamp of the last shim heartbeat, if reported. */
+  shimLastHeartbeat?: string;
 }
 
 export interface InstallResult {

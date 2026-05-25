@@ -49,6 +49,9 @@ type MockRuntimeStatus = {
   operatorRunning?: boolean
   requiresCRD?: boolean
   version?: string
+  shimRegistered?: boolean
+  shimConnected?: boolean
+  shimLastHeartbeat?: string
 }
 
 const defaultMockRuntimes = (): MockRuntimeStatus[] => [
@@ -140,6 +143,9 @@ const getMockInstallationStatus = (providerId: string) => {
         crdFound: true,
         operatorRunning: false,
         installationSteps: [],
+        shimRegistered: mockRuntimes.find(runtime => runtime.id === 'kuberay')?.shimRegistered,
+        shimConnected: mockRuntimes.find(runtime => runtime.id === 'kuberay')?.shimConnected,
+        shimLastHeartbeat: mockRuntimes.find(runtime => runtime.id === 'kuberay')?.shimLastHeartbeat,
       }
     case 'llmd':
       return {
@@ -378,6 +384,83 @@ describe('SettingsPage', () => {
     expect(within(installationPanel as HTMLElement).getByText('Operator Running')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^uninstall$/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /install kuberay/i })).toBeInTheDocument()
+  })
+
+  it('issue #244: distinguishes connected AI Runway integration from missing underlying runtime', () => {
+    // Simulate the user's reported scenario: KAITO shim is registered and
+    // heartbeating, but the underlying KAITO operator + CRDs are not
+    // installed. The card should still report "Not Installed", the detail
+    // panel should still show red X icons and an Install button, AND the
+    // integration status should be clearly shown as Connected so users
+    // understand which side is which.
+    const heartbeat = new Date().toISOString()
+    mockRuntimes = [
+      {
+        id: 'kuberay',
+        name: 'Kuberay',
+        installed: false,
+        healthy: false,
+        crdFound: false,
+        operatorRunning: false,
+        requiresCRD: true,
+        shimRegistered: true,
+        shimConnected: true,
+        shimLastHeartbeat: heartbeat,
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    // Card: still says "Not Installed" because the underlying operator is missing
+    const card = screen.getByText('Kuberay').closest('.rounded-2xl') as HTMLElement
+    expect(within(card).getByText('Not Installed')).toBeInTheDocument()
+    // Card: integration status visible and labeled "Connected"
+    const integrationRow = within(card).getByTestId('integration-status-kuberay')
+    expect(integrationRow).toHaveTextContent('AI Runway integration')
+    expect(integrationRow).toHaveTextContent('Connected')
+
+    // Detail panel: install button still visible, runtime row icons are red
+    fireEvent.click(screen.getByText('Kuberay'))
+    const installationPanel = screen.getByText('Kuberay Installation').closest('.rounded-2xl') as HTMLElement
+    expect(within(installationPanel).getByText('CRD Installed')).toBeInTheDocument()
+    expect(within(installationPanel).getByText('Operator Running')).toBeInTheDocument()
+    expect(within(installationPanel).getByRole('button', { name: /install kuberay/i })).toBeInTheDocument()
+
+    // Detail panel: integration status row shown with a "Connected" label
+    const detailIntegration = within(installationPanel).getByTestId('integration-status-detail')
+    expect(detailIntegration).toHaveTextContent('AI Runway integration')
+    expect(detailIntegration).toHaveTextContent('Connected')
+  })
+
+  it('issue #244: shows AI Runway integration as Not heartbeating when the shim has not reported recently', () => {
+    mockRuntimes = [
+      {
+        id: 'kuberay',
+        name: 'Kuberay',
+        installed: false,
+        healthy: false,
+        crdFound: false,
+        operatorRunning: false,
+        requiresCRD: true,
+        shimRegistered: true,
+        shimConnected: false,
+        shimLastHeartbeat: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    const card = screen.getByText('Kuberay').closest('.rounded-2xl') as HTMLElement
+    const integrationRow = within(card).getByTestId('integration-status-kuberay')
+    expect(integrationRow).toHaveTextContent('Not heartbeating')
   })
 
   it('shows providers that do not require runtime operators without CRD controls', () => {

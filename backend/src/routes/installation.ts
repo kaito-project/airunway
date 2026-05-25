@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { kubernetesService } from '../services/kubernetes';
+import { kubernetesService, computeShimStatus } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import logger from '../lib/logger';
 import { getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
@@ -212,6 +212,7 @@ const installation = new Hono()
       provider.name,
       provider.requiresCRD,
     );
+    const shim = computeShimStatus(status);
 
     return c.json({
       providerId: provider.id,
@@ -227,6 +228,9 @@ const installation = new Hono()
       installable,
       installationSteps: provider.installationSteps,
       helmCommands: installable ? helmService.getInstallCommands(provider.helmRepos, charts) : [],
+      shimRegistered: shim.shimRegistered,
+      shimConnected: shim.shimConnected,
+      shimLastHeartbeat: shim.shimLastHeartbeat,
     });
   })
   .get('/providers/:providerId/commands', async (c) => {

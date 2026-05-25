@@ -38,6 +38,36 @@ const KUBERAY_CRD = 'rayservices.ray.io';
 const KUBERAY_NAMESPACE = 'ray-system';
 const KUBERAY_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=kuberay-operator,app.kubernetes.io/instance=kuberay-operator';
 
+// The shim heartbeat interval is 1 minute (see providers/*/config.go). Treat
+// shim as connected when the last heartbeat is within 3x the interval to
+// tolerate transient delays.
+const SHIM_HEARTBEAT_FRESHNESS_MS = 3 * 60 * 1000;
+
+/**
+ * Compute the AI Runway provider integration ("shim") status from the
+ * InferenceProviderConfig status. The shim updates `status.ready=true` and
+ * `status.lastHeartbeat` periodically while running; treat the shim as
+ * connected only when both are present and the heartbeat is recent.
+ */
+export function computeShimStatus(
+  status: { ready?: boolean; lastHeartbeat?: string | null } | undefined,
+  now: number = Date.now(),
+): { shimRegistered: true; shimConnected: boolean; shimLastHeartbeat?: string } {
+  const lastHeartbeat = typeof status?.lastHeartbeat === 'string' ? status.lastHeartbeat : undefined;
+  let heartbeatFresh = false;
+  if (lastHeartbeat) {
+    const heartbeatMs = Date.parse(lastHeartbeat);
+    if (!Number.isNaN(heartbeatMs)) {
+      heartbeatFresh = now - heartbeatMs <= SHIM_HEARTBEAT_FRESHNESS_MS;
+    }
+  }
+  return {
+    shimRegistered: true,
+    shimConnected: status?.ready === true && heartbeatFresh,
+    shimLastHeartbeat: lastHeartbeat,
+  };
+}
+
 /**
  * GPU availability information from cluster nodes
  */
@@ -759,6 +789,7 @@ class KubernetesService {
             const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
             const requiresCRD = providerRequiresRuntimeCRD(name, item.spec?.capabilities?.requiresCRD, annotatedDisplayName);
             const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName, requiresCRD);
+            const shim = computeShimStatus(status);
 
             return {
               id: name,
@@ -770,6 +801,9 @@ class KubernetesService {
               requiresCRD: runtimeStatus.requiresCRD ?? requiresCRD,
               version: status.version,
               message: runtimeStatus.message,
+              shimRegistered: shim.shimRegistered,
+              shimConnected: shim.shimConnected,
+              shimLastHeartbeat: shim.shimLastHeartbeat,
             };
           })
         );

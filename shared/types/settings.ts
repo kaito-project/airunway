@@ -77,13 +77,29 @@ export interface Settings {
 export interface RuntimeStatus {
   id: string;           // 'dynamo' | 'kuberay'
   name: string;         // Display name
-  installed: boolean;   // Runtime is ready to use
-  healthy: boolean;     // Runtime service is running
-  crdFound?: boolean;   // Provider API is available
-  operatorRunning?: boolean; // Runtime service pods are ready
+  installed: boolean;   // Underlying runtime (CRD + operator) is ready to use
+  healthy: boolean;     // Underlying runtime service is running
+  crdFound?: boolean;   // Underlying provider API is available
+  operatorRunning?: boolean; // Underlying runtime service pods are ready
   requiresCRD?: boolean; // Whether the provider depends on an upstream runtime operator/CRD
   version?: string;     // Detected version
   message?: string;     // Status message
+  /**
+   * shimRegistered: true when the AI Runway provider integration ("shim")
+   * has registered an InferenceProviderConfig in the cluster. This is true
+   * for any runtime that appears in this list; included explicitly so the
+   * UI can distinguish the integration's presence from the underlying
+   * runtime's installation state.
+   */
+  shimRegistered?: boolean;
+  /**
+   * shimConnected: true when the AI Runway provider integration is
+   * actively heartbeating (status.ready=true AND a recent lastHeartbeat).
+   * Distinct from {@link installed}, which reflects the underlying runtime.
+   */
+  shimConnected?: boolean;
+  /** ISO timestamp of the last shim heartbeat, if reported. */
+  shimLastHeartbeat?: string;
 }
 
 /**
