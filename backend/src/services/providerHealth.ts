@@ -1,41 +1,43 @@
-import { kubernetesService } from './kubernetes';
-
 export type ProviderHealth = {
   providerId: string;
   healthy: boolean;
   reason: string;
   message: string;
-  managedBy?: 'Eno' | 'Helm' | 'Unknown';
   stale: boolean;
   lastHeartbeat?: string;
 };
 
-const STALENESS_THRESHOLD_MS = Number(process.env.PROVIDER_HEALTH_STALENESS_MS ?? 180_000);
+const DEFAULT_STALENESS_THRESHOLD_MS = 180_000;
 
-const ENO_PARTIAL_INSTALL_SUSPECTED_MESSAGE =
-  'This cluster appears to have been set up with `--enable-ai-toolchain-operator`. ' +
-  'The deployed KAITO shim is too old to detect this and is reporting stale health. ' +
-  'Upgrade the KAITO shim image to get accurate status and prevent stalled deployments.';
+function parsePositiveIntEnv(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
-const KAITO_ENO_STORAGECLASS = 'kaito-local-nvme-disk';
+const STALENESS_THRESHOLD_MS = parsePositiveIntEnv(
+  process.env.PROVIDER_HEALTH_STALENESS_MS,
+  DEFAULT_STALENESS_THRESHOLD_MS,
+);
 
-export async function getProviderHealth(providerId: string): Promise<ProviderHealth> {
-  const config = await kubernetesService.getInferenceProviderConfig(providerId);
-  if (!config) {
-    throw new Error(`provider not found: ${providerId}`);
-  }
-
-  const status = config.status ?? {};
+/**
+ * Wraps the shim-reported status conditions on an InferenceProviderConfig with
+ * a staleness check. The caller passes the already-fetched config object so
+ * this function does no Kubernetes API calls of its own — this keeps
+ * getRuntimesStatus's per-provider work bounded to a single CR read.
+ */
+export function getProviderHealth(providerId: string, config: any): ProviderHealth {
+  const status = config?.status ?? {};
   const conditions: Array<any> = status.conditions ?? [];
   const upstreamReady = conditions.find((c: any) => c.type === 'UpstreamReady');
-  const upstreamManagedBy = conditions.find((c: any) => c.type === 'UpstreamManagedBy');
   const lastHeartbeat: string | undefined = status.lastHeartbeat;
   const ready: boolean = status.ready === true;
 
-  // Step 4: staleness override
-  const stale = lastHeartbeat
-    ? Date.now() - new Date(lastHeartbeat).getTime() > STALENESS_THRESHOLD_MS
-    : true;
+  // Stale = shim wrote a heartbeat in the past but hasn't refreshed it.
+  // Absent heartbeat (no shim running, or provider with no health probe) is
+  // NOT stale — just fall through to whatever status conditions report.
+  const stale = !!lastHeartbeat
+    && Date.now() - new Date(lastHeartbeat).getTime() > STALENESS_THRESHOLD_MS;
 
   if (stale) {
     return {
@@ -48,8 +50,7 @@ export async function getProviderHealth(providerId: string): Promise<ProviderHea
     };
   }
 
-  // Step 5: passthrough
-  let health: ProviderHealth = {
+  return {
     providerId,
     healthy: ready,
     reason: upstreamReady?.reason ?? (ready ? 'Ready' : 'NotReady'),
@@ -57,30 +58,4 @@ export async function getProviderHealth(providerId: string): Promise<ProviderHea
     stale: false,
     lastHeartbeat,
   };
-
-  // Step 6: managedBy detection
-  if (upstreamManagedBy?.reason === 'Eno') {
-    health.managedBy = 'Eno';
-  } else if (providerId === 'kaito') {
-    const sc = await kubernetesService.getStorageClass(KAITO_ENO_STORAGECLASS);
-    if (sc?.metadata?.labels?.['app.kubernetes.io/managed-by'] === 'Eno') {
-      health.managedBy = 'Eno';
-    } else if (sc?.metadata?.labels?.['app.kubernetes.io/managed-by'] === 'Helm') {
-      health.managedBy = 'Helm';
-    } else if (sc) {
-      health.managedBy = 'Unknown';
-    }
-  }
-
-  // Step 7: old-shim override
-  if (providerId === 'kaito' && health.managedBy === 'Eno' && !upstreamReady) {
-    return {
-      ...health,
-      healthy: false,
-      reason: 'EnoPartialInstallSuspected',
-      message: ENO_PARTIAL_INSTALL_SUSPECTED_MESSAGE,
-    };
-  }
-
-  return health;
 }

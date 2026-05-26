@@ -34,41 +34,6 @@ function parseInstallationAnnotation(config: any): any {
   }
 }
 
-export type InstallConflict = {
-  kind: 'preexisting-resource';
-  source: 'eno' | 'helm' | 'unknown';
-  resource: { apiVersion: string; kind: string; name: string; namespace?: string };
-  message: string;
-};
-
-const ENO_STORAGECLASS_CONFLICT_MESSAGE =
-  'A `kaito-local-nvme-disk` StorageClass already exists and is managed by the ' +
-  'AKS AI toolchain operator (Eno). AI Runway cannot install KAITO on top of ' +
-  'this partial install. Options: (1) disable the AKS extension with ' +
-  '`az aks update --disable-ai-toolchain-operator ...` and retry, or ' +
-  '(2) install the `kaito-workspace` controller manually.';
-
-export async function checkInstallConflicts(providerId: string): Promise<InstallConflict | null> {
-  if (providerId !== 'kaito') return null;
-
-  const sc = await kubernetesService.getStorageClass('kaito-local-nvme-disk');
-  if (!sc) return null;
-
-  const managedBy = sc.metadata?.labels?.['app.kubernetes.io/managed-by'];
-  if (managedBy !== 'Eno') return null;
-
-  return {
-    kind: 'preexisting-resource',
-    source: 'eno',
-    resource: {
-      apiVersion: 'storage.k8s.io/v1',
-      kind: 'StorageClass',
-      name: 'kaito-local-nvme-disk',
-    },
-    message: ENO_STORAGECLASS_CONFLICT_MESSAGE,
-  };
-}
-
 /**
  * Extract provider details from an InferenceProviderConfig CRD object.
  * Installation and documentation metadata are read from metadata.annotations,
@@ -248,43 +213,26 @@ const installation = new Hono()
       provider.name,
       provider.requiresCRD,
     );
-    // providerHealth is best-effort enrichment (managedBy detection,
-    // heartbeat-aware reasons). If it throws — e.g. the CR was deleted
-    // between the first read and now — fall back to installationStatus only.
-    let managedBy: string | undefined;
-    let overrideMessage: string | undefined;
-    let overrideUnhealthy = false;
-    try {
-      const health = await getProviderHealth(providerId);
-      managedBy = health.managedBy;
-      // Only override structural flags when the shim probe (or the
-      // dashboard's old-shim fallback) reports an Eno-related reason —
-      // these mean the upstream operator literally isn't running so
-      // installationStatus's view is misleading. Other reasons (e.g.
-      // ShimStale) shouldn't downgrade installed/operatorRunning here.
-      if (health.reason === 'EnoPartialInstall' || health.reason === 'EnoPartialInstallSuspected') {
-        overrideUnhealthy = !health.healthy;
-        overrideMessage = health.message;
-      }
-    } catch (err) {
-      logger.warn({ error: (err as Error)?.message, providerId }, 'getProviderHealth failed, continuing with installationStatus only');
-    }
-
-    const installed = overrideUnhealthy ? false : installationStatus.installed;
-    const operatorRunning = overrideUnhealthy ? false : (installationStatus.operatorRunning ?? false);
+    // Layer the shim's heartbeat-aware health view on top of the live
+    // installation check. We only swap the user-visible message when the shim
+    // looks stale — structural fields (installed/operatorRunning) stay sourced
+    // from installationStatus since that reflects what's actually in the
+    // cluster regardless of the shim's reporting state.
+    const health = getProviderHealth(providerId, config);
+    const baseMessage = hasInstallMetadata || provider.requiresCRD === false
+      ? installationStatus.message
+      : `No installation metadata found for provider ${providerId}`;
+    const message = health.stale ? health.message : baseMessage;
 
     return c.json({
       providerId: provider.id,
       providerName: provider.name,
-      installed,
+      installed: installationStatus.installed,
       crdFound: installationStatus.crdFound,
-      operatorRunning,
+      operatorRunning: installationStatus.operatorRunning ?? false,
       requiresCRD: installationStatus.requiresCRD ?? provider.requiresCRD,
       version: status.version,
-      managedBy,
-      message: overrideMessage ?? (hasInstallMetadata || provider.requiresCRD === false
-        ? installationStatus.message
-        : `No installation metadata found for provider ${providerId}`),
+      message,
       installable,
       installationSteps: provider.installationSteps,
       helmCommands: installable ? helmService.getInstallCommands(provider.helmRepos, charts) : [],
@@ -337,18 +285,6 @@ const installation = new Hono()
       throw new HTTPException(400, {
         message: `Helm CLI not available: ${helmStatus.error}. Please install Helm or use the manual installation commands.`,
       });
-    }
-
-    const conflict = await checkInstallConflicts(providerId);
-    if (conflict) {
-      return c.json(
-        {
-          error: 'InstallConflict',
-          conflict,
-          message: conflict.message,
-        },
-        409,
-      );
     }
 
     logger.info({ providerId }, `Starting installation of ${provider.name}`);

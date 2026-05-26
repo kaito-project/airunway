@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -199,25 +200,15 @@ func (m *ProviderConfigManager) UpdateStatusFromProbe(ctx context.Context) error
 	config.Status.LastHeartbeat = &now
 	config.Status.UpstreamCRDVersion = "kaito.sh/v1beta1"
 
-	upsertCondition(&config.Status.Conditions, metav1.Condition{
-		Type:               "UpstreamReady",
-		Status:             boolToConditionStatus(probe.Healthy),
-		Reason:             probe.Reason,
-		Message:            probe.Message,
-		LastTransitionTime: now,
+	// SetStatusCondition preserves LastTransitionTime when Status/Reason/Message
+	// don't change, so monitoring/alerting based on transition time keeps working
+	// across heartbeats.
+	meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+		Type:    "UpstreamReady",
+		Status:  boolToConditionStatus(probe.Healthy),
+		Reason:  probe.Reason,
+		Message: probe.Message,
 	})
-
-	if probe.ManagedBy == managedByEno {
-		upsertCondition(&config.Status.Conditions, metav1.Condition{
-			Type:               "UpstreamManagedBy",
-			Status:             metav1.ConditionTrue,
-			Reason:             managedByEno,
-			Message:            "Upstream KAITO resources are managed by the AKS AI toolchain operator (Eno).",
-			LastTransitionTime: now,
-		})
-	} else {
-		removeCondition(&config.Status.Conditions, "UpstreamManagedBy")
-	}
 
 	if err := m.client.Status().Update(ctx, config); err != nil {
 		return fmt.Errorf("failed to update InferenceProviderConfig status: %w", err)
@@ -235,12 +226,11 @@ func (m *ProviderConfigManager) MarkUnregistered(ctx context.Context) error {
 	now := metav1.Now()
 	config.Status.Ready = false
 	config.Status.LastHeartbeat = &now
-	upsertCondition(&config.Status.Conditions, metav1.Condition{
-		Type:               "UpstreamReady",
-		Status:             metav1.ConditionFalse,
-		Reason:             ReasonUnregistered,
-		Message:            "Shim is shutting down.",
-		LastTransitionTime: now,
+	meta.SetStatusCondition(&config.Status.Conditions, metav1.Condition{
+		Type:    "UpstreamReady",
+		Status:  metav1.ConditionFalse,
+		Reason:  ReasonUnregistered,
+		Message: "Shim is shutting down.",
 	})
 
 	if err := m.client.Status().Update(ctx, config); err != nil {
@@ -276,26 +266,6 @@ func (m *ProviderConfigManager) StartHeartbeat(ctx context.Context) {
 // Unregister marks the provider as not ready
 func (m *ProviderConfigManager) Unregister(ctx context.Context) error {
 	return m.MarkUnregistered(ctx)
-}
-
-func upsertCondition(conditions *[]metav1.Condition, c metav1.Condition) {
-	for i := range *conditions {
-		if (*conditions)[i].Type == c.Type {
-			(*conditions)[i] = c
-			return
-		}
-	}
-	*conditions = append(*conditions, c)
-}
-
-func removeCondition(conditions *[]metav1.Condition, t string) {
-	out := (*conditions)[:0]
-	for _, c := range *conditions {
-		if c.Type != t {
-			out = append(out, c)
-		}
-	}
-	*conditions = out
 }
 
 func boolToConditionStatus(b bool) metav1.ConditionStatus {

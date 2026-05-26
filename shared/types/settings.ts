@@ -84,7 +84,6 @@ export interface RuntimeStatus {
   requiresCRD?: boolean; // Whether the provider depends on an upstream runtime operator/CRD
   version?: string;     // Detected version
   message?: string;     // Status message
-  managedBy?: string;   // Detected managing operator (e.g. 'Eno', 'Helm')
 }
 
 /**

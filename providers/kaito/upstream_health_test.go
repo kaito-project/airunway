@@ -9,9 +9,8 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
-	storagev1 "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -27,15 +26,12 @@ type simpleMapper struct {
 }
 
 func (m *simpleMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*meta.RESTMapping, error) {
-	// Check if the kind is registered in the scheme
 	knownTypes := m.scheme.AllKnownTypes()
 	for registeredGVK := range knownTypes {
 		if registeredGVK.Group == gk.Group && registeredGVK.Kind == gk.Kind {
-			// Kind found in scheme
 			return &meta.RESTMapping{}, nil
 		}
 	}
-	// Kind not found in scheme; return NoKindMatchError
 	return nil, &meta.NoKindMatchError{GroupKind: gk}
 }
 
@@ -116,17 +112,6 @@ func probeClientBuilderWithWorkspace(t *testing.T) *fake.ClientBuilder {
 		WithRESTMapper(&simpleMapper{scheme: s})
 }
 
-func newStorageClass(name, managedBy string) *storagev1.StorageClass {
-	sc := &storagev1.StorageClass{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Provisioner: "test",
-	}
-	if managedBy != "" {
-		sc.Labels = map[string]string{managedByLabel: managedBy}
-	}
-	return sc
-}
-
 func newKaitoDeployment(namespace, name string, readyReplicas int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -138,10 +123,6 @@ func newKaitoDeployment(namespace, name string, readyReplicas int32) *appsv1.Dep
 	}
 }
 
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
-}
-
 func stringContains(s, substr string) bool {
 	for i := 0; i+len(substr) <= len(s); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -151,55 +132,16 @@ func stringContains(s, substr string) bool {
 	return false
 }
 
-func TestProbe_EnoStorageClass_NoController(t *testing.T) {
-	sc := newStorageClass(kaitoStorageClassName, managedByEno)
-	c := probeClientBuilderWithWorkspace(t).
-		WithObjects(sc).
-		Build()
+func TestProbe_NoController(t *testing.T) {
+	c := probeClientBuilderWithWorkspace(t).Build()
 
 	got := probeUpstreamController(context.Background(), c)
 
 	if got.Healthy {
 		t.Error("expected Healthy=false")
 	}
-	if got.Reason != ReasonEnoPartialInstall {
-		t.Errorf("expected Reason=%s, got %s", ReasonEnoPartialInstall, got.Reason)
-	}
-	if got.ManagedBy != managedByEno {
-		t.Errorf("expected ManagedBy=%s, got %s", managedByEno, got.ManagedBy)
-	}
-	if got.Message != enoPartialInstallUserMessage {
-		t.Errorf("unexpected Message: %s", got.Message)
-	}
-}
-
-func TestProbe_HelmStorageClass_NoController(t *testing.T) {
-	sc := newStorageClass(kaitoStorageClassName, managedByHelm)
-	c := probeClientBuilderWithWorkspace(t).
-		WithObjects(sc).
-		Build()
-
-	got := probeUpstreamController(context.Background(), c)
-
 	if got.Reason != ReasonUpstreamControllerMissing {
 		t.Errorf("expected Reason=%s, got %s", ReasonUpstreamControllerMissing, got.Reason)
-	}
-	if got.ManagedBy != managedByHelm {
-		t.Errorf("expected ManagedBy=%s, got %s", managedByHelm, got.ManagedBy)
-	}
-}
-
-func TestProbe_NoStorageClass_NoController(t *testing.T) {
-	c := probeClientBuilderWithWorkspace(t).
-		Build()
-
-	got := probeUpstreamController(context.Background(), c)
-
-	if got.Reason != ReasonUpstreamControllerMissing {
-		t.Errorf("expected Reason=%s, got %s", ReasonUpstreamControllerMissing, got.Reason)
-	}
-	if got.ManagedBy != "" {
-		t.Errorf("expected ManagedBy='', got %q", got.ManagedBy)
 	}
 }
 
@@ -240,8 +182,9 @@ func TestProbe_ControllerNotReady(t *testing.T) {
 }
 
 func TestProbe_CRDMissing(t *testing.T) {
-	// Scheme without kaito.sh registered — List will fail with NoKindMatchError.
-	// We need to create a simple REST mapper that only knows about registered types.
+	// Scheme without kaito.sh registered — the RESTMapper lookup for
+	// kaito.sh/Workspace will fail with NoKindMatchError, which the probe
+	// translates into Reason=CRDMissing.
 	scheme := probeTestScheme(t)
 	mapper := &simpleMapper{scheme: scheme}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(mapper).Build()
@@ -261,12 +204,10 @@ func TestProbe_CRDMissing(t *testing.T) {
 	_ = meta.NoKindMatchError{}
 	_ = client.InNamespace("")
 	_ = appsv1.Deployment{}
-	_ = storagev1.StorageClass{}
 }
 
 func TestProbe_ContextCancelled(t *testing.T) {
-	c := probeClientBuilderWithWorkspace(t).
-		Build()
+	c := probeClientBuilderWithWorkspace(t).Build()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel
@@ -277,8 +218,4 @@ func TestProbe_ContextCancelled(t *testing.T) {
 	if got.Healthy {
 		t.Error("expected Healthy=false on cancelled context")
 	}
-	// The exact reason depends on which step the fake client fails at.
-	// Since the fake client doesn't actually check context cancellation,
-	// it will proceed through the normal probe steps and fail at whichever
-	// resource is missing first. The important thing is that Healthy=false.
 }

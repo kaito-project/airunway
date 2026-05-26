@@ -9,7 +9,6 @@ import (
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1707,17 +1706,10 @@ func TestReconcile_UnhealthyProbeRefusesFast(t *testing.T) {
 			Provider: &airunwayv1alpha1.ProviderStatus{Name: ProviderName},
 		},
 	}
-	sc := &storagev1.StorageClass{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "kaito-local-nvme-disk",
-			Labels: map[string]string{"app.kubernetes.io/managed-by": "Eno"},
-		},
-		Provisioner: "test",
-	}
 	s := newScheme()
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(md).WithStatusSubresource(md).Build()
-	// directC: has Workspace CRD + Eno StorageClass, but NO ready deployment → EnoPartialInstall
-	directC := probeClientBuilderWithWorkspace(t).WithObjects(sc).Build()
+	// directC: has Workspace CRD but no controller Deployment → UpstreamControllerMissing
+	directC := probeClientBuilderWithWorkspace(t).Build()
 	rec := record.NewFakeRecorder(10)
 	r := &KaitoProviderReconciler{
 		Client:           c,
@@ -1747,8 +1739,8 @@ func TestReconcile_UnhealthyProbeRefusesFast(t *testing.T) {
 	// Event must have been recorded.
 	select {
 	case ev := <-rec.Events:
-		if !strings.Contains(ev, ReasonEnoPartialInstall) && !strings.Contains(ev, ReasonUpstreamControllerMissing) {
-			t.Errorf("expected event with upstream reason, got %q", ev)
+		if !strings.Contains(ev, ReasonUpstreamControllerMissing) {
+			t.Errorf("expected event with %s, got %q", ReasonUpstreamControllerMissing, ev)
 		}
 	default:
 		t.Error("expected a Warning event, none recorded")

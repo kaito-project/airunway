@@ -346,19 +346,6 @@ export const mockKaitoCRNewShimHealthy = {
   },
 };
 
-export const mockKaitoCRNewShimEnoPartial = {
-  ...mockInferenceProviderConfig,
-  status: {
-    ready: false,
-    version: 'kaito-provider:v0.1.0',
-    lastHeartbeat: freshHeartbeat,
-    conditions: [
-      { type: 'UpstreamReady', status: 'False', reason: 'EnoPartialInstall', message: 'This cluster was set up with --enable-ai-toolchain-operator...' },
-      { type: 'UpstreamManagedBy', status: 'True', reason: 'Eno', message: 'Upstream KAITO resources are managed by the AKS AI toolchain operator (Eno).' },
-    ],
-  },
-};
-
 export const mockKaitoCROldShim = {
   ...mockInferenceProviderConfig,
   status: {
@@ -379,24 +366,4 @@ export const mockKaitoCRStale = {
       { type: 'UpstreamReady', status: 'True', reason: 'UpstreamHealthy', message: 'ok' },
     ],
   },
-};
-
-export const mockEnoStorageClass = {
-  apiVersion: 'storage.k8s.io/v1',
-  kind: 'StorageClass',
-  metadata: {
-    name: 'kaito-local-nvme-disk',
-    labels: { 'app.kubernetes.io/managed-by': 'Eno' },
-  },
-  provisioner: 'test',
-};
-
-export const mockHelmStorageClass = {
-  apiVersion: 'storage.k8s.io/v1',
-  kind: 'StorageClass',
-  metadata: {
-    name: 'kaito-local-nvme-disk',
-    labels: { 'app.kubernetes.io/managed-by': 'Helm' },
-  },
-  provisioner: 'test',
 };

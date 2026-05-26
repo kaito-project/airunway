@@ -16,11 +16,8 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
-	storagev1 "k8s.io/api/storage/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -28,10 +25,9 @@ import (
 // The probe is called from both the heartbeat loop (writing InferenceProviderConfig.status)
 // and the ModelDeployment reconcile loop (refuse-fast when upstream is broken).
 type UpstreamHealth struct {
-	Healthy   bool
-	Reason    string // one of the Reason* constants
-	Message   string // user-facing, safe to surface in CR status
-	ManagedBy string // "Helm", "Eno", or "" (unknown / no candidate resource)
+	Healthy bool
+	Reason  string // one of the Reason* constants
+	Message string // user-facing, safe to surface in CR status
 }
 
 // Reason codes stamped into InferenceProviderConfig.status.conditions[UpstreamReady]
@@ -41,21 +37,15 @@ const (
 	ReasonCRDMissing                 = "CRDMissing"
 	ReasonUpstreamControllerMissing  = "UpstreamControllerMissing"
 	ReasonUpstreamControllerNotReady = "UpstreamControllerNotReady"
-	ReasonEnoPartialInstall          = "EnoPartialInstall"
 	ReasonProbeFailed                = "ProbeFailed"
 	ReasonUnregistered               = "Unregistered" // stamped by MarkUnregistered on shim shutdown
 )
 
-// Well-known resource names the probe looks up.
+// Well-known resource selectors the probe looks up.
 const (
-	kaitoStorageClassName         = "kaito-local-nvme-disk"
 	kaitoDeploymentSelectorKey    = "app.kubernetes.io/name"
 	kaitoDeploymentSelectorValue  = "workspace"
-	managedByLabel                = "app.kubernetes.io/managed-by"
-	managedByEno                  = "Eno"
-	managedByHelm                 = "Helm"
-	enoPartialInstallUserMessage  = "This cluster was set up with `--enable-ai-toolchain-operator`, which installs KAITO partially (CRDs and StorageClass only). The KAITO workspace controller is not running. Options: (1) disable the AKS extension with `az aks update --disable-ai-toolchain-operator ...` and then click Install KAITO, or (2) install the `kaito-workspace` controller manually."
-	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install KAITO with `helm install kaito-workspace kaito/workspace`."
+	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install KAITO with `helm install kaito-workspace kaito/workspace`. If this cluster was provisioned with `--enable-ai-toolchain-operator`, disable the AKS extension first (`az aks update --disable-ai-toolchain-operator ...`)."
 	controllerNotReadyUserMessage = "The KAITO workspace controller Deployment %s/%s exists but has no ready replicas."
 	crdMissingUserMessage         = "KAITO Workspace CRD not found. Install KAITO."
 )
@@ -68,12 +58,12 @@ const (
 // informer caches.
 //
 // Probe order:
-//  1. Detect CRD presence (via meta.NoKindMatchError on workspaces list)
-//  2. Detect Eno signal (via the kaito-local-nvme-disk StorageClass label)
-//  3. Find the controller Deployment by label
-//  4. Any unexpected API error returns Reason=ProbeFailed
+//  1. Detect CRD presence via a RESTMapper lookup for kaito.sh/Workspace
+//     (NoKindMatchError ⇒ CRD missing).
+//  2. Find the controller Deployment by label and check ReadyReplicas.
+//  3. Any unexpected API error returns Reason=ProbeFailed.
 func probeUpstreamController(ctx context.Context, direct client.Client) UpstreamHealth {
-	// Step 1: Detect CRD presence by checking the REST mapper.
+	// Step 1: Detect CRD presence via the REST mapper.
 	workspaceGVK := schema.GroupVersionKind{
 		Group:   "kaito.sh",
 		Version: "v1beta1",
@@ -95,8 +85,8 @@ func probeUpstreamController(ctx context.Context, direct client.Client) Upstream
 		}
 	}
 
-	// Step 2: Detect Eno signal from the well-known StorageClass.
-	managedBy, err := getStorageClassManagedBy(ctx, direct)
+	// Step 2: Find the controller Deployment by label.
+	deploy, found, err := listWorkspaceController(ctx, direct)
 	if err != nil {
 		return UpstreamHealth{
 			Healthy: false,
@@ -104,48 +94,26 @@ func probeUpstreamController(ctx context.Context, direct client.Client) Upstream
 			Message: err.Error(),
 		}
 	}
-
-	// Step 3: Find the controller Deployment by label.
-	deploy, found, err := listWorkspaceController(ctx, direct)
-	if err != nil {
-		return UpstreamHealth{
-			Healthy:   false,
-			Reason:    ReasonProbeFailed,
-			Message:   err.Error(),
-			ManagedBy: managedBy,
-		}
-	}
 	if !found {
-		if managedBy == managedByEno {
-			return UpstreamHealth{
-				Healthy:   false,
-				Reason:    ReasonEnoPartialInstall,
-				Message:   enoPartialInstallUserMessage,
-				ManagedBy: managedByEno,
-			}
-		}
 		return UpstreamHealth{
-			Healthy:   false,
-			Reason:    ReasonUpstreamControllerMissing,
-			Message:   controllerMissingUserMessage,
-			ManagedBy: managedBy,
+			Healthy: false,
+			Reason:  ReasonUpstreamControllerMissing,
+			Message: controllerMissingUserMessage,
 		}
 	}
 
-	// Step 4: Deployment found — healthy if ReadyReplicas > 0, otherwise NotReady.
+	// Step 3: Deployment found — healthy if ReadyReplicas > 0, otherwise NotReady.
 	if deploy.Status.ReadyReplicas > 0 {
 		return UpstreamHealth{
-			Healthy:   true,
-			Reason:    ReasonUpstreamHealthy,
-			Message:   fmt.Sprintf("KAITO workspace controller %s/%s is ready", deploy.Namespace, deploy.Name),
-			ManagedBy: managedBy,
+			Healthy: true,
+			Reason:  ReasonUpstreamHealthy,
+			Message: fmt.Sprintf("KAITO workspace controller %s/%s is ready", deploy.Namespace, deploy.Name),
 		}
 	}
 	return UpstreamHealth{
-		Healthy:   false,
-		Reason:    ReasonUpstreamControllerNotReady,
-		Message:   fmt.Sprintf(controllerNotReadyUserMessage, deploy.Namespace, deploy.Name),
-		ManagedBy: managedBy,
+		Healthy: false,
+		Reason:  ReasonUpstreamControllerNotReady,
+		Message: fmt.Sprintf(controllerNotReadyUserMessage, deploy.Namespace, deploy.Name),
 	}
 }
 
@@ -158,24 +126,6 @@ func isNoKindMatch(err error) bool {
 	}
 	var nkm *meta.NoKindMatchError
 	return errors.As(err, &nkm)
-}
-
-// getStorageClassManagedBy reads the kaito-local-nvme-disk StorageClass and
-// returns its app.kubernetes.io/managed-by label. Returns "" if the
-// StorageClass does not exist; returns an error for any other failure.
-func getStorageClassManagedBy(ctx context.Context, direct client.Client) (string, error) {
-	sc := &storagev1.StorageClass{}
-	err := direct.Get(ctx, types.NamespacedName{Name: kaitoStorageClassName}, sc)
-	if apierrors.IsNotFound(err) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("get storageclass %q: %w", kaitoStorageClassName, err)
-	}
-	if sc.Labels == nil {
-		return "", nil
-	}
-	return sc.Labels[managedByLabel], nil
 }
 
 // listWorkspaceController returns the first Deployment matching the KAITO
