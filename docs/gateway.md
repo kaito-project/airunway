@@ -270,14 +270,17 @@ spec:
     engines:
       - name: vllm
         gateway:
+          managesInferencePool: true                # Provider creates and owns the InferencePool/EPP
           inferencePoolNamePattern: "{name}-pool"   # Pattern for the pool name
           inferencePoolNamespace: "{namespace}"     # Namespace where the pool is created
       - name: sglang
         gateway:
+          managesInferencePool: true
           inferencePoolNamePattern: "{name}-pool"
           inferencePoolNamespace: "{namespace}"
       - name: trtllm
         gateway:
+          managesInferencePool: true
           inferencePoolNamePattern: "{name}-pool"
           inferencePoolNamespace: "{namespace}"
 ```

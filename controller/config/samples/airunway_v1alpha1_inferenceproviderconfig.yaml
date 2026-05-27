@@ -42,18 +42,21 @@ spec:
         servingModes: [aggregated, disaggregated]
         gpuSupport: true
         gateway:
+          managesInferencePool: true
           inferencePoolNamePattern: "{name}-pool"
           inferencePoolNamespace: "{namespace}"
       - name: sglang
         servingModes: [aggregated, disaggregated]
         gpuSupport: true
         gateway:
+          managesInferencePool: true
           inferencePoolNamePattern: "{name}-pool"
           inferencePoolNamespace: "{namespace}"
       - name: trtllm
         servingModes: [aggregated]
         gpuSupport: true
         gateway:
+          managesInferencePool: true
           inferencePoolNamePattern: "{name}-pool"
           inferencePoolNamespace: "{namespace}"
   selectionRules:
