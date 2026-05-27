@@ -4,6 +4,11 @@ export type ProviderHealth = {
   reason: string;
   message: string;
   stale: boolean;
+  // True when the CR carries an explicit UpstreamReady condition from the
+  // provider shim. Callers use this to decide whether `reason`/`message`
+  // contain a shim-authored explanation worth surfacing, versus the generic
+  // Ready/NotReady fallback derived from status.ready alone.
+  hasShimSignal: boolean;
   lastHeartbeat?: string;
 };
 
@@ -30,6 +35,7 @@ export function getProviderHealth(providerId: string, config: any): ProviderHeal
   const status = config?.status ?? {};
   const conditions: Array<any> = status.conditions ?? [];
   const upstreamReady = conditions.find((c: any) => c.type === 'UpstreamReady');
+  const hasShimSignal = !!upstreamReady;
   const lastHeartbeat: string | undefined = status.lastHeartbeat;
   const ready: boolean = status.ready === true;
 
@@ -46,6 +52,7 @@ export function getProviderHealth(providerId: string, config: any): ProviderHeal
       reason: 'ShimStale',
       message: 'The provider is not reporting status. Check that the AI Runway provider shim is running.',
       stale: true,
+      hasShimSignal,
       lastHeartbeat,
     };
   }
@@ -56,6 +63,7 @@ export function getProviderHealth(providerId: string, config: any): ProviderHeal
     reason: upstreamReady?.reason ?? (ready ? 'Ready' : 'NotReady'),
     message: upstreamReady?.message ?? (ready ? 'Provider is installed and running' : 'Provider is not ready'),
     stale: false,
+    hasShimSignal,
     lastHeartbeat,
   };
 }

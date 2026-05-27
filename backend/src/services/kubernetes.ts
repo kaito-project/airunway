@@ -761,13 +761,15 @@ class KubernetesService {
             const runtimeStatus = await this.checkProviderInstallationStatus(name, status, displayName, requiresCRD);
 
             // Layer the shim's heartbeat-aware view over the live installation
-            // check: if the shim hasn't reported recently, surface that as the
-            // message so users know the status may be out of date. Structural
+            // check: prefer the shim's message when it carries an actionable
+            // signal (stale heartbeat, or a fresh UpstreamReady=False from the
+            // refuse-fast path) so users see the specific reason. Structural
             // fields (installed/operatorRunning) stay sourced from the live
             // check — they reflect what's actually in the cluster.
             const { getProviderHealth } = await import('./providerHealth');
             const health = getProviderHealth(name, item);
-            const message = health.stale ? health.message : runtimeStatus.message;
+            const useShimMessage = health.stale || (!health.healthy && health.hasShimSignal);
+            const message = useShimMessage ? health.message : runtimeStatus.message;
 
             return {
               id: name,

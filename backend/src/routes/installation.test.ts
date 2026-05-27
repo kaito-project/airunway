@@ -375,6 +375,47 @@ describe('Installation Provider Routes', () => {
       const res = await app.request('/api/installation/providers/unknown/status');
       expect(res.status).toBe(404);
     });
+
+    test('surfaces shim refuse-fast message when UpstreamReady=False is fresh', async () => {
+      const freshHeartbeat = new Date(Date.now() - 30_000).toISOString();
+      const configWithRefuseFast = {
+        ...mockInferenceProviderConfig,
+        status: {
+          ready: false,
+          version: 'kaito-provider:v0.1.0',
+          lastHeartbeat: freshHeartbeat,
+          conditions: [
+            {
+              type: 'UpstreamReady',
+              status: 'False',
+              reason: 'UpstreamControllerMissing',
+              message: 'The KAITO workspace controller is not running. Install KAITO with `helm install kaito-workspace kaito/workspace`.',
+            },
+          ],
+        },
+      };
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithRefuseFast),
+        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+          installed: true,
+          crdFound: true,
+          operatorRunning: true,
+          message: 'KAITO is installed and running',
+        })),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/status');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      // Structural fields stay sourced from the live installation check.
+      expect(data.installed).toBe(true);
+      expect(data.operatorRunning).toBe(true);
+      // Message should be the shim's specific refuse-fast guidance, not the
+      // generic live-probe message.
+      expect(data.message).toContain('The KAITO workspace controller is not running');
+    });
   });
 
   // ==========================================================================

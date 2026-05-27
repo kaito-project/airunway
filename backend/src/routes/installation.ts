@@ -235,15 +235,17 @@ const installation = new Hono()
       provider.requiresCRD,
     );
     // Layer the shim's heartbeat-aware health view on top of the live
-    // installation check. We only swap the user-visible message when the shim
-    // looks stale — structural fields (installed/operatorRunning) stay sourced
-    // from installationStatus since that reflects what's actually in the
-    // cluster regardless of the shim's reporting state.
+    // installation check. Prefer the shim's message whenever it has an
+    // actionable signal — either a stale heartbeat OR a fresh UpstreamReady
+    // condition reporting unhealthy (the refuse-fast path). Structural fields
+    // (installed/operatorRunning) stay sourced from installationStatus since
+    // that reflects what's actually in the cluster regardless of shim state.
     const health = getProviderHealth(providerId, config);
     const baseMessage = hasInstallMetadata || provider.requiresCRD === false
       ? installationStatus.message
       : `No installation metadata found for provider ${providerId}`;
-    const message = health.stale ? health.message : baseMessage;
+    const useShimMessage = health.stale || (!health.healthy && health.hasShimSignal);
+    const message = useShimMessage ? health.message : baseMessage;
 
     return c.json({
       providerId: provider.id,
