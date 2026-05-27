@@ -1,10 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import app from './hono-app';
+import app, { parseCorsOrigin } from './hono-app';
 import { kubernetesService } from './services/kubernetes';
 import { configService } from './services/config';
 import { authService } from './services/auth';
 import { mockServiceMethod } from './test/helpers';
 import { mockDeployment } from './test/fixtures';
+import { HTTPException } from 'hono/http-exception';
 
 // Helper to add timeout to async operations for K8s-dependent tests
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -58,6 +59,14 @@ function createChunkedErrorStream(chunks: string[]): {
   };
 }
 
+app.get('/__test/http-exception/internal', () => {
+  throw new HTTPException(500, { message: 'database password is secret' });
+});
+
+app.get('/__test/http-exception/bad-request', () => {
+  throw new HTTPException(400, { message: 'client supplied an invalid value' });
+});
+
 describe('Hono Routes', () => {
   describe('Health Routes', () => {
     test('GET /api/health returns healthy status', async () => {
@@ -66,6 +75,44 @@ describe('Hono Routes', () => {
       const data = await res.json();
       expect(data.status).toBe('healthy');
       expect(data.timestamp).toBeDefined();
+    });
+  });
+
+  describe('CORS', () => {
+    const defaultCorsTest = process.env.CORS_ORIGIN === undefined ? test : test.skip;
+
+    defaultCorsTest('default CORS allows loopback origins and rejects non-loopback origins', async () => {
+      const loopbackOrigins = [
+        'http://localhost:4466',
+        'http://127.0.0.1:4466',
+        'http://[::1]:4466',
+      ];
+
+      for (const loopbackOrigin of loopbackOrigins) {
+        const loopbackRes = await app.request('/api/health', {
+          headers: { Origin: loopbackOrigin },
+        });
+        expect(loopbackRes.headers.get('Access-Control-Allow-Origin')).toBe(loopbackOrigin);
+      }
+
+      const externalRes = await app.request('/api/health', {
+        headers: { Origin: 'https://example.com' },
+      });
+      expect(externalRes.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    });
+
+    test('empty CORS_ORIGIN falls back to loopback origins', () => {
+      const origin = parseCorsOrigin(' , ');
+      expect(typeof origin).toBe('function');
+
+      if (typeof origin !== 'function') {
+        throw new Error('expected empty CORS_ORIGIN fallback to be a function');
+      }
+
+      expect(origin('http://localhost:4466', {} as never)).toBe('http://localhost:4466');
+      expect(origin('http://127.0.0.1:4466', {} as never)).toBe('http://127.0.0.1:4466');
+      expect(origin('http://[::1]:4466', {} as never)).toBe('http://[::1]:4466');
+      expect(origin('https://example.com', {} as never)).toBeNull();
     });
   });
 
@@ -1270,6 +1317,34 @@ describe('Hono Routes', () => {
       } finally {
         restoreValidate();
       }
+    });
+
+    test('health-like paths do not bypass auth when AUTH_ENABLED=true', async () => {
+      process.env.AUTH_ENABLED = 'true';
+
+      for (const path of ['/api/healthz', '/api/health/foo']) {
+        const res = await app.request(path);
+        expect(res.status).toBe(401);
+        const data = await res.json();
+        expect(data.error.message).toBe('Authentication required');
+      }
+    });
+  });
+
+  describe('Error Handling', () => {
+    test('sanitizes 5xx HTTPException messages', async () => {
+      const res = await app.request('/__test/http-exception/internal');
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error.message).toBe('Internal Server Error');
+      expect(data.error.message).not.toContain('database password');
+    });
+
+    test('preserves 4xx HTTPException messages', async () => {
+      const res = await app.request('/__test/http-exception/bad-request');
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error.message).toBe('client supplied an invalid value');
     });
   });
 
