@@ -163,9 +163,10 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	previousEntry := r.phaseCache[req.NamespacedName]
 	r.phaseCacheMu.RUnlock()
 
-	// Record metrics only when the status Patch succeeds. If the Patch fails,
-	// the status wasn't persisted and the retry will re-reconcile from the old
-	// state, so recording now would double-count phase transitions and skew gauges.
+	// Record metrics when reconciliation returns without error. This includes
+	// successful status patches and early-return paths (deletion, pause) where
+	// the in-memory state still reflects the API. On error, we skip metrics
+	// because the retry will re-reconcile from the old state.
 	defer func() {
 		if retErr == nil {
 			r.recordMetrics(&md, previousEntry)
