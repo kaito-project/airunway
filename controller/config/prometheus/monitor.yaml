@@ -23,9 +23,9 @@ spec:
         # which securely references the certificate from the 'metrics-server-cert' secret.
         insecureSkipVerify: true
   namespaceSelector:
-    matchNames:
-      - airunway-system
+    any: true
   selector:
     matchLabels:
       control-plane: controller-manager
       app.kubernetes.io/name: airunway
+  scrapeClassicHistograms: true
