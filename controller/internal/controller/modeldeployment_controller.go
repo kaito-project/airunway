@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -43,6 +44,7 @@ import (
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
 	"github.com/kaito-project/airunway/controller/internal/gateway"
+	airmetrics "github.com/kaito-project/airunway/controller/internal/metrics"
 	"github.com/kaito-project/airunway/controller/internal/validation"
 )
 
@@ -60,6 +62,34 @@ type ModelDeploymentReconciler struct {
 	// ProviderResolver looks up gateway capabilities from InferenceProviderConfig CRs.
 	// When nil, the reconciler treats all providers as having no gateway capabilities.
 	ProviderResolver gateway.ProviderCapabilityResolver
+
+	// phaseCache tracks the last observed phase per ModelDeployment for detecting transitions.
+	phaseCacheMu sync.RWMutex
+	phaseCache   map[k8stypes.NamespacedName]phaseEntry
+}
+
+// phaseEntry holds per-deployment metrics state that the K8s API cannot
+// provide: previous phase, wall-clock timestamps, one-shot guards, and
+// aggregate gauge data. Volatile on restart; transitions are skipped
+// until each deployment reconciles again.
+type phaseEntry struct {
+	// Phase is the last observed deployment phase.
+	Phase airunwayv1alpha1.DeploymentPhase
+	// Provider is the provider name for this deployment, used to aggregate metrics.
+	Provider string
+	// Replicas holds the last observed replica counts (desired, ready, available).
+	Replicas [3]int32
+	// DeployingTimestamp records when the Deploying phase was first observed.
+	// Used to compute provision duration (Deploying→Running wall-clock time).
+	DeployingTimestamp time.Time
+	// RunningMetricsRecorded tracks whether one-time Running metrics (lead time,
+	// provision duration) have already been recorded for this deployment lifecycle.
+	RunningMetricsRecorded bool
+	// MetricsInitialized tracks whether DORA metric label combinations have been
+	// pre-initialized for this deployment's provider. This ensures Prometheus sees
+	// zero-valued counters/histograms before any real observations, so that
+	// increase() correctly reports the first event.
+	MetricsInitialized bool
 }
 
 // celEnvOnce lazily initializes a shared CEL environment for evaluating selection rules.
@@ -78,6 +108,10 @@ func getCELEnv() (*cel.Env, error) {
 	})
 	return celEnvInst, celEnvErr
 }
+
+const (
+	ExplicitProviderSelectionReason = "explicit provider selection"
+)
 
 // +kubebuilder:rbac:groups=airunway.ai,resources=modeldeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=airunway.ai,resources=modeldeployments/status,verbs=get;update;patch
@@ -105,19 +139,43 @@ func getCELEnv() (*cel.Env, error) {
 //
 // Provider controllers (out-of-tree) watch for ModelDeployments where status.provider.name
 // matches their name and handle the actual resource creation.
-func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
+	reconcileStart := time.Now()
 	logger := log.FromContext(ctx)
 
-	// Fetch the ModelDeployment
 	var md airunwayv1alpha1.ModelDeployment
+
+	// Record reconciliation duration when a provider is known.
+	defer func() {
+		if md.Status.Provider != nil {
+			airmetrics.ReconciliationDurationSeconds.WithLabelValues(md.Status.Provider.Name).Observe(time.Since(reconcileStart).Seconds())
+		}
+	}()
+
+	// Fetch the ModelDeployment
 	if err := r.Get(ctx, req.NamespacedName, &md); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			// MD was deleted — check if the namespace should be removed from
-			// the Gateway's allowedRoutes.
+			// MD was deleted — clean up phase cache, gauges, and gateway routes.
+			r.cleanupMetrics(req.NamespacedName)
 			r.cleanupGatewayAllowedRoutesForNamespace(ctx, req.Namespace)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	// Capture previous phase entry for transition detection.
+	r.phaseCacheMu.RLock()
+	previousEntry := r.phaseCache[req.NamespacedName]
+	r.phaseCacheMu.RUnlock()
+
+	// Record metrics when reconciliation returns without error. This includes
+	// successful status patches and early-return paths (deletion, pause) where
+	// the in-memory state still reflects the API. On error, we skip metrics
+	// because the retry will re-reconcile from the old state.
+	defer func() {
+		if retErr == nil {
+			r.recordMetrics(&md, previousEntry)
+		}
+	}()
 
 	// Save a deep copy as the patch base so we only send changed status fields.
 	// This avoids clobbering status fields set by out-of-tree provider controllers.
@@ -130,6 +188,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if !md.DeletionTimestamp.IsZero() {
 		if err := r.cleanupGatewayResources(ctx, &md); err != nil {
 			logger.Error(err, "Failed to clean up gateway resources on deletion")
+			r.recordReconcileError(&md, "gateway")
 		}
 		return ctrl.Result{}, nil
 	}
@@ -179,6 +238,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			logger.Error(err, "Engine selection failed", "name", md.Name)
 			r.setCondition(&md, airunwayv1alpha1.ConditionTypeEngineSelected, metav1.ConditionFalse, "SelectionFailed", err.Error())
 			md.Status.Message = fmt.Sprintf("Engine selection failed: %s", err.Error())
+			r.recordReconcileError(&md, "engine_selection")
 			return ctrl.Result{}, r.Status().Patch(ctx, &md, client.MergeFrom(base))
 		}
 	}
@@ -195,6 +255,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.setCondition(&md, airunwayv1alpha1.ConditionTypeValidated, metav1.ConditionFalse, "ValidationFailed", err.Error())
 		md.Status.Phase = airunwayv1alpha1.DeploymentPhaseFailed
 		md.Status.Message = fmt.Sprintf("Validation failed: %s", err.Error())
+		r.recordReconcileError(&md, "validation")
 		return ctrl.Result{}, r.Status().Patch(ctx, &md, client.MergeFrom(base))
 	}
 	r.setCondition(&md, airunwayv1alpha1.ConditionTypeValidated, metav1.ConditionTrue, "ValidationPassed", "Schema validation passed")
@@ -215,6 +276,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			logger.Error(err, "Provider selection failed", "name", md.Name)
 			r.setCondition(&md, airunwayv1alpha1.ConditionTypeProviderSelected, metav1.ConditionFalse, "SelectionFailed", err.Error())
 			md.Status.Message = fmt.Sprintf("Provider selection failed: %s", err.Error())
+			r.recordReconcileError(&md, "provider_selection")
 			return ctrl.Result{}, r.Status().Patch(ctx, &md, client.MergeFrom(base))
 		}
 	}
@@ -226,7 +288,7 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// User explicitly specified a provider
 			md.Status.Provider = &airunwayv1alpha1.ProviderStatus{
 				Name:           md.Spec.Provider.Name,
-				SelectedReason: "explicit provider selection",
+				SelectedReason: ExplicitProviderSelectionReason,
 			}
 			r.setCondition(&md, airunwayv1alpha1.ConditionTypeProviderSelected, metav1.ConditionTrue, "ExplicitSelection", "Provider explicitly specified in spec")
 		} else if !r.EnableProviderSelector {
@@ -255,10 +317,12 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// Gateway explicitly disabled — clean up any existing resources
 			if err := r.cleanupGatewayResources(ctx, &md); err != nil {
 				logger.Error(err, "Failed to clean up gateway resources")
+				r.recordReconcileError(&md, "gateway")
 			}
 		} else {
 			if err := r.reconcileGateway(ctx, &md); err != nil {
 				logger.Error(err, "Gateway reconciliation failed", "name", md.Name)
+				r.recordReconcileError(&md, "gateway")
 				// If the error suggests CRDs were removed, refresh the detection cache
 				if isNoMatchError(err) && r.GatewayDetector != nil {
 					logger.Info("Gateway CRDs may have been removed, refreshing detection cache")
@@ -632,6 +696,172 @@ func (r *ModelDeploymentReconciler) setCondition(md *airunwayv1alpha1.ModelDeplo
 	meta.SetStatusCondition(&md.Status.Conditions, condition)
 }
 
+// recordMetrics updates all Prometheus metrics for the current ModelDeployment state.
+func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDeployment, previous phaseEntry) {
+	// Lazy-init the phase cache so recordMetrics is safe even if SetupWithManager was not called
+	// (e.g. in unit tests that invoke Reconcile directly).
+	r.phaseCacheMu.Lock()
+	if r.phaseCache == nil {
+		r.phaseCache = make(map[k8stypes.NamespacedName]phaseEntry)
+	}
+	r.phaseCacheMu.Unlock()
+
+	providerName := ""
+	if md.Status.Provider != nil {
+		providerName = md.Status.Provider.Name
+	}
+	currentPhase := md.Status.Phase
+	key := k8stypes.NamespacedName{Name: md.Name, Namespace: md.Namespace}
+
+	// Known phases used to zero-initialize all label combinations for this provider.
+	phases := []string{"Pending", "Deploying", "Running", "Failed", "Terminating"}
+
+	// Build the updated phase entry. Start from the previous entry to preserve timestamps.
+	entry := previous
+
+	// Update replica counts and provider in the entry for aggregate computation
+	if md.Status.Replicas != nil {
+		entry.Replicas = [3]int32{md.Status.Replicas.Desired, md.Status.Replicas.Ready, md.Status.Replicas.Available}
+	} else {
+		entry.Replicas = [3]int32{}
+	}
+	entry.Provider = providerName
+
+	// Zero-initialize all known label combinations so that increase() and
+	// rate() work correctly from the first scrape.
+	if providerName != "" && !previous.MetricsInitialized {
+		airmetrics.ReadyDurationSeconds.WithLabelValues(providerName)
+		airmetrics.ProvisionDurationSeconds.WithLabelValues(providerName)
+		airmetrics.ReconciliationDurationSeconds.WithLabelValues(providerName)
+		for _, errType := range []string{"validation", "engine_selection", "provider_selection", "gateway"} {
+			airmetrics.ReconciliationErrorsTotal.WithLabelValues(providerName, errType)
+		}
+		for _, reason := range []string{"manual", "auto"} {
+			airmetrics.ProviderSelection.WithLabelValues(providerName, reason)
+		}
+		for _, from := range phases {
+			for _, to := range phases {
+				if from != to {
+					airmetrics.PhaseTransitionsTotal.WithLabelValues(providerName, from, to)
+				}
+			}
+		}
+		entry.MetricsInitialized = true
+	}
+
+	// Record provider selection counter.
+	// When the previous provider is empty and a new provider is assigned, it indicates a selection event occured,
+	// either auto or manual. We use the presence of the ExplicitProviderSelectionReason reason to distinguish between them.
+	if previous.Provider == "" && providerName != "" {
+		reason := "auto"
+		if md.Status.Provider != nil && md.Status.Provider.SelectedReason == ExplicitProviderSelectionReason {
+			reason = "manual"
+		}
+		airmetrics.ProviderSelection.WithLabelValues(providerName, reason).Inc()
+	}
+
+	// Record phase transition counter.
+	// When previous.Phase is empty (first reconciliation or after controller restart),
+	// we skip recording a transition to avoid a spurious "" -> X event.
+	if previous.Phase != "" && currentPhase != previous.Phase {
+		// Skip recording transitions that involve deployments without providers.
+		if providerName != "" {
+			airmetrics.PhaseTransitionsTotal.WithLabelValues(
+				providerName, string(previous.Phase), string(currentPhase),
+			).Inc()
+		}
+	}
+
+	// Track when the Deploying phase starts. This gives us a reliable wall-clock
+	// anchor for provision duration, immune to condition-timestamp flapping
+	// (e.g. ResourceCreated being toggled by conflict retries).
+	if currentPhase == airunwayv1alpha1.DeploymentPhaseDeploying && previous.Phase != airunwayv1alpha1.DeploymentPhaseDeploying {
+		entry.DeployingTimestamp = time.Now()
+	}
+
+	// Record one-time Running metrics only when we observe an actual phase
+	// transition into Running. This avoids duplicate/inflated lead-time samples
+	// after controller restarts, where the in-memory cache is empty and the
+	// previous phase is unknown.
+	transitionedToRunning := currentPhase == airunwayv1alpha1.DeploymentPhaseRunning &&
+		previous.Phase != "" &&
+		previous.Phase != airunwayv1alpha1.DeploymentPhaseRunning
+	if transitionedToRunning && !previous.RunningMetricsRecorded {
+		// Skip recording if provider is not known.
+		if providerName != "" {
+			// Lead time: wall-clock time from CR creation to first observed transition
+			// into Running.
+			leadTime := time.Since(md.CreationTimestamp.Time).Seconds()
+			airmetrics.ReadyDurationSeconds.WithLabelValues(providerName).Observe(leadTime)
+
+			// Provision duration: wall-clock time from Deploying to Running.
+			// Only recorded when we observed the Deploying phase start (i.e. the
+			// controller was running when the deployment first entered Deploying).
+			if !entry.DeployingTimestamp.IsZero() {
+				provisionDuration := time.Since(entry.DeployingTimestamp).Seconds()
+				airmetrics.ProvisionDurationSeconds.WithLabelValues(providerName).Observe(provisionDuration)
+			}
+
+			entry.RunningMetricsRecorded = true
+		}
+	}
+
+	// Reset RunningMetricsRecorded when leaving Running (allows re-recording if
+	// deployment cycles back through Deploying→Running, e.g. after a rollback).
+	if currentPhase != airunwayv1alpha1.DeploymentPhaseRunning {
+		entry.RunningMetricsRecorded = false
+	}
+
+	// Update the phase cache and apply gauge deltas (decrement old, increment new).
+	entry.Phase = currentPhase
+	r.phaseCacheMu.Lock()
+	decrementPhaseEntryGauges(previous)
+	incrementPhaseEntryGauges(entry)
+	r.phaseCache[key] = entry
+	r.phaseCacheMu.Unlock()
+}
+
+// decrementPhaseEntryGauges subtracts a phaseEntry's contributions from the aggregate gauges.
+func decrementPhaseEntryGauges(e phaseEntry) {
+	replicaStates := []string{"desired", "ready", "available"}
+	if e.Phase != "" {
+		airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Dec()
+	}
+	for i, s := range replicaStates {
+		airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Sub(float64(e.Replicas[i]))
+	}
+}
+
+// incrementPhaseEntryGauges adds a phaseEntry's contributions to the aggregate gauges.
+func incrementPhaseEntryGauges(e phaseEntry) {
+	replicaStates := []string{"desired", "ready", "available"}
+	if e.Phase != "" {
+		airmetrics.DeploymentStatus.WithLabelValues(e.Provider, string(e.Phase)).Inc()
+	}
+	for i, s := range replicaStates {
+		airmetrics.DeploymentReplicas.WithLabelValues(e.Provider, s).Add(float64(e.Replicas[i]))
+	}
+}
+
+// cleanupMetrics decrements aggregate gauges and removes the phase cache entry for a deleted ModelDeployment.
+func (r *ModelDeploymentReconciler) cleanupMetrics(key k8stypes.NamespacedName) {
+	r.phaseCacheMu.Lock()
+	if old, ok := r.phaseCache[key]; ok {
+		decrementPhaseEntryGauges(old)
+		delete(r.phaseCache, key)
+	}
+	r.phaseCacheMu.Unlock()
+}
+
+// recordReconcileError records a reconciliation error metric.
+// Skipped when no provider is assigned to avoid empty-label series.
+func (r *ModelDeploymentReconciler) recordReconcileError(md *airunwayv1alpha1.ModelDeployment, errorType string) {
+	if md.Status.Provider == nil {
+		return
+	}
+	airmetrics.ReconciliationErrorsTotal.WithLabelValues(md.Status.Provider.Name, errorType).Inc()
+}
+
 func providerConfigChangePredicate() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc: func(event.CreateEvent) bool {
@@ -705,6 +935,8 @@ func (r *ModelDeploymentReconciler) mapProviderConfigToModelDeployments(ctx cont
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ModelDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.phaseCache = make(map[k8stypes.NamespacedName]phaseEntry)
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&airunwayv1alpha1.ModelDeployment{}).
 		Watches(
