@@ -109,6 +109,10 @@ func getCELEnv() (*cel.Env, error) {
 	return celEnvInst, celEnvErr
 }
 
+const (
+	ExplicitProviderSelectionReason = "explicit provider selection"
+)
+
 // +kubebuilder:rbac:groups=airunway.ai,resources=modeldeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=airunway.ai,resources=modeldeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=airunway.ai,resources=modeldeployments/finalizers,verbs=update
@@ -284,9 +288,8 @@ func (r *ModelDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// User explicitly specified a provider
 			md.Status.Provider = &airunwayv1alpha1.ProviderStatus{
 				Name:           md.Spec.Provider.Name,
-				SelectedReason: "explicit provider selection",
+				SelectedReason: ExplicitProviderSelectionReason,
 			}
-			airmetrics.ProviderSelection.WithLabelValues(md.Spec.Provider.Name, "manual").Inc()
 			r.setCondition(&md, airunwayv1alpha1.ConditionTypeProviderSelected, metav1.ConditionTrue, "ExplicitSelection", "Provider explicitly specified in spec")
 		} else if !r.EnableProviderSelector {
 			// No provider specified and selector disabled
@@ -564,8 +567,6 @@ func (r *ModelDeploymentReconciler) selectProvider(ctx context.Context, md *airu
 
 	logger.Info("Provider selected", "provider", selectedProvider, "reason", reason)
 
-	airmetrics.ProviderSelection.WithLabelValues(selectedProvider, "auto").Inc()
-
 	md.Status.Provider = &airunwayv1alpha1.ProviderStatus{
 		Name:           selectedProvider,
 		SelectedReason: reason,
@@ -746,6 +747,17 @@ func (r *ModelDeploymentReconciler) recordMetrics(md *airunwayv1alpha1.ModelDepl
 			}
 		}
 		entry.MetricsInitialized = true
+	}
+
+	// Record provider selection counter.
+	// When the previous provider is empty and a new provider is assigned, it indicates a selection event occured,
+	// either auto or manual. We use the presence of the ExplicitProviderSelectionReason reason to distinguish between them.
+	if previous.Provider == "" && providerName != "" {
+		reason := "auto"
+		if md.Status.Provider != nil && md.Status.Provider.SelectedReason == ExplicitProviderSelectionReason {
+			reason = "manual"
+		}
+		airmetrics.ProviderSelection.WithLabelValues(providerName, reason).Inc()
 	}
 
 	// Record phase transition counter.
