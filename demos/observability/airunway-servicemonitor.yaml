@@ -20,8 +20,8 @@ spec:
         insecureSkipVerify: true
   namespaceSelector:
     any: true
+  scrapeClassicHistograms: true
   selector:
     matchLabels:
       app.kubernetes.io/name: airunway
       control-plane: controller-manager
-  scrapeClassicHistograms: true

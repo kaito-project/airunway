@@ -100,7 +100,13 @@ Open [http://localhost:9090/targets](http://localhost:9090/targets) and look for
 > [!TIP]
 > Keep the port-forward for Prometheus server running and run the following commands in a new terminal tab.
 
-To see metrics populate, create a sample ModelDeployment. Without a real provider installed, it will stay in `Pending` phase — but that's enough to generate controller metrics:
+To see metrics populate, create a KAITO provider then a sample KAITO-based ModelDeployment.
+
+```bash
+kubectl apply -f ./providers/kaito/deploy/kaito.yaml
+```
+
+Your KIND cluster will not have enough resources to run the model, so it will stay in `Pending` phase — but that's enough to generate controller metrics:
 
 ```bash
 kubectl apply -f ./demos/observability/sample-modeldeployment.yaml
