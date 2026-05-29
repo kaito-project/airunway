@@ -390,9 +390,10 @@
     <li><a href="#s1">Problem &amp; goals</a></li>
     <li><a href="#s2">Personas</a></li>
     <li><a href="#s3">Design principles</a></li>
-    <li><a href="#s4">Three layers</a></li>
+    <li><a href="#s4">Layers &amp; data path</a></li>
     <li><a href="#s5">Project model</a></li>
     <li><a href="#s6">Observability — MVP</a></li>
+    <li><a href="#s6a">Topology (stretch)</a></li>
     <li><a href="#s7">Workload detection</a></li>
     <li><a href="#s8">Inspektor Gadget</a></li>
     <li><a href="#s9">AKS overlay</a></li>
@@ -412,14 +413,14 @@
   <p class="kicker"><span class="dot"></span>Specification <span class="dot"></span> Draft for stakeholder review</p>
   <h1>AI Runway —<br><em>Projects</em> &amp; the AKS overlay</h1>
   <div class="byline">
-    <span><strong>Date</strong> 2026-05-28</span>
+    <span><strong>Date</strong> 2026-05-29</span>
     <span><strong>Surface</strong> Headlamp plugin</span>
     <span><strong>Repo</strong> kaito-project/airunway</span>
   </div>
 </header>
 
 <section id="tldr" class="tldr">
-  <p>AI Runway today deploys ML models well but does not give operators an <em>application</em> view. v1 of this work adds three things to the Headlamp plugin: a <strong>Project</strong> CRD that groups the resources behind one ML app by label selector, a <strong>Project-scoped Observability tab</strong> that unifies inference-server metrics with Inspektor Gadget kernel diagnostics, and an <strong>AKS overlay</strong> that wires KAITO, Workload Identity, ACR, Gateway API, and an Azure OpenAI fallback — without taking on the Azure ARM control plane. Everything optional fails open with a call-to-action. v1 is scoped at roughly six to ten engineering weeks; v2 covers historical metrics and ARM. The IG-maintainer items in §8 are the only external blockers.</p>
+  <p>AI Runway today deploys ML models well but does not give operators an <em>application</em> view. v1 of this work adds three things to the Headlamp plugin: a <strong>Project</strong> CRD that groups the resources behind one ML app by label selector (with an opt-in secondary-membership label), a <strong>Project-scoped Observability tab</strong> that unifies inference-server metrics with Inspektor Gadget kernel diagnostics, and an <strong>AKS overlay</strong> that wires KAITO, Workload Identity, ACR, Gateway API, and an Azure OpenAI fallback — <em>without any cloud-provider SDK dependency, ever</em>. Azure-specific facts come from K8s labels, CR status, and Portal deep-links. Everything optional fails open with a call-to-action. v1 is scoped at roughly six to ten engineer-weeks (one engineer working sequentially; calendar depends on staffing). A real topology view of each Project is a v1.0 stretch goal. The IG-maintainer items in §8 are the only external blockers.</p>
 </section>
 
 <h2 id="s1"><span class="num">§ 01</span> Problem &amp; goals</h2>
@@ -435,18 +436,18 @@
 <ul>
   <li><strong>Project as a first-class grouping</strong> so an operator can see one ML application end-to-end and bulk-act on it.</li>
   <li><strong>Two-pane observability</strong> scoped to a Project: app metrics from the inference engine, kernel diagnostics from Inspektor Gadget.</li>
-  <li><strong>AKS-aware deploy glue</strong> that removes the most common Azure paper-cuts (KAITO preset, Workload Identity, ACR, HTTPRoute, AOAI fallback) without taking on the Azure ARM control plane.</li>
+  <li><strong>AKS-aware deploy glue</strong> that removes the most common Azure paper-cuts (KAITO preset, Workload Identity, ACR, HTTPRoute, AOAI fallback) without any cloud-provider SDK dep.</li>
 </ul>
 <p>Graceful degradation across all optional dependencies is treated as a design principle, not a goal — see §3.</p>
 
 <h3>Non-goals (v1)</h3>
-<p>Replacing AI Runway's deploy wizard · generic IG browser · alerting / on-call · GitOps integration · multi-cluster Project views · Azure ARM control plane · long-term metric / gadget-result persistence.</p>
+<p>Replacing AI Runway's deploy wizard · generic IG browser · alerting / on-call · GitOps integration · multi-cluster Project views · <em>any</em> cloud SDK use (Azure ARM, AWS, GCP) · long-term metric / gadget-result persistence.</p>
 
 <h3>Success criteria</h3>
 <ul>
   <li>An operator can go from "no Project" to "RAG app deployed, labeled, visible in Projects list with green status, TTFT panel rendering" in under 10 minutes on a fresh AKS cluster with KAITO + IG installed.</li>
-  <li>On a cluster with <strong>none</strong> of the optional deps (no Prometheus, no IG, no KAITO, no Gateway API), every Project page still renders without errors and shows actionable CTAs.</li>
-  <li>Pulling the AKS overlay out into its own repo later is a config change, not a refactor (enforced by the import-direction rule, §4).</li>
+  <li>On a cluster with the AI Runway backend installed (a required install-time dep — see §3 / §6) but <strong>none</strong> of the other optional pieces (no Prometheus, no IG, no KAITO, no Gateway API), every Project page still renders without errors and shows actionable CTAs.</li>
+  <li>The AKS overlay can be pulled out into its own repo later as a config change, not a refactor (enforced by the import-direction rule, §4, and the cloud-neutral data-path rule, §3).</li>
 </ul>
 
 <h2 id="s2"><span class="num">§ 02</span> Personas</h2>
@@ -486,13 +487,15 @@
 
 <h2 id="s3"><span class="num">§ 03</span> Key design principles</h2>
 <ol>
-  <li><strong>Two data planes, treated independently.</strong> AI-workload signal comes from two distinct sources: the <strong>application-metrics plane</strong> (TTFT, TPOT, tokens/s, KV-cache — emitted by the inference server on its Prometheus endpoint) and the <strong>kernel/eBPF plane</strong> (DNS, TCP, OOM, file-I/O — emitted by Inspektor Gadget). They have independent availability and never substitute for each other. IG cannot produce TTFT; an inference server cannot tell you why DNS to HuggingFace is slow.</li>
+  <li><strong>Two data planes, treated independently.</strong> AI-workload signal comes from two distinct sources: the <strong>application-metrics plane</strong> (TTFT, TPOT, tokens/s, KV-cache — emitted by the inference server on its Prometheus endpoint, served to the plugin through the AI Runway backend) and the <strong>kernel/eBPF plane</strong> (DNS, TCP, OOM, file-I/O — emitted by Inspektor Gadget). They have independent availability and never substitute for each other. IG cannot produce TTFT; an inference server cannot tell you why DNS to HuggingFace is slow.</li>
   <li><strong>Inspektor Gadget is provider-neutral.</strong> IG lives in the <strong>core</strong> plugin, scoped to a Project, on any Kubernetes distribution. The AKS overlay only adds AKS-<em>flavored enrichers</em> on top (GPU-SKU fit, NCCL flagging on Azure GPU pools).</li>
-  <li><strong>Project is a CRD with label-selector membership</strong> — not namespace-as-Project. The CRD gives the UI a real object to watch, supports multiple-Projects-per-namespace, and leaves room for status aggregation and (later) ownerRef-style cascades.</li>
-  <li><strong>Graceful degradation is a hard requirement.</strong> Every optional dependency (IG, Prometheus, KAITO, Gateway API, AKS itself) is detected; missing = inline CTA; never a crash.</li>
+  <li><strong>Project is a CRD with label-selector membership</strong> — not namespace-as-Project. The CRD gives the UI a real object to watch, supports multiple-Projects-per-namespace, and leaves room for status aggregation and (later) ownerRef-style cascades. Primary membership is one label; opt-in secondary membership lets a resource belong to additional Projects without creating ambiguity in the common case (§5).</li>
+  <li><strong>Graceful degradation is a hard requirement.</strong> Every optional dependency (IG, Prometheus, KAITO, Gateway API, AKS itself) is detected; missing = inline CTA; never a crash. The AI Runway backend is the one exception: it is a required install-time component (see §6), and its absence is surfaced as "Install or repair AI Runway backend" rather than as silent partial functionality.</li>
+  <li><strong>Don't re-implement Headlamp.</strong> The plugin's job is to add what Headlamp doesn't know about: AI workloads, AI-specific metrics, kernel-level AI diagnostics, and Project-as-an-application grouping. Generic K8s status, events, logs, exec, YAML views, and per-resource aggregation are Headlamp's job — we link to them, not duplicate them. This shapes §5 (Project detail links to Headlamp pages for per-resource detail) and §6 (the overview strip only carries Project-specific items).</li>
+  <li><strong>Detection is explicit and overridable.</strong> Every detector returns a <code>{ detected, confidence, source }</code> triple. Low-confidence detections (e.g., image-name regex) show an inline "override" link. Users can pin a definitive answer with the <code>airunway.ai/engine=&lt;name&gt;</code> label, which detectors treat as authoritative. Framework detection (§7) and AKS-context probes (§9) are entries in a single typed detection registry (§7.1).</li>
 </ol>
 
-<h2 id="s4"><span class="num">§ 04</span> Three layers</h2>
+<h2 id="s4"><span class="num">§ 04</span> Three layers + cloud-neutral data path</h2>
 <div class="layers">
   <div class="layer">
     <div class="badge">A</div>
@@ -500,8 +503,9 @@
     <p class="lname">airunway (runs everywhere Headlamp does)</p>
     <ul class="lfeatures">
       <li><strong>Existing:</strong> Deployments, Models, Runtimes (RO), Gateway, Settings</li>
-      <li><strong>New:</strong> Projects — list, detail, create wizard, "Add to project"</li>
-      <li><strong>New:</strong> Project → Observability tab (app-metrics panel + IG diagnostics panel)</li>
+      <li><strong>New:</strong> Projects — list, detail [Topology | Resources | Observability], create wizard, "Add to project"</li>
+      <li><strong>New:</strong> Project → Observability tab (app-metrics panel via backend + IG diagnostics panel)</li>
+      <li><strong>New:</strong> Detection registry (framework + cluster probes)</li>
     </ul>
   </div>
   <div class="layer b">
@@ -515,16 +519,17 @@
       <li>AKS-flavored IG enrichers (GPU-SKU fit, NCCL silent-replica)</li>
     </ul>
   </div>
-  <div class="layers-arrow">Headlamp K8s proxy &mdash; the only data path</div>
+  <div class="layers-arrow">Two K8s-only data paths: Headlamp K8s proxy + AI Runway backend (also via that proxy)</div>
   <div class="cluster-card">
     <h4>Kubernetes cluster</h4>
     <div class="items">
-      <span>Project CRD + controller</span><span>ModelDeployments</span><span>inference-server /metrics</span><span>Inspektor Gadget (optional)</span><span>KAITO / KubeRay / …</span>
+      <span>Project CRD + controller</span><span>ModelDeployments</span><span>AI Runway backend</span><span>Inspektor Gadget (optional)</span><span>KAITO / KubeRay / …</span>
     </div>
   </div>
 </div>
 <p><strong>Import direction:</strong> B → A only, never A → B. Core never learns about Azure. Splitting B out later stays a config change, not a refactor.</p>
-<p><strong>Controller</strong> (<code>controller/project/</code>, lives in the airunway repo): one <code>controller-runtime</code> reconciler that watches <code>Project</code>, lists resources matching its selector, writes <code>status.resourceCounts</code> + aggregated <code>status.conditions</code>. v1: no ownerRefs, no cascade delete, no finalizer, no quota.</p>
+<div class="callout warn"><strong>Cloud-neutral data path (hard rule).</strong> The plugin makes calls <em>only</em> to the Kubernetes API server (through Headlamp's proxy) and to the AI Runway backend (also a K8s Service, reached the same way). Cloud provider SDKs (Azure ARM, AWS, GCP) are explicitly out of scope at every version. Cloud-specific facts surface via K8s labels, CR status, or in-cluster exporters — never via a cloud SDK in the plugin. Where a fact is only available outside K8s (e.g., AOAI provisioned-throughput units), the UX is a Portal deep-link, not an API call. This rule makes the AKS overlay an AKS-<em>detection-and-K8s-glue</em> layer rather than an Azure-SDK layer, which is what keeps it fit-for-purpose in the kaito-project repo and keeps the future "lift it out" path open.</div>
+<p><strong>Controller</strong> (<code>controller/project/</code>): one <code>controller-runtime</code> reconciler that watches <code>Project</code>, computes the effective member set (primary label union secondary labels — §5), writes <code>status.resourceCounts</code> + aggregated <code>status.conditions</code>. v1: no ownerRefs, no cascade delete, no finalizer, no quota.</p>
 
 <h2 id="s5"><span class="num">§ 05</span> Project model <span class="pill">Layer A</span></h2>
 <h3>CRD &mdash; <code>airunway.ai/v1alpha1</code>, minimal</h3>
@@ -539,121 +544,198 @@ spec:
 status:
   resourceCounts: { modelDeployments: 1, deployments: 2, services: 3, pvcs: 1 }
   conditions: []   # aggregated readiness across labeled resources</code></pre>
-<p>Membership = label <code>airunway.ai/project=&lt;name&gt;</code>. The CRD gives the UI a real object to watch and room to grow.</p>
+
+<h3>Membership model</h3>
+<ul>
+  <li><strong>Primary membership.</strong> Label <code>airunway.ai/project=&lt;name&gt;</code>. This is the resource's <em>home</em> Project. The CRD <code>spec.selector</code> matches this label; users write exactly this in their YAML. One primary per resource.</li>
+  <li><strong>Secondary membership (opt-in).</strong> Label <code>airunway.ai/secondary-project.&lt;name&gt;=true</code>, one key per extra Project. The Project controller unions secondary members into the effective member set in code; users do not author secondary selectors. This keeps the common (single-Project) case clean while letting a shared resource (e.g., a common embedding model serving two RAG apps) declare itself in multiple Projects without ambiguity.</li>
+  <li><strong>Lifecycle implication.</strong> Actions that imply ownership (eventual cascade delete, eventual rename) only touch primary members. Secondaries are surfaced but never modified by Project-level operations.</li>
+</ul>
 
 <h3>Scope rules</h3>
 <ul>
-  <li><strong>Namespaced.</strong> A Project is namespaced and its selector matches <em>namespaced</em> resources in <strong>its own namespace</strong> only. Cross-namespace membership is explicitly out of v1.</li>
-  <li><strong>Cluster-scoped resources excluded.</strong> ClusterRoles, CRDs, Nodes etc. are intentionally not Project members in v1. If a Project needs "context" from a cluster-scoped resource — e.g., the GatewayClass it routes through — it's surfaced as a <em>reference</em>, not membership.</li>
-  <li><strong>Selector collisions.</strong> Two Projects in the same namespace may select the same resource. v1 behavior: <strong>allowed</strong>. The detail page shows an "Also in: N other Projects" hint. A validating webhook is <em>not</em> added in v1 — overlap is a legitimate use case (a shared embedding model serving two RAG apps).</li>
-  <li><strong>Label tampering.</strong> Any user with patch rights on a resource can add or remove the <code>airunway.ai/project</code> label. v1 treats this as an RBAC question for the cluster admin; the plugin does not enforce Project-scoped ACLs. See <a href="#s13">§13 Security</a>.</li>
+  <li><strong>Namespaced.</strong> A Project is namespaced and its members are in <em>its own namespace</em> only (whether primary or secondary). Cross-namespace membership is explicitly out of v1.</li>
+  <li><strong>Cluster-scoped resources excluded.</strong> ClusterRoles, CRDs, Nodes etc. are not Project members in v1. Cluster-scoped context — e.g., the GatewayClass a Project routes through — is surfaced as a <em>reference</em>, not membership.</li>
+  <li><strong>Selector collisions on primary.</strong> Two Projects in the same namespace whose primary selectors match the same resource: v1 <strong>allowed</strong> for compatibility (and usually signals a label mistake). The Project detail page shows an "Also home in: N other Projects" warning when this happens; this is distinct from secondary membership.</li>
+  <li><strong>Label tampering.</strong> Any user with patch rights on a resource can add or remove either label. v1 treats this as an RBAC question for the cluster admin; the plugin does not enforce Project-scoped ACLs. See <a href="#s13">§13 Security</a>.</li>
 </ul>
 
 <h3>UI (core plugin)</h3>
 <ul>
-  <li><strong>Projects list</strong> — sidebar entry; status chips (Ready / Degraded / Empty).</li>
-  <li><strong>Project detail</strong> — resources grouped by kind (ModelDeployments, Deployments, Services, PVCs, Secrets, HTTPRoutes), quick actions, plus the <strong>Observability tab</strong> (§6).</li>
-  <li><strong>Create wizard</strong> — three TS-defined templates: <em>Chat / single-model</em>, <em>RAG app</em> (ModelDeployment + PVC + app-pod placeholder), <em>Empty</em> (creates the <code>Project</code> CR alone, no resources — users grow it later via "Add to project"). Templates live in TS, not in-cluster.</li>
-  <li><strong>"Add to project"</strong> affordance on existing ModelDeployment / Deployment detail pages — patches the label. <strong>This is the primary day-2 path</strong>; the wizard is the greenfield path.</li>
+  <li><strong>Projects list</strong> — sidebar entry; status chips (Ready / Degraded / Empty — see §6 for what feeds these).</li>
+  <li><strong>Project detail</strong> — three tabs:
+    <ul>
+      <li><strong>Topology</strong> (default, v1.0 stretch — see §6a). Visual graph of the Project's primary members with edges by relationship. Falls back to the Resources tab if topology is deferred to v1.1.</li>
+      <li><strong>Resources.</strong> The kind-grouped list (ModelDeployments, Deployments, Services, PVCs, Secrets, HTTPRoutes). Each entry links to Headlamp's existing per-resource detail page (per §3.5). Secondary members get a small "secondary" chip; resources with cross-primary collision get a warning marker.</li>
+      <li><strong>Observability</strong> — §6.</li>
+    </ul>
+  </li>
+  <li><strong>Project-shaped quick actions only</strong> — "Add to project", and (in v1.1) "Rename". Per-resource actions (delete, edit, scale, etc.) are not duplicated here — operators click into the Headlamp page.</li>
+  <li><strong>Create wizard</strong> — three TS-defined templates: <em>Chat / single-model</em>, <em>RAG app</em> (ModelDeployment + PVC + app-pod placeholder), <em>Empty</em> (creates the <code>Project</code> CR alone). Templates live in TS, not in-cluster.</li>
+  <li><strong>"Add to project"</strong> affordance on existing ModelDeployment / Deployment detail pages — patches the <strong>primary</strong> label by default. Holding a modifier (or selecting from a small menu) adds a secondary-project label instead. This is the primary day-2 path; the wizard is the greenfield path.</li>
+  <li><strong>"Also in" hint.</strong> On a resource's detail page (Headlamp), the plugin contributes a small "Project: my-rag-app · Also in: shared-embeddings, eval-harness" line so the dual-membership state is discoverable from either direction.</li>
 </ul>
 
 <h4>Not in v1</h4>
-<p>ownerRef cascade delete · Project-scoped RBAC/quota UI · in-cluster template storage · multi-cluster Project views · resource move across namespaces · Project rename (label rewrite is invasive; pushed to v1.1).</p>
+<p>ownerRef cascade delete · Project-scoped RBAC/quota UI · in-cluster template storage · multi-cluster Project views · resource move across namespaces · Project rename (v1.1; well-defined now because rename touches only the primary label).</p>
 
 <h2 id="s6"><span class="num">§ 06</span> Observability — the MVP <span class="pill">Layer A</span></h2>
 <p>Lives as a <strong>tab on Project detail</strong> — always <em>of</em> a Project. Two independent panels, two data planes.</p>
 
 <h3>Data-source priority (per plane, fail soft)</h3>
 <table>
-  <thead><tr><th>Plane</th><th>Source order</th><th>Transport</th><th>If unavailable</th></tr></thead>
+  <thead><tr><th>Plane</th><th>Source</th><th>Transport</th><th>If unavailable</th></tr></thead>
   <tbody>
-    <tr><td><strong>App metrics</strong></td><td>(1) AI Runway backend → (2) inference-server <code>/metrics</code> via Headlamp proxy → (3) Prometheus via Headlamp proxy</td><td>All reads go through Headlamp's K8s API proxy. No in-browser scrape (avoids CORS, avoids per-engine TLS pain).</td><td>Panel shows inline hint, page still renders</td></tr>
-    <tr><td><strong>Kernel/eBPF</strong></td><td>Inspektor Gadget (on-demand)</td><td>Trace CRD via Headlamp proxy</td><td>"Install IG" CTA, rest works</td></tr>
-    <tr><td><strong>K8s-native</strong></td><td>Always (pod status, restarts, Events, container resources)</td><td>Headlamp K8s client</td><td>n/a</td></tr>
+    <tr><td><strong>App metrics</strong></td><td><strong>AI Runway backend</strong> (required install-time dep)</td><td>Backend Service via Headlamp K8s proxy; inherits user's token</td><td>"Install or repair AI Runway backend" CTA; panel dark, rest of tab renders</td></tr>
+    <tr><td><strong>Kernel/eBPF</strong></td><td>Inspektor Gadget (on-demand)</td><td>IG <code>GadgetManager</code> gRPC via Headlamp K8s proxy</td><td>"Install IG" CTA, rest works</td></tr>
+    <tr><td><strong>K8s-native</strong></td><td>always (pod status, restarts, Events, container resources)</td><td>Headlamp K8s client</td><td>n/a — but the plugin <strong>does not duplicate</strong> Headlamp's per-resource detail; see §3.5</td></tr>
   </tbody>
 </table>
-<div class="callout"><strong>Principle.</strong> A missing optional source is a UI state, not a crash. Detection fails open → assume not-installed → show CTA.</div>
+<div class="callout"><strong>Principle.</strong> A missing optional source is a UI state, not a crash. Detection fails open → assume not-installed → show CTA. The backend is the one <em>required</em> source; everything else is optional.</div>
 
-<h3>Panel 1 — App metrics (inference server)</h3>
-<p>Per-ModelDeployment, sourced from the serving engine's own Prometheus output. Provider-specific schemas already standardized in AI Runway's existing <code>MetricsPanel</code> / <code>useMetrics</code>:</p>
+<h3>Panel 1 — App metrics (inference server, via backend)</h3>
+<p>Per-ModelDeployment, sourced from the AI Runway backend, which in turn reads the serving engine's Prometheus output. The backend schemas already standardized in AI Runway's existing <code>MetricsPanel</code> / <code>useMetrics</code> apply:</p>
 <ul>
   <li><strong>Latency:</strong> TTFT (p50/p95/p99), TPOT / inter-token, end-to-end.</li>
   <li><strong>Throughput:</strong> tokens/s, requests/s.</li>
   <li><strong>Saturation:</strong> queue depth / pending, KV-cache utilization, error rate.</li>
-  <li>Time-series sparklines (extends current <code>MetricsPanel</code>, which is mostly point-in-time today).</li>
+  <li><strong>Time-series sparklines:</strong> fixed window of <strong>15 minutes</strong>, polled every <strong>15 seconds</strong> (~60 points per series). The backend keeps an in-memory rolling ring buffer per ModelDeployment it knows about; no Prometheus dep, no on-disk persistence. Empty state "Collecting…" for the first 15 minutes after a new MD appears, and again after a backend restart (documented behaviour, acceptable for a live view).</li>
 </ul>
 <blockquote>Engine coverage note. vLLM and Ray Serve expose these natively; TRT-LLM and SGLang vary. The panel renders whatever the engine emits and labels unknowns "not reported by this engine" rather than showing zeros.</blockquote>
 
 <h3>Panel 2 — Diagnostics (Inspektor Gadget)</h3>
 <p>On-demand, scoped to the Project's pods. See §8 for the IG client.</p>
 
-<h3>Overview strip (K8s-native, always on)</h3>
-<pre><code>Pods: 6 (5 running, 1 pending) · Restarts(1h): 0 · OOMs(24h): 1 ·
-GPU pods: 4 · Recent events: 3</code></pre>
+<h3>Overview strip — Project-specific only</h3>
+<p>Per the "Don't re-implement Headlamp" principle (§3.5), the strip carries only items Headlamp cannot compute because it doesn't know what a Project or a ModelDeployment is:</p>
+<pre><code>MDs: 3/3 ready · GPU pods: 4 · Engines: vLLM ×2, SGLang ×1 · Project status: Ready</code></pre>
+<p>Generic K8s aggregations (Pods running, Restarts(1h), OOMs(24h), Recent events) are not duplicated — they are one click away on any member's Headlamp detail page.</p>
+
+<h3>Ready / Degraded / Empty chip</h3>
+<p>Pure aggregation, no thresholds, no time windows, no app-metrics signal:</p>
+<ul>
+  <li><strong>Ready</strong> = every primary Pod is Ready, every primary ModelDeployment has <code>status.ready=true</code>, every primary PVC is Bound, every primary Service has endpoints.</li>
+  <li><strong>Degraded</strong> = any of the above false.</li>
+  <li><strong>Empty</strong> = no primary members.</li>
+</ul>
+<p>This stays deterministic — the chip never becomes a de-facto alert (non-goal §1). Operators who want to see <em>why</em> something is wobbling (CrashLoopBackOff counts, OOMs in the last hour, recent events) click into the relevant member's Headlamp detail page, which already shows all of that.</p>
 
 <h4>Not in v1</h4>
-<p>Grafana embedding · alerting / thresholds / on-call · cost rollups · historical storage of gadget results · long-term metric retention (read live; persistence is a v2 question).</p>
+<p>Grafana embedding · alerting / thresholds / on-call · cost rollups · historical storage of gadget results · long-term metric retention beyond the 15-minute live buffer (persistence is a v2 question, see §10).</p>
+
+<h2 id="s6a"><span class="num">§ 06a</span> Topology view <span class="pill">v1.0 stretch</span></h2>
+<p>The default tab of Project detail. A real graph view of an application's resources is the visually right answer for "what is this Project" — a kind-grouped list is a table of contents, not a topology. Marked <strong>stretch</strong> in v1.0: if the rest of v1.0 ships clean, topology ships with it; if v1.0 runs hot, topology slides to v1.1 and Project detail defaults to the Resources tab instead. Neither the Observability tab nor the AKS overlay blocks on topology.</p>
+
+<h3>Scope and rendering</h3>
+<ul>
+  <li><strong>Members shown:</strong> primary members only. Secondary members render as faded chips at the edges with "see Project X" links — they are part of <em>another</em> Project's topology, not this one's.</li>
+  <li><strong>Node kinds:</strong> ModelDeployments, Deployments, Pods (collapsed by ReplicaSet when count &gt; N, default N=3), Services, HTTPRoutes, Gateways, PVCs, and Secrets/ConfigMaps <em>only if referenced</em> by a shown resource. No generic "all resources" view.</li>
+  <li><strong>Edges by relationship:</strong> <code>routes-to</code>, <code>selects</code>, <code>owns</code>, <code>mounts</code>, <code>references</code>. Each edge clickable for a one-line tooltip.</li>
+  <li><strong>Layout:</strong> left-to-right, oriented around request entry — HTTPRoute / Gateway on the left, Services / Pods / MDs in the middle, storage / secrets on the right. Disaggregated serving (<code>spec.serving.mode: disaggregated</code>) gets prefill and decode lanes. The fixed direction and lane discipline kill the "graphs look chaotic" failure mode.</li>
+  <li><strong>Renderer:</strong> <strong>react-flow</strong> (~80 KB gz, BSD-3, actively maintained, accessible focus order, keyboard-navigable). Stays inside §12's 1.5 MB core bundle budget with margin.</li>
+  <li><strong>Node-count caps:</strong>
+    <ul>
+      <li>At &gt; 50 nodes: Pod groups auto-collapse to a single "N Pods" node (clickable for the expanded list).</li>
+      <li>At &gt; 100 nodes: the topology pane falls back to the Resources tab with a banner "Project too large for topology view."</li>
+    </ul>
+  </li>
+  <li><strong>Interactions:</strong> click a node → opens that resource in Headlamp's existing detail page (§3.5). No editing in the topology view.</li>
+  <li><strong>Empty / degraded states:</strong> a Project with one MD + one Service still renders meaningfully (2 nodes, 1 edge). An Empty Project shows the create-wizard CTA in the topology pane.</li>
+</ul>
+
+<h3>Performance</h3>
+<p>Computed client-side from the same K8s reads the Project detail page already does — no new API calls. First-paint target ≤ 2 s at 50 nodes (§12).</p>
 
 <h2 id="s7"><span class="num">§ 07</span> AI-workload detection</h2>
-<p>Detection drives engine-specific metric schemas and per-kind icons in the Project view. It is <strong>independent of Project membership</strong> — a Pod is detected as "vLLM" purely from its image/env; that detection does <em>not</em> add it to any Project. Membership requires the <code>airunway.ai/project=&lt;name&gt;</code> label, always.</p>
+<p>Detection drives engine-specific metric schemas and per-kind icons in the Project view. It is <strong>independent of Project membership</strong> — a Pod is detected as "vLLM" purely from its image/env; that detection does <em>not</em> add it to any Project. Membership requires the <code>airunway.ai/project=&lt;name&gt;</code> label (primary) or <code>airunway.ai/secondary-project.&lt;name&gt;=true</code> (secondary), always.</p>
 <p>Detect by image + env + label, extensible via ConfigMap:</p>
 <table>
-  <thead><tr><th>Framework</th><th>Signal</th></tr></thead>
+  <thead><tr><th>Framework</th><th>Signal</th><th>Default confidence</th></tr></thead>
   <tbody>
-    <tr><td>vLLM</td><td>image <code>*vllm*</code> or env <code>VLLM_*</code></td></tr>
-    <tr><td>Triton</td><td>image <code>*tritonserver*</code></td></tr>
-    <tr><td>SGLang</td><td>image <code>*sglang*</code></td></tr>
-    <tr><td>TorchServe</td><td>image <code>*torchserve*</code></td></tr>
-    <tr><td>Ray Serve / KubeRay</td><td>RayService / RayCluster CRs</td></tr>
-    <tr><td>KServe</td><td>label <code>serving.kserve.io/inferenceservice</code></td></tr>
-    <tr><td>ONNX Runtime</td><td>image <code>*onnxruntime-server*</code></td></tr>
-    <tr><td>Ollama</td><td>image <code>*ollama*</code></td></tr>
-    <tr><td>Generic GPU (fallback)</td><td><code>nvidia.com/gpu</code> request &gt; 0</td></tr>
+    <tr><td>vLLM</td><td>image <code>*vllm*</code> or env <code>VLLM_*</code></td><td>low (image regex) → <strong>high</strong> if <code>airunway.ai/engine=vllm</code> is set</td></tr>
+    <tr><td>Triton</td><td>image <code>*tritonserver*</code></td><td>low</td></tr>
+    <tr><td>SGLang</td><td>image <code>*sglang*</code></td><td>low</td></tr>
+    <tr><td>TorchServe</td><td>image <code>*torchserve*</code></td><td>low</td></tr>
+    <tr><td>Ray Serve / KubeRay</td><td><code>RayService</code> / <code>RayCluster</code> CRs</td><td><strong>high</strong> (CR presence)</td></tr>
+    <tr><td>KServe</td><td>label <code>serving.kserve.io/inferenceservice</code></td><td><strong>high</strong> (canonical label)</td></tr>
+    <tr><td>ONNX Runtime</td><td>image <code>*onnxruntime-server*</code></td><td>low</td></tr>
+    <tr><td>Ollama</td><td>image <code>*ollama*</code></td><td>low</td></tr>
+    <tr><td>Generic GPU (fallback)</td><td><code>nvidia.com/gpu</code> request &gt; 0</td><td>informational only</td></tr>
   </tbody>
 </table>
 
+<h3>7.1 Detection contract</h3>
+<p>All detectors — framework detection here and the <code>useAksContext</code> probes in §9 — return:</p>
+<pre><code>type Detection&lt;T&gt; = {
+  detected: T;
+  confidence: 'high' | 'low';
+  source: 'crd' | 'label' | 'image' | 'env' | 'node-label' | 'oidc' | 'pull-secret';
+};</code></pre>
+<ul>
+  <li><strong>High confidence</strong> = canonical signal (CRD presence, dedicated label, OIDC issuer set). Rendered without an override link.</li>
+  <li><strong>Low confidence</strong> = inferred from a string match (image name, env prefix, pull-secret pattern). Rendered with a small "detected via image name — override?" link that points the user to set the authoritative label.</li>
+  <li><strong>Override label:</strong> <code>airunway.ai/engine=&lt;name&gt;</code> is the universal override for framework detection. When present on a Pod or its workload, all detectors treat it as authoritative and skip inference. AKS-context overrides, if needed, follow the same pattern with their own well-known label keys; see §9.</li>
+</ul>
+
+<h3>Unified registry</h3>
+<p>Framework detection and the AKS-context probes (§9) are entries in a single typed detection registry. Each probe declares:</p>
+<ul>
+  <li><strong>Probe name</strong> (e.g., <code>engine</code>, <code>aks.gpu-pool</code>, <code>aks.workload-identity</code>)</li>
+  <li><strong>Signal type</strong> (CRD / node label / pull-secret / etc.)</li>
+  <li><strong>Cost</strong> (cluster API hit, node label scan, etc.) and <strong>cache TTL</strong></li>
+  <li><strong>Fail-open default</strong> (what to assume when the probe errors out)</li>
+  <li><strong>"What's missing" CTA</strong> (used by the UI when the probe returns "not detected" and a Project page wants to surface the gap)</li>
+</ul>
+<p>The plugin exposes a single <code>useDetection(probeName)</code> hook. The §7 framework table and the §9 AKS-context table are both views over the same registry.</p>
+
 <h2 id="s8"><span class="num">§ 08</span> Inspektor Gadget integration <span class="pill">Layer A</span></h2>
-<p>Items flagged <strong>[IG-CONFIRM]</strong> below are assumptions that still need verification against the current IG catalog and roadmap before we commit UI copy.</p>
+<div class="callout"><strong>Validated against the inspektor-gadget repo</strong> (image-based gadgets era, post-v0.31). The legacy <code>gadget.kinvolk.io/v1alpha1 Trace</code> CRD and its <code>gadgettracermanager</code> controller were removed in mid-2025 (commit <code>3ba4e5500</code>, "treewide: Remove built-in gadgets") and must not be used by the plugin. Any leftover CRD-era RBAC in IG's chart is stale.</div>
 
 <h3>Design</h3>
 <ul>
-  <li><strong>Surface:</strong> prefer the <code>Trace</code> CRD (create → watch → delete) wrapped in <code>useGadgetTrace(spec)</code> that cleans up on unmount. Goes through Headlamp's K8s proxy, no extra endpoint or auth. Keep the gadget-manager HTTP API as fallback.</li>
-  <li><strong>Dynamic discovery + curated subset.</strong> On mount, query IG for available gadgets + param schemas (no hardcoded list). Surface a "Recommended for AI workloads" group (~8) with the full catalog under "All gadgets". Curated list in <code>ig-recommended.json</code>, overridable in settings.</li>
+  <li><strong>Surface:</strong> the IG gadget DaemonSet exposes a <strong>gRPC API</strong> (proto in <code>pkg/gadget-service/api/api.proto</code>) reached through Headlamp's K8s API proxy — no extra endpoint, no extra auth. Two services matter:
+    <ul>
+      <li><code>GadgetManager.RunGadget</code> — bidi stream of <code>GadgetEvent</code>s for one-shot, user-scoped runs. Wrapped in <code>useGadgetRun(spec)</code> that cleans up on unmount.</li>
+      <li><code>GadgetInstanceManager.{Create,List,Get,Remove}GadgetInstance</code> — named, durable runs that survive a browser refresh. Wrapped in <code>useGadgetInstance(spec)</code> for the 5-minute tier.</li>
+    </ul>
+    There is no HTTP fallback; gRPC-through-the-K8s-proxy is the only supported path. Helm-declared <code>GadgetInstance</code> ConfigMaps exist for cluster-admin pre-provisioning but are not a per-user run surface.</li>
+  <li><strong>Dynamic discovery + curated subset.</strong> On mount, call <code>GadgetManager.GetGadgetInfo</code> to fetch each gadget's data sources, fields, and param schemas (no hardcoded list). Surface a "Recommended for AI workloads" group (~8) with the full catalog under "All gadgets". Curated list in <code>ig-recommended.json</code>, overridable in settings.</li>
   <li><strong>Scoping:</strong> every run auto-fills namespace = Project; user may narrow by pod label / container, never widen. Per-user rate limit to avoid DOSing the <code>gadget</code> DaemonSet.</li>
-  <li><strong>Run model:</strong> on-demand only, user-picked duration (15s / 30s / 60s / 5min). No always-on streams in v1.</li>
-  <li><strong>Rendering (<code>GadgetRunner.tsx</code>):</strong> generic table from the gadget's column schema; optional <em>enrichers</em> for curated gadgets (e.g. <code>trace_dns</code> groups by host + flags <code>huggingface.co</code>, <code>*.azurecr.io</code>, <code>openai.azure.com</code>; network gadgets annotate pod/container per PID). Absent enricher = raw table. Export JSON / CSV.</li>
+  <li><strong>Run model:</strong> on-demand only, user-picked duration (15s / 30s / 60s / 5min). The 5min tier uses <code>GadgetInstance</code> so a refresh doesn't drop the stream; shorter tiers use <code>RunGadget</code> direct. No always-on streams in v1.</li>
+  <li><strong>Rendering (<code>GadgetRunner.tsx</code>):</strong> generic table from the gadget's column schema (from <code>GetGadgetInfo</code>); optional <em>enrichers</em> for curated gadgets (e.g. <code>trace_dns</code> groups by host + flags <code>huggingface.co</code>, <code>*.azurecr.io</code>, <code>openai.azure.com</code>; network gadgets annotate pod/container per PID). Absent enricher = raw table. Export JSON / CSV.</li>
   <li><strong>Results:</strong> last ~5 per Project in Headlamp plugin-storage; ephemeral, documented as such. No server-side persistence.</li>
-  <li><strong>Permissions:</strong> IG needs cluster privileges; plugin never elevates. If the user's token can't reach IG, show a clear permission message (see <a href="#s13">§13 Security</a> for PII handling).</li>
+  <li><strong>Permissions:</strong> IG needs cluster privileges; plugin never elevates. Reaching the gadget pod via apiserver proxy requires the user's token to have rights on the <code>gadget</code> namespace's pods (proxy/exec semantics). If the call fails, show a clear permission message (see <a href="#s13">§13 Security</a> for PII handling).</li>
 </ul>
 
-<h3>Open questions to verify against the IG catalog</h3>
+<h3>Validated against the IG repo</h3>
 <ol>
-  <li><strong>[IG-CONFIRM] Surface choice.</strong> Trace CRD vs gadget-manager HTTP API — confirm CRD is the supported path going forward.</li>
-  <li><strong>[IG-CONFIRM] GPU coverage.</strong> IG is eBPF-based; GPU <em>utilization %</em> is conventionally DCGM-exporter → Prometheus, not eBPF. We do not want to assert gadgets like <code>profile_cuda</code> / <code>top_gpu</code> / <code>top_cuda_memory</code> exist without confirmation. Which GPU signals can IG actually produce today, and which must come from DCGM?</li>
-  <li><strong>[IG-CONFIRM] Curated catalog.</strong> Confirm real names for the candidate set: <code>trace_dns</code>, <code>trace_tcp</code>, <code>top_tcp</code>, <code>trace_oomkill</code>, <code>trace_open</code> / <code>trace_fsslower</code> (model-weight load), <code>top_file</code>, plus GPU gadget(s) iff they exist.</li>
-  <li><strong>[IG-CONFIRM] Version floor.</strong> Minimum IG release containing all gadgets used; we pin in detection and CTA on mismatch.</li>
+  <li><strong>Surface choice — RESOLVED.</strong> Use the gRPC <code>GadgetManager</code> / <code>GadgetInstanceManager</code> services. The <code>Trace</code> CRD is removed.</li>
+  <li><strong>GPU coverage — RESOLVED.</strong> IG ships <code>profile_cuda</code> (CUDA memory allocation profile) and <code>top_cuda_memory</code> (per-process CUDA alloc/free activity); both are uprobe-on-CUDA-runtime, not DCGM/NVML. <strong><code>top_gpu</code> does not exist</strong> — drop from any curated set or UI copy. GPU <strong>utilization %, SM occupancy, temp, power</strong> continue to come from DCGM-exporter → Prometheus.</li>
+  <li><strong>Curated catalog — RESOLVED.</strong> Confirmed present in <code>gadgets/</code>: <code>trace_dns</code>, <code>trace_tcp</code>, <code>top_tcp</code>, <code>trace_oomkill</code>, <code>trace_open</code>, <code>trace_fsslower</code>, <code>top_file</code>, <code>profile_cuda</code>, <code>top_cuda_memory</code>. Adjacent gadgets worth considering for the AI-workloads preset: <code>trace_sni</code>, <code>trace_ssl</code>, <code>trace_tcpdrop</code>, <code>trace_tcpretrans</code>, <code>top_blockio</code>, <code>profile_blockio</code>, <code>trace_exec</code>, <code>traceloop</code>.</li>
+  <li><strong>Version floor — RESOLVED for v1.0.</strong> Pin to the <strong>latest stable IG release at v1.0 ship date</strong>, documented as "minimum tested." A user on an older release sees an "Upgrade IG to ≥ vX.Y.Z" CTA; a user on a newer release gets forward-compatibility assumed, with CI smoke tests against IG-main (§11) catching breaks early. Exact tag is filled in at v1.0 ship. Per-gadget <code>GetGadgetInfo</code> degradation (probe each curated gadget individually, show "X of 8 available") is deferred to v1.1.</li>
 </ol>
 
 <h2 id="s9"><span class="num">§ 09</span> AKS overlay <span class="pill b">Layer B</span></h2>
-<p>Loads only on AKS. Gate: node label <code>kubernetes.azure.com/cluster</code>. When absent, none of this code runs — core stays clean for non-AKS users.</p>
+<p>Loads only on AKS. Gate: node label <code>kubernetes.azure.com/cluster</code>. When absent, none of this code runs — core stays clean for non-AKS users. <strong>No cloud-provider SDK calls at any version</strong> (§3.5 / §4): the overlay is an AKS-<em>detection-and-K8s-glue</em> layer.</p>
 
-<h3>Detection → <code>useAksContext()</code> (all fail open)</h3>
+<h3>Detection → <code>useAksContext()</code> (all fail open, all entries in the §7.1 registry)</h3>
 <table>
-  <thead><tr><th>Signal</th><th>Source</th><th>Used for</th></tr></thead>
+  <thead><tr><th>Probe</th><th>Signal</th><th>Source</th><th>Used for</th></tr></thead>
   <tbody>
-    <tr><td>Is AKS</td><td><code>kubernetes.azure.com/cluster</code></td><td>activate overlay</td></tr>
-    <tr><td>GPU pools</td><td><code>agentpool</code> + <code>accelerator=nvidia</code> + SKU label</td><td>KAITO preset / warn</td></tr>
-    <tr><td>GPU SKU (H100/A100/V100/T4)</td><td><code>node.kubernetes.io/instance-type</code></td><td>preset, model-fit</td></tr>
-    <tr><td>KAITO installed</td><td><code>kaito.sh</code> CRDs</td><td>Workspace shortcuts</td></tr>
-    <tr><td>Workload Identity</td><td>OIDC issuer + <code>azure.workload.identity/use</code></td><td>one-click SA wiring</td></tr>
-    <tr><td>ACR attached</td><td>pull-secret / kubelet identity patterns</td><td>image-pull config</td></tr>
-    <tr><td>Gateway API</td><td><code>gateway.networking.k8s.io</code> CRDs</td><td>HTTPRoute template</td></tr>
-    <tr><td>IG installed</td><td>IG CRDs</td><td>enable AKS IG enrichers</td></tr>
+    <tr><td><code>aks.is-aks</code></td><td><code>kubernetes.azure.com/cluster</code> node label</td><td>node-label (high)</td><td>activate overlay</td></tr>
+    <tr><td><code>aks.gpu-pool</code></td><td><code>agentpool</code> + <code>accelerator=nvidia</code> + SKU label</td><td>node-label (high)</td><td>KAITO preset / warn</td></tr>
+    <tr><td><code>aks.gpu-sku</code></td><td><code>node.kubernetes.io/instance-type</code> (H100/A100/V100/T4)</td><td>node-label (high)</td><td>preset, model-fit</td></tr>
+    <tr><td><code>aks.kaito</code></td><td><code>kaito.sh</code> CRDs</td><td>crd (high)</td><td>Workspace shortcuts</td></tr>
+    <tr><td><code>aks.workload-identity</code></td><td>OIDC issuer + <code>azure.workload.identity/use</code></td><td>oidc + label (high)</td><td>one-click SA wiring</td></tr>
+    <tr><td><code>aks.acr</code></td><td>pull-secret / kubelet identity patterns</td><td>pull-secret (low → override via label)</td><td>image-pull config</td></tr>
+    <tr><td><code>aks.gateway-api</code></td><td><code>gateway.networking.k8s.io</code> CRDs</td><td>crd (high)</td><td>HTTPRoute template</td></tr>
+    <tr><td><code>aks.ig</code></td><td>IG CRDs / gRPC reachability</td><td>crd (high)</td><td>enable AKS IG enrichers</td></tr>
   </tbody>
 </table>
+<p>Each probe follows the §7.1 contract: probes whose source is <code>low</code> confidence (<code>aks.acr</code> today) get an override affordance.</p>
 
 <h3>Deploy glue — in-cluster writes only</h3>
-<p>No Azure ARM calls in v1. Adds an "Azure" step to the deploy wizard + "Azure" tab on ModelDeployment:</p>
+<p>Adds an "Azure" step to the deploy wizard + "Azure" tab on ModelDeployment:</p>
 <ol>
   <li>KAITO preset for detected SKU — <code>(SKU, model-family) → preset</code> table in TS. <strong>Initial table needs a pass against the KAITO catalog</strong>; shipping set TBD (<a href="#s14">§14</a>).</li>
   <li>Model-fit estimate (model size vs GPU mem; R/Y/G).</li>
@@ -663,13 +745,14 @@ GPU pods: 4 · Recent events: 3</code></pre>
   <li>Azure OpenAI fallback <code>Secret</code> + <code>ConfigMap</code> (OpenAI-compatible shape).</li>
 </ol>
 
-<h3>Where ARM is needed → copy-paste, not API calls</h3>
-<p>Node pool creation, ACR attach, Workload-Identity enablement, AOAI provisioning — all require Azure ARM access we are explicitly deferring to v2. UX surface in v1:</p>
+<h3>Things the cloud-neutral rule punts to Portal deep-links</h3>
+<p>Node pool creation, ACR attach, Workload-Identity enablement, AOAI provisioning, ARM-only infra details (pricing, quota, provisioned-throughput units) — all of these require Azure ARM and are therefore <strong>permanently out of scope</strong> for the plugin. UX surface:</p>
 <ul>
   <li>A <strong>right-side drawer</strong> opens when an Azure-out-of-band step is needed.</li>
-  <li>Each step renders as: 1-line description, a code block with the exact <code>az</code> command pre-filled with detected values (subscription, resource group, cluster name), a <strong>Copy</strong> button, and an <strong>"Open in Azure Portal"</strong> deep link as a secondary action.</li>
-  <li>The drawer is dismissible and re-openable; nothing in cluster state depends on the user having actually run the command — the next detection pass picks up the new state.</li>
+  <li>Each step renders as: 1-line description, a code block with the exact <code>az</code> command pre-filled with detected values <em>from K8s</em> (cluster name from labels, etc.), a <strong>Copy</strong> button, and an <strong>"Open in Azure Portal"</strong> deep link as a secondary action.</li>
+  <li>The drawer is dismissible and re-openable; nothing in cluster state depends on the user having actually run the command — the next detection pass picks up the new state from K8s labels / CRs.</li>
 </ul>
+<p>Where infra detail is genuinely missing (e.g., a fact the K8s API doesn't surface), the right fix is <strong>upstream</strong>: KAITO exposes more in CR status, AKS exposes more in node labels, or a Prometheus exporter fills the gap. The plugin links to the gap, it does not work around it with a cloud SDK. See §14 for the running list of such gaps.</p>
 
 <h3>Partial-failure UX (no auto-rollback)</h3>
 <p>Multi-step wizards (Deploy, Add Azure glue) can leave the cluster with some resources created and some not. v1 policy:</p>
@@ -684,36 +767,47 @@ GPU pods: 4 · Recent events: 3</code></pre>
 <p>GPU-SKU-aware fit overlay on GPU diagnostics; NCCL inter-pod traffic view that flags silent replicas in multi-replica deployments. These <em>decorate</em> the core IG panel; they don't replace it.</p>
 
 <h2 id="s10"><span class="num">§ 10</span> Phasing</h2>
-<p>T-shirt sizes are engineering-effort estimates from current code state, not calendar commitments. <strong>S</strong> ≈ days, <strong>M</strong> ≈ 1–2 weeks, <strong>L</strong> ≈ 3+ weeks (per engineer).</p>
+<p>T-shirt sizes are engineering-effort estimates from current code state, <strong>per engineer</strong>, not calendar commitments. <strong>S</strong> ≈ days, <strong>M</strong> ≈ 1–2 weeks, <strong>L</strong> ≈ 3+ weeks per engineer. The TL;DR's 6–10 engineer-weeks figure is the total v1.0 sum assuming one engineer working sequentially; calendar time depends on staffing.</p>
 <table>
-  <thead><tr><th>Phase</th><th>Size</th><th>Scope</th></tr></thead>
+  <thead><tr><th>Phase</th><th>Per-engineer size</th><th>Scope</th></tr></thead>
   <tbody>
-    <tr><td><strong>v1.0</strong></td><td>L</td><td>Project CRD + controller (status aggregation); Projects list/detail/wizard + "Add to project"; <strong>Observability tab — app-metrics + IG diagnostics</strong> (MVP); framework detection; AKS overlay: <code>useAksContext</code>, Azure tab, KAITO preset step, WI SA / ACR / HTTPRoute / AOAI-fallback glue, AKS IG enrichers; graceful-degradation CTAs everywhere.</td></tr>
-    <tr><td><strong>v1.1</strong></td><td>M</td><td>Project rename; cascade-delete finalizer; more curated gadgets + enrichers from feedback; more KAITO presets; AMD GPU in IG panel; automated AKS E2E in CI.</td></tr>
-    <tr><td><strong>v2.0</strong></td><td>L</td><td>Azure ARM control plane (separate auth design); Prometheus / Azure Monitor historical metrics; gadget-result persistence; cross-Project ops view; vector-DB / training-shaped Projects.</td></tr>
-    <tr><td><strong>Not planned</strong></td><td>—</td><td>Replacing AI Runway's deploy wizard; generic IG browser; alerting; GitOps integration.</td></tr>
+    <tr><td><strong>v1.0</strong></td><td>~6–10 eng-weeks total</td><td>Project CRD + controller (primary/secondary union + status aggregation); Projects list/detail-as-Resources/wizard + "Add to project"; <strong>Observability tab — app-metrics panel (backend) + IG diagnostics panel (gRPC)</strong> (MVP); framework detection (registry + override label); AKS overlay: <code>useAksContext</code>, Azure tab, KAITO preset step, WI SA / ACR / HTTPRoute / AOAI-fallback glue, AKS IG enrichers; graceful-degradation CTAs everywhere; IG smoke CI (§11). <strong>Stretch:</strong> Topology tab as the default Project view (§6a).</td></tr>
+    <tr><td><strong>v1.1</strong></td><td>M</td><td>Project rename (touches primary label only); cascade-delete finalizer (primaries only); more curated gadgets + enrichers from feedback; per-gadget IG version degradation; more KAITO presets; AMD GPU in IG panel; full AKS E2E in CI; if v1.0 deferred topology, ship it here.</td></tr>
+    <tr><td><strong>v2.0</strong></td><td>L</td><td>Prometheus / Azure-Monitor-as-Prometheus historical metrics (still K8s-cluster-local — no cloud SDK); gadget-result persistence; cross-Project ops view; vector-DB / training-shaped Projects.</td></tr>
+    <tr><td><strong>Not planned</strong></td><td>—</td><td>Replacing AI Runway's deploy wizard; generic IG browser; alerting; GitOps integration; <strong>any cloud-provider SDK use (Azure ARM, AWS, GCP)</strong>.</td></tr>
   </tbody>
 </table>
 
 <h3>Suggested build order</h3>
 <table>
-  <thead><tr><th>#</th><th>Step</th><th>Size</th></tr></thead>
+  <thead><tr><th>#</th><th>Step</th><th>Per-engineer size</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td>Project CRD + controller (unblocks UI)</td><td>M</td></tr>
-    <tr><td>2</td><td>Projects list / detail / wizard + "Add to project" in core</td><td>M</td></tr>
-    <tr><td>3</td><td>Observability tab — app-metrics first (reuses existing <code>useMetrics</code>), then IG panel</td><td>M</td></tr>
-    <tr><td>4</td><td>AKS overlay scaffold + <code>useAksContext</code> + Azure tab placeholder</td><td>S</td></tr>
-    <tr><td>5</td><td>KAITO preset step; WI / ACR / HTTPRoute / AOAI glue</td><td>M</td></tr>
+    <tr><td>1</td><td>Project CRD + controller (primary + secondary union; unblocks UI)</td><td>M</td></tr>
+    <tr><td>2a</td><td>Projects list / Resources tab / wizard + "Add to project" in core</td><td>M</td></tr>
+    <tr><td>2b</td><td><em>(stretch)</em> Topology tab (react-flow, primary-only, caps, fallback)</td><td>M</td></tr>
+    <tr><td>3</td><td>Observability tab — app-metrics panel (reuses backend / <code>useMetrics</code>, adds sparkline ring buffer in backend), then IG diagnostics panel (gRPC <code>GadgetManager</code> + <code>GadgetInstanceManager</code>) + IG smoke CI</td><td>M</td></tr>
+    <tr><td>4</td><td>AKS overlay scaffold + <code>useAksContext</code> (probes in shared §7.1 registry) + Azure tab placeholder</td><td>S</td></tr>
+    <tr><td>5</td><td>KAITO preset step; WI / ACR / HTTPRoute / AOAI glue; Portal deep-link drawer</td><td>M</td></tr>
     <tr><td>6</td><td>AKS IG enrichers; polish; docs; E2E checklist</td><td>S</td></tr>
   </tbody>
 </table>
+<p>Steps 1 → 2a → 3 are the critical path. Step 2b can be cut at any point if v1.0 is running hot; steps 4–6 can fork off in parallel after step 2a if multiple engineers are available.</p>
 
 <h2 id="s11"><span class="num">§ 11</span> Cross-cutting: data flow, errors, testing</h2>
 <ul>
-  <li><strong>One data path:</strong> Headlamp's K8s API client. Project CRD reads, IG Trace writes, ModelDeployment writes, detection probes — all standard K8s calls. App-metrics is the one non-K8s read, <strong>also routed through the Headlamp K8s proxy</strong> (via Service / Pod port-forward semantics) to avoid CORS and to inherit the user's token. No new plugin-owned backend.</li>
-  <li><strong>Caching:</strong> detection + context in React context (<code>useRunwayContext</code>, <code>useAksContext</code>), invalidated on cluster switch.</li>
-  <li><strong>Errors:</strong> missing dependency = inline CTA, never a throw; detection fails open; K8s writes are per-resource (wizards surface partial-failure + "retry failed step", no auto-rollback — see §9); IG trace failures non-fatal.</li>
-  <li><strong>Testing:</strong> unit (vitest/RTL) is the bulk — detection, KAITO table, CRD transforms, <code>ig-client</code> with mocked IG, hook lifecycles; component tests per major view against fixtures using Headlamp's harness; controller via controller-runtime envtest; IG stubbed via fake Trace CRD in envtest, real IG verified manually until AKS E2E lands (v1.1). Gate: <code>bun run lint &amp;&amp; bun run tsc &amp;&amp; bun run test</code>.</li>
+  <li><strong>Two data paths, both K8s-only:</strong> Headlamp's K8s API client for the CRD reads, IG gRPC, ModelDeployment writes, and detection probes; the AI Runway backend (also a K8s Service, reached the same way) for app metrics. No cloud-provider SDK dep (§4). No new plugin-owned backend; the existing AI Runway backend is reused and gets a small in-memory metric ring buffer for sparklines (§6).</li>
+  <li><strong>Caching:</strong> detection + context in React context (<code>useRunwayContext</code>, <code>useAksContext</code>), invalidated on cluster switch. Detection registry TTLs live with the probe definition (§7.1).</li>
+  <li><strong>Errors:</strong> missing optional dependency = inline CTA, never a throw; detection fails open; missing AI Runway backend = "Install/repair" CTA on the app-metrics panel; K8s writes are per-resource (wizards surface partial-failure + "retry failed step", no auto-rollback — see §9); IG failures non-fatal.</li>
+  <li><strong>Testing:</strong>
+    <ul>
+      <li><strong>Unit (vitest/RTL):</strong> the bulk — detection registry &amp; override label, KAITO table, CRD transforms (primary + secondary union), <code>ig-client</code> with mocked IG gRPC, hook lifecycles, sparkline ring buffer semantics.</li>
+      <li><strong>Component:</strong> per major view against fixtures using Headlamp's harness — Projects list, Resources tab, Topology (if shipped), Observability with backend present/absent, IG panel with gRPC stubbed.</li>
+      <li><strong>Controller:</strong> via controller-runtime envtest, including primary/secondary selector union and overlap warning.</li>
+      <li><strong>IG smoke (NEW in v1.0):</strong> CI job spins up a <code>kind</code> cluster, Helm-installs IG, runs one curated gadget (<code>trace_dns</code>) end-to-end through the plugin's <code>ig-client</code> against the in-cluster gRPC endpoint. Triggered per-PR when <code>ig-client.ts</code> or <code>GadgetRunner.tsx</code> changes; nightly against IG-main to catch upstream churn.</li>
+      <li><strong>Full AKS E2E:</strong> v1.1.</li>
+      <li><strong>Gate:</strong> <code>bun run lint &amp;&amp; bun run tsc &amp;&amp; bun run test</code>.</li>
+    </ul>
+  </li>
 </ul>
 
 <h2 id="s12"><span class="num">§ 12</span> Non-functional requirements</h2>
@@ -722,53 +816,60 @@ GPU pods: 4 · Recent events: 3</code></pre>
   <tbody>
     <tr><td>Headlamp version</td><td>≥ current LTS at v1.0 ship date; pinned in plugin manifest. Breaking-API drift treated as a release blocker.</td></tr>
     <tr><td>Kubernetes version</td><td>≥ 1.27 (matches AI Runway controller floor).</td></tr>
+    <tr><td>AI Runway backend</td><td>Required install-time dep; same version constraint as the controller.</td></tr>
     <tr><td>Browser support</td><td>Latest 2 versions of Chrome, Edge, Firefox, Safari.</td></tr>
-    <tr><td>Plugin bundle size</td><td>Core plugin <strong>≤ 1.5 MB</strong> gzipped; AKS overlay <strong>≤ 750 KB</strong> gzipped. CI fails on regression.</td></tr>
+    <tr><td>Plugin bundle size</td><td>Core plugin <strong>≤ 1.5 MB</strong> gzipped (includes react-flow ~80 KB gz for topology); AKS overlay <strong>≤ 750 KB</strong> gzipped. CI fails on regression.</td></tr>
     <tr><td>Project-detail TTI</td><td><strong>≤ 2.5 s</strong> on a cluster with 50 Projects / 500 labeled resources, warm Headlamp session (measured against fixtures in CI).</td></tr>
-    <tr><td>Observability tab first-paint</td><td><strong>≤ 1.5 s</strong> to render the K8s-native overview strip; app-metrics and IG panels stream in independently.</td></tr>
-    <tr><td>Detection latency</td><td>All <code>useAksContext</code> / <code>useRunwayContext</code> probes complete in <strong>≤ 1 s</strong> or fail open.</td></tr>
-    <tr><td>Accessibility</td><td>Keyboard-navigable; respects Headlamp's existing a11y baseline. No new keyboard traps.</td></tr>
+    <tr><td>Topology tab first-paint</td><td><strong>≤ 2 s</strong> at 50 nodes; falls back to Resources tab beyond the 100-node cap (§6a).</td></tr>
+    <tr><td>Observability tab first-paint</td><td><strong>≤ 1.5 s</strong> to render the Project-specific overview strip; app-metrics and IG panels stream in independently.</td></tr>
+    <tr><td>Detection latency</td><td>All §7.1 registry probes complete in <strong>≤ 1 s</strong> or fail open.</td></tr>
+    <tr><td>Accessibility</td><td>Keyboard-navigable; respects Headlamp's existing a11y baseline. No new keyboard traps. Topology view has keyboard focus order across nodes/edges.</td></tr>
   </tbody>
 </table>
 
 <h2 id="s13"><span class="num">§ 13</span> Security</h2>
 <ul>
   <li><strong>RBAC for Projects.</strong> The plugin issues all calls with the end-user's token; it never elevates. Creating, listing, or modifying a <code>Project</code> CR requires standard K8s RBAC on <code>projects.airunway.ai</code> in the target namespace. Cluster admins are responsible for granting this — the plugin offers no per-Project ACL of its own in v1.</li>
-  <li><strong>Label tampering.</strong> Any user with <code>patch</code> on a resource can add or remove the <code>airunway.ai/project</code> label, moving it in or out of a Project. This is the same trust model as any K8s label-based grouping (Services, NetworkPolicies). v1 does not validate or webhook-enforce membership — cluster admins who care should restrict <code>patch</code> on the label key via RBAC or an OPA / Kyverno policy. Documented, not prevented.</li>
-  <li><strong>Selector overlap is allowed</strong> (§5); UI surfaces it so users notice if a resource is unexpectedly in multiple Projects.</li>
-  <li><strong>IG privileges.</strong> IG itself runs privileged on every node; the plugin inherits no extra privilege. If the user's token cannot create <code>Trace</code> CRs, the Diagnostics panel shows a permission CTA rather than failing silently.</li>
+  <li><strong>Label tampering.</strong> Any user with <code>patch</code> on a resource can add or remove either the <code>airunway.ai/project</code> (primary) or <code>airunway.ai/secondary-project.&lt;name&gt;</code> (secondary) label. This is the same trust model as any K8s label-based grouping (Services, NetworkPolicies). v1 does not validate or webhook-enforce membership — cluster admins who care should restrict <code>patch</code> on the label keys via RBAC or an OPA / Kyverno policy. Documented, not prevented.</li>
+  <li><strong>Selector collisions on primary</strong> are allowed and surfaced (§5); secondary membership is the intended path for shared resources and does not collide.</li>
+  <li><strong>IG privileges.</strong> IG itself runs privileged on every node; the plugin inherits no extra privilege. If the user's token cannot reach IG via the apiserver proxy, the Diagnostics panel shows a permission CTA rather than failing silently.</li>
   <li><strong>PII in IG output.</strong> Kernel-level traces can leak sensitive strings: DNS names (<code>*.openai.azure.com</code>, internal hostnames), file paths (model identifiers, user-data mounts), syscall arguments. Plugin policy:
     <ul>
       <li>IG output is rendered <strong>as-is</strong> in the table. Nothing is auto-uploaded anywhere; the last-5 ephemeral cache lives in Headlamp plugin-storage (browser-local), not the cluster. JSON/CSV export is explicit and user-initiated.</li>
       <li>The Diagnostics panel header carries a one-line PII notice the first time it's opened per session.</li>
     </ul>
   </li>
-  <li><strong>Untrusted input.</strong> Project <code>displayName</code> / <code>description</code>, user-supplied client IDs, and gadget output are all rendered as text (React default-escapes); no <code>dangerouslySetInnerHTML</code>. Backend Zod validation enforced on every route per project security rules.</li>
+  <li><strong>Untrusted input.</strong> Project <code>displayName</code> / <code>description</code>, user-supplied client IDs, override-label values, and gadget output are all rendered as text (React default-escapes); no <code>dangerouslySetInnerHTML</code>. Backend Zod validation enforced on every route per project security rules.</li>
   <li><strong>Secrets.</strong> The AOAI fallback step writes a <code>Secret</code>; the plugin never logs the value, never sends it to telemetry, and clears form fields on navigation.</li>
 </ul>
 
 <h2 id="s14"><span class="num">§ 14</span> Open questions</h2>
 <p>These need decisions from named owners before or during v1 implementation.</p>
 <ol>
-  <li><strong>[IG-CONFIRM] IG surface, GPU coverage, curated catalog, version floor.</strong> See §8 sub-bullets.</li>
-  <li><strong>App-metrics fallback.</strong> Can we rely on the AI Runway backend being present, or must direct <code>/metrics</code> (via Headlamp proxy) be a first-class path? Affects whether observability works backend-less.</li>
+  <li><strong>IG version floor — exact tag.</strong> §8 resolves to "latest stable at v1.0 ship date." The literal tag is filled in at ship time; CI pins it.</li>
   <li><strong>KAITO preset table.</strong> Which <code>(SKU, model-family)</code> pairs ship in v1? Needs a pass with the KAITO catalog owner.</li>
   <li><strong>Sidebar placement.</strong> Projects as a new top-level group, or nested under the existing "AIRunway" group?</li>
   <li><strong>Naming.</strong> Core Project work needs no special name; AKS overlay working name <code>airunway-aks</code> — final name TBD.</li>
+  <li><strong>Upstream infra-metadata gaps.</strong> With the cloud-neutral rule (§3/§4) holding firm, which infra facts that an operator would reasonably want to see in a Project are currently only available via ARM, and which of those should be fixed upstream (KAITO CR status, AKS node labels, a Prometheus exporter, etc.) rather than worked around in the plugin? Owner: KAITO maintainers + AI Runway. Track as a living list; do not block v1.</li>
+  <li><strong>Topology stretch decision.</strong> Re-evaluate mid-v1.0: is the rest of v1.0 on track such that §6a topology ships in v1.0, or does it slip to v1.1? Owner: project lead, decision needed before step 2b starts.</li>
 </ol>
 
 <h2 id="s15"><span class="num">§ 15</span> Risks</h2>
 <table>
   <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
   <tbody>
-    <tr><td>IG gadget catalog doesn't include the GPU signals assumed in the curated set</td><td>Medium</td><td>Medium — Diagnostics panel feels thin on GPU</td><td>Confirm with IG maintainer (<a href="#s8">§8</a>) before committing UI copy; fall back to DCGM-via-Prometheus + clear "GPU = via DCGM" label</td></tr>
+    <tr><td>AI Runway backend unavailable in a user's install (misconfig, version skew, RBAC)</td><td>Low</td><td>Medium — app-metrics panel dark</td><td>Required install-time dep; clear "Install/repair AI Runway backend" CTA on the panel; backend health probe in <code>useRunwayContext</code></td></tr>
+    <tr><td>IG GPU coverage is alloc-events only (<code>profile_cuda</code>, <code>top_cuda_memory</code>) — no utilization%, SM occupancy, temp, power</td><td>Low</td><td>Low — known limit, clearly attributed</td><td>Validated against <code>gadgets/</code> (<a href="#s8">§8</a>); UI labels CUDA-alloc panels as IG and routes utilization/temp/power to DCGM-via-Prometheus with a "GPU = via DCGM" badge</td></tr>
+    <tr><td>IG image-based gadget gRPC API churns (proto in <code>pkg/gadget-service/api/api.proto</code>) between releases</td><td>Medium</td><td>Medium — plugin run/instance calls break</td><td>Pin minimum IG release in detection and CTA on mismatch; <strong>IG smoke CI in v1.0</strong> (§11); keep curated set's required fields narrow</td></tr>
     <tr><td>KAITO presets churn between releases</td><td>Medium</td><td>Low — wrong preset surfaced</td><td>Keep preset table in TS, version it against KAITO release; CTA "report stale preset"</td></tr>
     <tr><td>Inference-engine metric schemas drift (vLLM rename, SGLang adds/removes) over a 12-month horizon</td><td>High</td><td>Low — panel labels go stale</td><td>Engine-coverage matrix in tests; renders "not reported by this engine" gracefully</td></tr>
     <tr><td>Headlamp plugin API breaks between releases</td><td>Low–Medium</td><td>High — plugin doesn't load</td><td>Pin tested Headlamp version range; CI runs plugin against Headlamp-main weekly</td></tr>
-    <tr><td>Selector overlap confuses users in practice</td><td>Medium</td><td>Low</td><td>"Also in: N Projects" hint in UI; revisit at v1.1 if support load is high</td></tr>
+    <tr><td>Detection false positives confuse users (e.g., a fork named <code>myco-vllm-patched</code> mis-detected)</td><td>Medium</td><td>Low</td><td>Detection contract (§7.1) surfaces confidence; low-confidence detections offer the <code>airunway.ai/engine=&lt;name&gt;</code> override link inline</td></tr>
+    <tr><td>Secondary-membership UX confuses users ("why is this in two Projects?")</td><td>Medium</td><td>Low</td><td>Default action is primary-only; secondary requires an explicit modifier; "Also in" hint surfaces it from both directions; "secondary" chip in the Resources tab</td></tr>
     <tr><td>AKS detection false positives on non-AKS clusters using the same node label out of habit</td><td>Low</td><td>Medium — overlay activates wrongly</td><td>Detection requires <em>both</em> the cluster-wide label and at least one Azure-specific CRD/identity signal before activating</td></tr>
     <tr><td>Wizard partial-failure cleanup is misunderstood as auto-rollback</td><td>Medium</td><td>Medium — orphaned resources</td><td>UI is explicit: "no automatic rollback, use Clean up partial resources to remove what this wizard created"</td></tr>
-    <tr><td>ARM-deferred steps (copy-paste <code>az</code>) feel like a regression vs. fully automated tooling stakeholders may have seen elsewhere</td><td>Medium</td><td>Low</td><td>Frame as deliberate v1 scope cut in stakeholder review; v2 owns the ARM control plane with proper auth design</td></tr>
+    <tr><td>Topology view becomes unreadable for medium Projects (20–50 nodes)</td><td>Medium</td><td>Low — view degrades, list still works</td><td>Fixed L→R direction + lane discipline; Pod-group collapse at 50 nodes; full fallback to Resources tab at 100 nodes (§6a)</td></tr>
+    <tr><td>Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools</td><td>Medium</td><td>Low</td><td>Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the "I need to see this in Azure" case; upstream-gaps list (§14.5) tracks where K8s should surface more</td></tr>
   </tbody>
 </table>
 
@@ -780,6 +881,7 @@ GPU pods: 4 · Recent events: 3</code></pre>
     <tr><td><strong>AGIC</strong></td><td>Application Gateway Ingress Controller — Azure's Gateway API / Ingress implementation</td></tr>
     <tr><td><strong>AKS</strong></td><td>Azure Kubernetes Service — Microsoft's managed Kubernetes offering</td></tr>
     <tr><td><strong>AOAI</strong></td><td>Azure OpenAI — Azure-hosted OpenAI-compatible model endpoints</td></tr>
+    <tr><td><strong>ARM</strong></td><td>Azure Resource Manager — Azure's control-plane API. Explicitly out of scope for this plugin at every version (§3 / §4)</td></tr>
     <tr><td><strong>CTA</strong></td><td>Call-to-action — a button or link prompting the user to take a next step (e.g., "Install IG")</td></tr>
     <tr><td><strong>DCGM</strong></td><td>NVIDIA Data Center GPU Manager — exporter that produces GPU utilization, memory, temperature metrics for Prometheus</td></tr>
     <tr><td><strong>eBPF</strong></td><td>extended Berkeley Packet Filter — Linux kernel mechanism for safely running sandboxed programs in kernel space; the basis for Inspektor Gadget</td></tr>
@@ -787,11 +889,13 @@ GPU pods: 4 · Recent events: 3</code></pre>
     <tr><td><strong>IG / Inspektor Gadget</strong></td><td>Collection of eBPF-based tools for inspecting and debugging Kubernetes workloads</td></tr>
     <tr><td><strong>KAITO</strong></td><td>Kubernetes AI Toolchain Operator — Azure-originated operator for deploying ML models; the "Workspace" CR is its deployment object</td></tr>
     <tr><td><strong>KV-cache</strong></td><td>Key/Value cache in transformer inference — memory used to avoid recomputing attention over prior tokens; saturation kills throughput</td></tr>
+    <tr><td><strong>MD</strong></td><td>ModelDeployment — AI Runway's unified CRD for deploying ML models</td></tr>
     <tr><td><strong>NCCL</strong></td><td>NVIDIA Collective Communications Library — used for inter-GPU / inter-pod tensor exchange in distributed inference; silent failures cause "silent replicas"</td></tr>
     <tr><td><strong>OIDC</strong></td><td>OpenID Connect — identity-token standard; needed for Workload Identity</td></tr>
     <tr><td><strong>PII</strong></td><td>Personally Identifiable Information</td></tr>
     <tr><td><strong>RAG</strong></td><td>Retrieval-Augmented Generation — LLM pattern that fetches documents and feeds them to the model as context</td></tr>
     <tr><td><strong>R/Y/G</strong></td><td>Red / Yellow / Green status indicator</td></tr>
+    <tr><td><strong>react-flow</strong></td><td>React library for building node-based UIs; used for the topology view (§6a)</td></tr>
     <tr><td><strong>SKU</strong></td><td>Stock-Keeping Unit — Azure's name for VM/instance types (e.g., <code>Standard_NC24ads_A100_v4</code>)</td></tr>
     <tr><td><strong>TPOT</strong></td><td>Time Per Output Token — average latency between successive generated tokens; a key streaming-perf metric</td></tr>
     <tr><td><strong>TTFT</strong></td><td>Time To First Token — latency from request submission to the first generated token reaching the client; a key UX metric</td></tr>
