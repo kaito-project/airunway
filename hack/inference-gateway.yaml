@@ -1,0 +1,20 @@
+# Provider-agnostic inference gateway used by the root `setup-gateway` target.
+# The name and namespace are filled in by envsubst at apply time
+# (defaults: inference-gateway / default — see GATEWAY_NAME / GATEWAY_NAMESPACE
+# in the root Makefile).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ${GATEWAY_NAME}
+  namespace: ${GATEWAY_NAMESPACE}
+spec:
+  gatewayClassName: istio
+  infrastructure:
+    annotations:
+      # Required on AKS with Istio. Azure otherwise probes GET / on port 80,
+      # but the gateway returns 404 there and the public IP can time out.
+      service.beta.kubernetes.io/port_80_health-probe_protocol: tcp
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80

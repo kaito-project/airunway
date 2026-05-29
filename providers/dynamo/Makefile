@@ -64,6 +64,8 @@ DYNAMO_PRE_DEPLOY_URL := https://raw.githubusercontent.com/ai-dynamo/dynamo/v$(D
 GAIE_MANIFEST_URL := https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/$(GAIE_VERSION)/manifests.yaml
 
 setup-dynamo: verify-versions
+	@echo "Setting up the inference gateway (Gateway API CRDs, Istio, BBR, Gateway)..."
+	@$(MAKE) -C ../.. setup-gateway
 	@echo "Running Dynamo pre-deployment checks..."
 	@TMPSCRIPT=$$(mktemp) && \
 		trap 'rm -f "$$TMPSCRIPT"' EXIT && \
