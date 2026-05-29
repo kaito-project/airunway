@@ -420,7 +420,7 @@
 </header>
 
 <section id="tldr" class="tldr">
-  <p>AI Runway today deploys ML models well but does not give operators an <em>application</em> view. v1 of this work adds three things to the Headlamp plugin: a <strong>Project</strong> CRD that groups the resources behind one ML app by label selector (with an opt-in secondary-membership label), a <strong>Project-scoped Observability tab</strong> that unifies inference-server metrics with Inspektor Gadget kernel diagnostics, and an <strong>AKS overlay</strong> that wires KAITO, Workload Identity, ACR, Gateway API, and an Azure OpenAI fallback — <em>without any cloud-provider SDK dependency, ever</em>. Azure-specific facts come from K8s labels, CR status, and Portal deep-links. Everything optional fails open with a call-to-action. v1 is scoped at roughly six to ten engineer-weeks (one engineer working sequentially; calendar depends on staffing). A real topology view of each Project is a v1.0 stretch goal. The IG-maintainer items in §8 are the only external blockers.</p>
+  <p>AI Runway today deploys ML models well but does not give operators an <em>application</em> view. v1 of this work adds three things to the Headlamp plugin: a <strong>Project</strong> CRD that groups the resources behind one ML app by label selector (with an opt-in secondary-membership label), a <strong>Project-scoped Observability tab</strong> that unifies inference-server metrics with Inspektor Gadget kernel diagnostics, and an <strong>AKS overlay</strong> that wires KAITO, Workload Identity, ACR, Gateway API, and an Azure OpenAI fallback — <em>without any cloud-provider SDK dependency, ever</em>. Azure-specific facts come from K8s labels, CR status, and Portal deep-links. Everything optional fails open with a call-to-action. v1 is scoped at roughly six to ten engineer-weeks (one engineer working sequentially; calendar depends on staffing). A real topology view of each Project is a v1.0 stretch goal. No external blockers: the Inspektor Gadget surface, GPU coverage, and curated catalog are validated against the IG repo (§8); the exact IG version-floor tag is filled in at v1.0 ship.</p>
 </section>
 
 <h2 id="s1"><span class="num">§ 01</span> Problem &amp; goals</h2>
@@ -846,13 +846,13 @@ status:
 <h2 id="s14"><span class="num">§ 14</span> Open questions</h2>
 <p>These need decisions from named owners before or during v1 implementation.</p>
 <ol>
-  <li><strong>IG version floor — exact tag.</strong> §8 resolves to "latest stable at v1.0 ship date." The literal tag is filled in at ship time; CI pins it.</li>
   <li><strong>KAITO preset table.</strong> Which <code>(SKU, model-family)</code> pairs ship in v1? Needs a pass with the KAITO catalog owner.</li>
   <li><strong>Sidebar placement.</strong> Projects as a new top-level group, or nested under the existing "AIRunway" group?</li>
   <li><strong>Naming.</strong> Core Project work needs no special name; AKS overlay working name <code>airunway-aks</code> — final name TBD.</li>
   <li><strong>Upstream infra-metadata gaps.</strong> With the cloud-neutral rule (§3/§4) holding firm, which infra facts that an operator would reasonably want to see in a Project are currently only available via ARM, and which of those should be fixed upstream (KAITO CR status, AKS node labels, a Prometheus exporter, etc.) rather than worked around in the plugin? Owner: KAITO maintainers + AI Runway. Track as a living list; do not block v1.</li>
   <li><strong>Topology stretch decision.</strong> Re-evaluate mid-v1.0: is the rest of v1.0 on track such that §6a topology ships in v1.0, or does it slip to v1.1? Owner: project lead, decision needed before step 2b starts.</li>
 </ol>
+<div class="callout">The IG version-floor tag (referenced in §8.4 and §15) is <strong>not</strong> an open question — it's a ship-time value filled in when v1.0 is cut, not a decision blocking design or implementation.</div>
 
 <h2 id="s15"><span class="num">§ 15</span> Risks</h2>
 <table>
@@ -869,7 +869,7 @@ status:
     <tr><td>AKS detection false positives on non-AKS clusters using the same node label out of habit</td><td>Low</td><td>Medium — overlay activates wrongly</td><td>Detection requires <em>both</em> the cluster-wide label and at least one Azure-specific CRD/identity signal before activating</td></tr>
     <tr><td>Wizard partial-failure cleanup is misunderstood as auto-rollback</td><td>Medium</td><td>Medium — orphaned resources</td><td>UI is explicit: "no automatic rollback, use Clean up partial resources to remove what this wizard created"</td></tr>
     <tr><td>Topology view becomes unreadable for medium Projects (20–50 nodes)</td><td>Medium</td><td>Low — view degrades, list still works</td><td>Fixed L→R direction + lane discipline; Pod-group collapse at 50 nodes; full fallback to Resources tab at 100 nodes (§6a)</td></tr>
-    <tr><td>Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools</td><td>Medium</td><td>Low</td><td>Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the "I need to see this in Azure" case; upstream-gaps list (§14.5) tracks where K8s should surface more</td></tr>
+    <tr><td>Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools</td><td>Medium</td><td>Low</td><td>Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the "I need to see this in Azure" case; upstream-gaps list (§14.4) tracks where K8s should surface more</td></tr>
   </tbody>
 </table>
 

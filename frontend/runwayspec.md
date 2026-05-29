@@ -20,8 +20,10 @@ Azure-specific facts come from K8s labels, CR status, and Portal
 deep-links. Everything optional fails open with a call-to-action.
 v1 is scoped at ~6–10 engineer-weeks (one engineer working
 sequentially; calendar depends on staffing). A real topology view of
-each Project is a v1.0 stretch goal. The IG-maintainer items in §8 are
-the only external blockers.
+each Project is a v1.0 stretch goal. No external blockers: the
+Inspektor Gadget surface, GPU coverage, and curated catalog are
+validated against the IG repo (§8); the exact IG version-floor tag is
+filled in at v1.0 ship.
 
 ---
 
@@ -782,26 +784,27 @@ after step 2a if multiple engineers are available.
 These need decisions from named owners before or during v1
 implementation.
 
-1. **IG version floor — exact tag.** §8 resolves to "latest stable at
-   v1.0 ship date." The literal tag is filled in at ship time; CI
-   pins it.
-2. **KAITO preset table.** Which `(SKU, model-family)` pairs ship in
+1. **KAITO preset table.** Which `(SKU, model-family)` pairs ship in
    v1? Needs a pass with the KAITO catalog owner.
-3. **Sidebar placement.** Projects as a new top-level group, or nested
+2. **Sidebar placement.** Projects as a new top-level group, or nested
    under the existing "AIRunway" group?
-4. **Naming.** Core Project work needs no special name; AKS overlay
+3. **Naming.** Core Project work needs no special name; AKS overlay
    working name `airunway-aks` — final name TBD.
-5. **Upstream infra-metadata gaps.** With the cloud-neutral rule
+4. **Upstream infra-metadata gaps.** With the cloud-neutral rule
    (§3/§4) holding firm, which infra facts that an operator would
    reasonably want to see in a Project are currently only available
    via ARM, and which of those should be fixed upstream (KAITO CR
    status, AKS node labels, a Prometheus exporter, etc.) rather than
    worked around in the plugin? Owner: KAITO maintainers + AI Runway.
    Track as a living list; do not block v1.
-6. **Topology stretch decision.** Re-evaluate mid-v1.0: is the rest of
+5. **Topology stretch decision.** Re-evaluate mid-v1.0: is the rest of
    v1.0 on track such that §6a topology ships in v1.0, or does it slip
    to v1.1? Owner: project lead, decision needed before step 2b
    starts.
+
+> The IG version-floor tag (referenced in §8.4 and §15) is not an
+> open question — it's a ship-time value filled in when v1.0 is cut,
+> not a decision blocking design or implementation.
 
 ---
 
@@ -820,7 +823,7 @@ implementation.
 | AKS detection false positives on non-AKS clusters using the same node label out of habit | Low | Medium — overlay activates wrongly | Detection requires *both* the cluster-wide label and at least one Azure-specific CRD/identity signal before activating |
 | Wizard partial-failure cleanup is misunderstood as auto-rollback | Medium | Medium — orphaned resources | UI is explicit: "no automatic rollback, use Clean up partial resources to remove what this wizard created" |
 | Topology view becomes unreadable for medium Projects (20–50 nodes) | Medium | Low — view degrades, list still works | Fixed L→R direction + lane discipline; Pod-group collapse at 50 nodes; full fallback to Resources tab at 100 nodes (§6a) |
-| Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools | Medium | Low | Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the "I need to see this in Azure" case; upstream-gaps list (§14.5) tracks where K8s should surface more |
+| Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools | Medium | Low | Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the "I need to see this in Azure" case; upstream-gaps list (§14.4) tracks where K8s should surface more |
 
 ---
 
