@@ -20,9 +20,9 @@
   "devDependencies": {
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",
-    "@iconify/react": "^6.0.2",
+    "@iconify/react": "^3.2.1",
     "@kinvolk/headlamp-plugin": "^0.14.0",
-    "@mui/material": "^9.0.1",
+    "@mui/material": "^5.15.14",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.0.0",
     "@types/react": "^18.3.1",
