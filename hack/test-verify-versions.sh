@@ -71,9 +71,14 @@ sed -i.bak -E 's|^var DefaultGAIEVersion = "[^"]*"$|var DefaultGAIEVersion = "v0
 expect_fail "${GATEWAY_DETECTION}"
 mv -f "${GATEWAY_DETECTION}.bak" "${GATEWAY_DETECTION}"
 
-echo "== Mutating ${KAITO_CONFIG} =="
+echo "== Mutating ${KAITO_CONFIG} (struct Version field) =="
 sed -i.bak -E 's|(Version:[[:space:]]+)"[^"]*"|\1"0.0.0-bogus"|' "${KAITO_CONFIG}"
-expect_fail "${KAITO_CONFIG}"
+expect_fail "${KAITO_CONFIG} struct Version"
+mv -f "${KAITO_CONFIG}.bak" "${KAITO_CONFIG}"
+
+echo "== Mutating ${KAITO_CONFIG} (install Command --version arg) =="
+sed -i.bak -E 's|(--version )[^ ]+( )|\10.0.0-bogus\2|' "${KAITO_CONFIG}"
+expect_fail "${KAITO_CONFIG} install Command --version"
 mv -f "${KAITO_CONFIG}.bak" "${KAITO_CONFIG}"
 
 echo "== Mutating ${VERSIONS_TS} =="

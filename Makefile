@@ -225,7 +225,10 @@ verify-versions:
 	@# 4. providers/kaito/config.go chart version literal must match KAITO_VERSION
 	@grep -qE 'Version:[[:space:]]+"$(KAITO_VERSION_RE)"' providers/kaito/config.go || \
 	  { echo "❌ providers/kaito/config.go chart Version != $(KAITO_VERSION) (from versions.env)"; exit 1; }
-	@# 4. generated TS must be in sync with versions.env.
+	@# 5. providers/kaito/config.go install Command --version arg must match KAITO_VERSION
+	@grep -qE -- '--version $(KAITO_VERSION_RE) ' providers/kaito/config.go || \
+	  { echo "❌ providers/kaito/config.go install Command --version != $(KAITO_VERSION) (from versions.env)"; exit 1; }
+	@# 6. generated TS must be in sync with versions.env.
 	@#    Generate to a temp file and diff against the working-tree copy so
 	@#    that synced uncommitted edits pass (the local-dev case) while
 	@#    stale committed files still fail (the CI case — CI's working
