@@ -4,3 +4,4 @@
 
 export const GAIE_VERSION = "v1.5.0";
 export const DYNAMO_VERSION = "1.1.1";
+export const KAITO_VERSION = "0.10.0";
