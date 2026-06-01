@@ -92,23 +92,16 @@ cleanup-dynamo:
 ## Install Dynamo platform for the CPU-only mocker E2E lane (run before test-e2e-mocker).
 ## Unlike setup-dynamo this skips the GPU pre-deployment check and GAIE: the mocker
 ## backend (python3 -m dynamo.mocker) needs no GPUs and the standalone Frontend path
-## needs no Gateway API Inference Extension.
+## needs no Gateway API Inference Extension. Grove is left at its chart default (off):
+## it only orchestrates multinode PodCliqueSets, and the mocker runs single-node CPU pods.
 setup-dynamo-mocker: verify-versions
-	@if helm status dynamo-platform --namespace $(DYNAMO_NAMESPACE) >/dev/null 2>&1 && \
-		kubectl get deploy -n $(DYNAMO_NAMESPACE) -l app.kubernetes.io/name=dynamo-operator >/dev/null 2>&1; then \
-		echo "ℹ️  Dynamo platform already present in $(DYNAMO_NAMESPACE); skipping install."; \
-		echo "    (Re-running helm upgrade collides with grove-operator's runtime-managed"; \
-		echo "     webhook certs via server-side apply. Run 'make cleanup-dynamo' to reinstall.)"; \
-	else \
-		echo "Installing Dynamo platform v$(DYNAMO_VERSION) for CPU-only mocker E2E..."; \
-		helm upgrade -i dynamo-platform "$(DYNAMO_CHART_URL)" \
+	@echo "Installing Dynamo platform v$(DYNAMO_VERSION) for CPU-only mocker E2E..."
+	@helm upgrade -i dynamo-platform "$(DYNAMO_CHART_URL)" \
 			--namespace $(DYNAMO_NAMESPACE) \
 			--create-namespace \
 			--set "dynamo-operator.controllerManager.manager.image.tag=$(DYNAMO_VERSION)" \
-			--set "dynamo-operator.gpuDiscovery.enabled=false" \
-			--set "global.grove.install=true"; \
-		echo "✅ Dynamo platform v$(DYNAMO_VERSION) (CPU/mocker) installed in namespace $(DYNAMO_NAMESPACE)"; \
-	fi
+			--set "dynamo-operator.gpuDiscovery.enabled=false"
+	@echo "✅ Dynamo platform v$(DYNAMO_VERSION) (CPU/mocker) installed in namespace $(DYNAMO_NAMESPACE)"
 
 ## Run e2e tests (requires DYNAMO_INSTALLED=true and a cluster with dynamo provider deployed)
 test-e2e:
