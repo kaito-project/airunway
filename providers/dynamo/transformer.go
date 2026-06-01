@@ -895,15 +895,17 @@ var defaultImages = map[airunwayv1alpha1.EngineType]string{
 
 // getImage returns the container image to use
 func (t *Transformer) getImage(md *airunwayv1alpha1.ModelDeployment) string {
+	// Mocker mode runs python3 -m dynamo.mocker, which lives only in the
+	// dynamo-planner image. This is annotation-gated, test-only behavior, so the
+	// planner image must win even over an explicit spec.image: a custom image
+	// without the dynamo.mocker module would silently break the test backend.
+	if isMockerMode(md) {
+		return defaultMockerImage
+	}
+
 	// Use custom image if specified
 	if md.Spec.Image != "" {
 		return md.Spec.Image
-	}
-
-	// Mocker mode runs python3 -m dynamo.mocker, which lives in the
-	// dynamo-planner image rather than the per-engine runtime images.
-	if isMockerMode(md) {
-		return defaultMockerImage
 	}
 
 	// Use default image for engine type

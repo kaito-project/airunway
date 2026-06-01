@@ -211,6 +211,28 @@ func TestTransformMockerUsesServedName(t *testing.T) {
 	}
 }
 
+// TestTransformMockerImageWinsOverOverride asserts the planner image is used in
+// mocker mode even when spec.Image is set: the dynamo.mocker module only exists
+// in the planner image, so an arbitrary override would break the test backend.
+func TestTransformMockerImageWinsOverOverride(t *testing.T) {
+	tr := NewTransformer()
+	md := newMockerMD("mock-img")
+	md.Spec.Image = "example.com/some/custom-image:latest"
+
+	resources, err := tr.Transform(context.Background(), md)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	worker := dgdService(t, resources[0], "VllmWorker")
+	image, _ := mainContainer(t, worker)["image"].(string)
+	if !strings.Contains(image, "dynamo-planner") {
+		t.Errorf("worker image=%q, expected dynamo-planner to win over spec.Image", image)
+	}
+	if strings.Contains(image, "custom-image") {
+		t.Errorf("worker image=%q must not use the spec.Image override in mocker mode", image)
+	}
+}
+
 func TestTransformMockerDisaggregated(t *testing.T) {
 	tr := NewTransformer()
 	md := newMockerMD("mock-disagg")

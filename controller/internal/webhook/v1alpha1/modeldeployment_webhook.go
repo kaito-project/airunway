@@ -395,7 +395,11 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 					specPath.Child("scaling", "prefill"),
 					"disaggregated mode requires scaling.prefill",
 				))
-			} else {
+			} else if !isDynamoMocker {
+				// Mocker mode runs the GPU-less python3 -m dynamo.mocker backend,
+				// so a CPU-only disaggregated mocker deployment legitimately omits
+				// scaling.prefill.gpu.count. The prefill block itself is still
+				// required (above) so the dynamo transformer can build the worker.
 				if spec.Scaling.Prefill.GPU == nil || spec.Scaling.Prefill.GPU.Count == 0 {
 					allErrs = append(allErrs, field.Required(
 						specPath.Child("scaling", "prefill", "gpu", "count"),
@@ -409,7 +413,9 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 					specPath.Child("scaling", "decode"),
 					"disaggregated mode requires scaling.decode",
 				))
-			} else {
+			} else if !isDynamoMocker {
+				// See the prefill note above: mocker mode waives the GPU-count
+				// requirement while still requiring the decode block.
 				if spec.Scaling.Decode.GPU == nil || spec.Scaling.Decode.GPU.Count == 0 {
 					allErrs = append(allErrs, field.Required(
 						specPath.Child("scaling", "decode", "gpu", "count"),
