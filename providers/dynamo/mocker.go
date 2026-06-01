@@ -35,6 +35,14 @@ const (
 
 	// DynamoTestBackendMocker is the annotation value that enables mocker mode.
 	DynamoTestBackendMocker = "mocker"
+
+	// MockerWorkerCPU and MockerWorkerMemory are the CPU/memory requests and
+	// limits applied to mocker workers (and mirrored by the mocker Frontend
+	// defaults). They keep the pods Burstable — not BestEffort — so they survive
+	// memory pressure and satisfy namespace LimitRanges, while staying tiny
+	// enough to co-schedule on small CPU-only CI nodes.
+	MockerWorkerCPU    = "100m"
+	MockerWorkerMemory = "256Mi"
 )
 
 // defaultMockerImage is the image used for mocker Frontend and worker
@@ -80,11 +88,22 @@ func mockerCommand() []string {
 	return []string{"python3", "-m", "dynamo.mocker"}
 }
 
-// emptyResources returns an empty resource block (no GPU/CPU/memory requests or
-// limits) for mocker workers, which run on CPU-only nodes.
-func emptyResources() map[string]interface{} {
+// mockerWorkerResources returns the resource block for mocker workers. It sets
+// small CPU/memory requests and limits (and no GPU) so the worker schedules on
+// CPU-only nodes while remaining Burstable rather than BestEffort: BestEffort
+// pods are first to be evicted under memory pressure and are rejected outright
+// in namespaces whose LimitRange mandates requests/limits, both of which would
+// make the CPU-only E2E lane flaky. The values mirror the mocker Frontend
+// defaults and are ample for the lightweight python3 -m dynamo.mocker process.
+func mockerWorkerResources() map[string]interface{} {
 	return map[string]interface{}{
-		"limits":   map[string]interface{}{},
-		"requests": map[string]interface{}{},
+		"requests": map[string]interface{}{
+			"cpu":    MockerWorkerCPU,
+			"memory": MockerWorkerMemory,
+		},
+		"limits": map[string]interface{}{
+			"cpu":    MockerWorkerCPU,
+			"memory": MockerWorkerMemory,
+		},
 	}
 }

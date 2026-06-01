@@ -283,8 +283,8 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 	// is a lightweight router, so default to modest requests (overridable) to
 	// leave headroom for the mocker worker on the same node.
 	if isMockerMode(md) {
-		cpu = "100m"
-		memory = "256Mi"
+		cpu = MockerWorkerCPU
+		memory = MockerWorkerMemory
 	}
 	if overrides.Frontend != nil && overrides.Frontend.Resources != nil {
 		if overrides.Frontend.Resources.CPU != "" {
@@ -517,7 +517,7 @@ func (t *Transformer) buildAggregatedWorker(md *airunwayv1alpha1.ModelDeployment
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = buildMockerArgs(md)
-		resources = emptyResources()
+		resources = mockerWorkerResources()
 	}
 
 	worker := map[string]interface{}{
@@ -616,7 +616,7 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypePrefill)
-		resources = emptyResources()
+		resources = mockerWorkerResources()
 	}
 
 	worker := map[string]interface{}{
@@ -692,7 +692,7 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypeDecode)
-		resources = emptyResources()
+		resources = mockerWorkerResources()
 	}
 
 	worker := map[string]interface{}{

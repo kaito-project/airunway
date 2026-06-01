@@ -186,12 +186,21 @@ func TestTransformMockerAggregated(t *testing.T) {
 		}
 	}
 
-	// No GPU resource requests/limits.
+	// No GPU, but small CPU/memory requests+limits (Burstable, not BestEffort).
 	res, _ := worker["resources"].(map[string]interface{})
 	requests, _ := res["requests"].(map[string]interface{})
 	limits, _ := res["limits"].(map[string]interface{})
-	if len(requests) != 0 || len(limits) != 0 {
-		t.Errorf("expected empty resources in mocker mode, got requests=%v limits=%v", requests, limits)
+	if _, hasGPU := requests["gpu"]; hasGPU {
+		t.Errorf("expected no GPU request in mocker mode, got requests=%v", requests)
+	}
+	if _, hasGPU := limits["gpu"]; hasGPU {
+		t.Errorf("expected no GPU limit in mocker mode, got limits=%v", limits)
+	}
+	if requests["cpu"] != MockerWorkerCPU || requests["memory"] != MockerWorkerMemory {
+		t.Errorf("expected CPU/memory requests %s/%s, got %v", MockerWorkerCPU, MockerWorkerMemory, requests)
+	}
+	if limits["cpu"] != MockerWorkerCPU || limits["memory"] != MockerWorkerMemory {
+		t.Errorf("expected CPU/memory limits %s/%s, got %v", MockerWorkerCPU, MockerWorkerMemory, limits)
 	}
 }
 
@@ -280,8 +289,11 @@ func TestTransformMockerDisaggregated(t *testing.T) {
 
 		res, _ := worker["resources"].(map[string]interface{})
 		requests, _ := res["requests"].(map[string]interface{})
-		if len(requests) != 0 {
-			t.Errorf("%s expected no resource requests, got %v", svcName, requests)
+		if _, hasGPU := requests["gpu"]; hasGPU {
+			t.Errorf("%s expected no GPU request, got %v", svcName, requests)
+		}
+		if requests["cpu"] != MockerWorkerCPU || requests["memory"] != MockerWorkerMemory {
+			t.Errorf("%s expected CPU/memory requests %s/%s, got %v", svcName, MockerWorkerCPU, MockerWorkerMemory, requests)
 		}
 	}
 }

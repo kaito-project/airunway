@@ -27,12 +27,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
-// mockerAnnotation is the ModelDeployment annotation that switches the Dynamo
-// provider into its GPU-less mocker test backend. It must match
+// mockerAnnotationKey/Value are the ModelDeployment annotation that switches the
+// Dynamo provider into its GPU-less mocker test backend. They must match
 // providers/dynamo/mocker.go (AnnotationDynamoTestBackend / DynamoTestBackendMocker).
-const mockerAnnotation = "airunway.ai/dynamo-test-backend: mocker"
+const (
+	mockerAnnotationKey   = "airunway.ai/dynamo-test-backend"
+	mockerAnnotationValue = "mocker"
+)
 
 // mockerPlannerImageSubstr is the image substring expected on mocker workers.
 const mockerPlannerImageSubstr = "dynamo-planner"
@@ -154,18 +160,31 @@ func testCreateMockerModelDeployment(t *testing.T, tc mockerCase) {
 	t.Logf("applied mocker ModelDeployment %s from %s", tc.name, tc.fixture)
 }
 
-// injectMockerAnnotation inserts the mocker annotation under the first metadata
-// block of a single-document ModelDeployment manifest.
+// injectMockerAnnotation parses a single-document ModelDeployment manifest and
+// sets the mocker annotation via the unstructured API, then re-serializes it.
+// SetAnnotations handles all the fixture-evolution cases for free: it creates
+// metadata.annotations if absent, merges into an existing block, and overwrites
+// (no duplicate) if the key is already present — no string/line surgery.
 func injectMockerAnnotation(t *testing.T, manifest string) string {
 	t.Helper()
-	const marker = "metadata:\n"
-	idx := strings.Index(manifest, marker)
-	if idx < 0 {
-		t.Fatalf("fixture has no metadata block to annotate")
+
+	var obj unstructured.Unstructured
+	if err := yaml.Unmarshal([]byte(manifest), &obj.Object); err != nil {
+		t.Fatalf("failed to parse fixture as YAML: %v", err)
 	}
-	insertAt := idx + len(marker)
-	annotations := "  annotations:\n    " + mockerAnnotation + "\n"
-	return manifest[:insertAt] + annotations + manifest[insertAt:]
+
+	ann := obj.GetAnnotations()
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[mockerAnnotationKey] = mockerAnnotationValue
+	obj.SetAnnotations(ann)
+
+	out, err := yaml.Marshal(obj.Object)
+	if err != nil {
+		t.Fatalf("failed to re-serialize annotated manifest: %v", err)
+	}
+	return string(out)
 }
 
 // testMockerDGDCreated waits for the DGD to exist and asserts the generated
