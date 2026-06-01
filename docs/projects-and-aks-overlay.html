@@ -1,0 +1,1522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Runway — Projects + AKS Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Spectral:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f3ece1;     /* warm ivory */
+    --paper-deep:   #ebe2d3;
+    --paper-edge:   #ddd1bd;
+    --ink:          #1a1814;     /* near-black, warm */
+    --ink-soft:     #4a443b;
+    --ink-faint:    #8a8174;
+    --rule:         #c8bda8;
+    --accent:       #b94a2c;     /* terracotta */
+    --accent-deep:  #862e16;
+    --accent-soft:  #f0d7c9;
+    --gold:         #a07a2c;
+    --green:        #4a6b3a;
+    --code-bg:      #e8dfce;
+    --maxw:         72rem;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 17px/1.6 "Spectral", Georgia, serif;
+    font-feature-settings: "kern", "liga", "onum";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* paper grain */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+    background-image:
+      radial-gradient(rgba(40,30,20,0.06) 1px, transparent 1px),
+      radial-gradient(rgba(40,30,20,0.04) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 1px;
+    mix-blend-mode: multiply;
+    opacity: 0.7;
+  }
+
+  /* Layout */
+  .frame { display: grid; grid-template-columns: 18rem minmax(0, 1fr); max-width: var(--maxw); margin: 0 auto; }
+  nav.toc {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    padding: 4rem 2rem 3rem 2.5rem;
+    border-right: 1px solid var(--rule);
+  }
+  main { padding: 4rem 3rem 8rem; min-width: 0; }
+
+  /* TOC */
+  .toc-eyebrow {
+    font: 500 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent-deep); margin: 0 0 1.5rem;
+  }
+  .toc-list { list-style: none; padding: 0; margin: 0; counter-reset: tocnum; }
+  .toc-list li { counter-increment: tocnum; margin: 0; }
+  .toc-list a {
+    display: grid; grid-template-columns: 2rem 1fr;
+    gap: 0.5rem; align-items: baseline;
+    padding: 0.4rem 0;
+    color: var(--ink-soft); text-decoration: none;
+    font: 400 14px/1.35 "Spectral", serif;
+    border-top: 1px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .toc-list a::before {
+    content: counter(tocnum, decimal-leading-zero);
+    font: 500 11px/1.4 "JetBrains Mono", monospace;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+  }
+  .toc-list a:hover { color: var(--accent); }
+  .toc-list a:hover::before { color: var(--accent); }
+  .toc-tldr a {
+    grid-template-columns: 1fr;
+    font: 500 13px/1.35 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent-deep);
+    padding: 0.6rem 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 0.75rem;
+  }
+
+  /* Masthead */
+  .masthead {
+    border-bottom: 3px double var(--ink);
+    padding-bottom: 1.5rem; margin-bottom: 2.5rem;
+  }
+  .kicker {
+    font: 500 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.28em; text-transform: uppercase;
+    color: var(--accent-deep); margin: 0 0 1rem;
+    display: flex; gap: 1rem; align-items: center;
+  }
+  .kicker .dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; display: inline-block; }
+  h1 {
+    font: 300 clamp(2.5rem, 5vw, 4.25rem)/0.95 "Fraunces", serif;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin: 0 0 1rem;
+  }
+  h1 em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 80;
+    color: var(--accent);
+  }
+  .byline {
+    display: flex; flex-wrap: wrap; gap: 1.25rem;
+    font: 400 13px/1.4 "JetBrains Mono", monospace;
+    color: var(--ink-soft); letter-spacing: 0.02em;
+  }
+  .byline strong { color: var(--ink); font-weight: 500; }
+
+  /* TL;DR — drop cap, distinct treatment */
+  .tldr {
+    background: var(--paper-deep);
+    border-left: 6px solid var(--accent);
+    padding: 2rem 2.25rem 2rem 2rem;
+    margin: 3rem 0 4rem;
+    position: relative;
+  }
+  .tldr::before {
+    content: "TL;DR";
+    position: absolute; top: -0.7em; left: 1.5rem;
+    background: var(--paper);
+    padding: 0 0.6rem;
+    font: 500 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.28em; color: var(--accent-deep);
+  }
+  .tldr p { margin: 0; font-size: 18px; line-height: 1.65; color: var(--ink); }
+  .tldr p::first-letter {
+    font: 300 4.5rem/0.85 "Fraunces", serif;
+    font-variation-settings: "opsz" 144, "SOFT" 40;
+    float: left; padding: 0.3rem 0.6rem 0 0;
+    color: var(--accent);
+  }
+
+  /* Section headings */
+  h2 {
+    font: 400 2rem/1.15 "Fraunces", serif;
+    font-variation-settings: "opsz" 60, "SOFT" 20;
+    letter-spacing: -0.015em;
+    margin: 5rem 0 1.25rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--ink);
+    color: var(--ink);
+    display: flex; align-items: baseline; gap: 1rem;
+  }
+  h2 .num {
+    font: 500 13px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em; color: var(--accent);
+    flex: 0 0 auto;
+  }
+  h2 .pill {
+    font: 500 10px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    background: var(--ink); color: var(--paper);
+    padding: 0.35em 0.7em; border-radius: 2px;
+    margin-left: auto; flex: 0 0 auto;
+  }
+  h2 .pill.b { background: var(--accent); }
+  h3 {
+    font: 500 1.2rem/1.3 "Fraunces", serif;
+    font-variation-settings: "opsz" 36;
+    margin: 2.25rem 0 0.5rem;
+    color: var(--ink);
+  }
+  h4 {
+    font: 500 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--accent-deep);
+    margin: 1.75rem 0 0.5rem;
+  }
+
+  /* Body text */
+  p { margin: 0 0 1rem; max-width: 38rem; }
+  main ul, main ol { padding-left: 1.4rem; margin: 0 0 1.25rem; max-width: 38rem; }
+  main li { margin: 0.35rem 0; }
+  main li::marker { color: var(--accent); }
+  strong { color: var(--ink); font-weight: 600; }
+  em { font-style: italic; }
+  a { color: var(--accent-deep); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { color: var(--accent); }
+
+  /* Code */
+  code {
+    font: 500 0.88em/1.4 "JetBrains Mono", monospace;
+    background: var(--code-bg);
+    color: var(--ink);
+    padding: 0.05em 0.4em;
+    border-radius: 2px;
+    border-bottom: 1px solid var(--paper-edge);
+  }
+  pre {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 1.5rem 1.75rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    font: 400 13px/1.55 "JetBrains Mono", monospace;
+    margin: 1rem 0 1.5rem;
+    max-width: 42rem;
+    position: relative;
+    box-shadow: 0 1px 0 var(--ink), 6px 6px 0 var(--paper-edge);
+  }
+  pre code { background: transparent; color: inherit; padding: 0; border: 0; }
+
+  /* Tables */
+  table {
+    width: 100%; border-collapse: collapse;
+    margin: 1rem 0 1.75rem;
+    font: 400 14px/1.5 "Spectral", serif;
+    max-width: 44rem;
+  }
+  thead th {
+    text-align: left;
+    font: 500 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent-deep);
+    padding: 0.5rem 0.75rem 0.5rem 0;
+    border-bottom: 2px solid var(--ink);
+  }
+  tbody td {
+    padding: 0.75rem 0.75rem 0.75rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tbody tr:hover td { background: var(--paper-deep); }
+
+  /* Callouts */
+  .callout {
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--accent);
+    background: var(--paper-deep);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    max-width: 42rem;
+    font-size: 15px;
+  }
+  .callout.warn { border-left-color: var(--gold); background: #f0e6c8; }
+  .callout strong { display: inline-block; margin-right: 0.4rem; }
+
+  blockquote {
+    margin: 1.25rem 0; padding: 0 0 0 1.5rem;
+    border-left: 2px solid var(--accent);
+    font: italic 400 16px/1.55 "Spectral", serif;
+    color: var(--ink-soft);
+    max-width: 38rem;
+  }
+
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 3rem 0; max-width: 38rem; }
+
+  /* Diagram — replaces the ASCII art */
+  .layers {
+    margin: 2rem 0 2.5rem;
+    display: grid; gap: 1.25rem;
+    max-width: 48rem;
+  }
+  .layer {
+    position: relative;
+    background: var(--paper-deep);
+    border: 1px solid var(--ink);
+    padding: 1.25rem 1.5rem 1.25rem 4rem;
+    box-shadow: 4px 4px 0 var(--paper-edge);
+  }
+  .layer.b {
+    background: var(--accent-soft);
+    border-color: var(--accent-deep);
+    box-shadow: 4px 4px 0 var(--paper-edge);
+  }
+  .layer .badge {
+    position: absolute; top: -0.7rem; left: -0.7rem;
+    background: var(--ink); color: var(--paper);
+    width: 2.4rem; height: 2.4rem;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font: 600 1rem "Fraunces", serif;
+  }
+  .layer.b .badge { background: var(--accent-deep); }
+  .layer h4 { margin: 0 0 0.3rem; color: var(--accent-deep); }
+  .layer.b h4 { color: var(--accent-deep); }
+  .layer .lname { font: 500 1.1rem/1.2 "Fraunces", serif; margin: 0 0 0.6rem; }
+  .layer .lhost { font: 400 12px/1.4 "JetBrains Mono", monospace; color: var(--ink-soft); }
+  .layer ul.lfeatures { padding-left: 1.1rem; margin: 0.5rem 0 0; font-size: 14px; }
+  .layer ul.lfeatures li { margin: 0.15rem 0; }
+  .layers-arrow {
+    text-align: center;
+    font: 400 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.2em; color: var(--ink-faint);
+    text-transform: uppercase;
+    padding: 0.25rem 0;
+  }
+  .layers-arrow::before { content: "▼ "; color: var(--accent); }
+  .cluster-card {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 1.25rem 1.5rem;
+    background-image: repeating-linear-gradient(
+      45deg, transparent 0, transparent 8px,
+      rgba(40,30,20,0.04) 8px, rgba(40,30,20,0.04) 9px
+    );
+    max-width: 48rem;
+  }
+  .cluster-card h4 { margin: 0 0 0.5rem; }
+  .cluster-card .items {
+    font: 400 13px/1.6 "JetBrains Mono", monospace;
+    color: var(--ink-soft);
+  }
+  .cluster-card .items span { white-space: nowrap; }
+  .cluster-card .items span + span::before { content: " · "; color: var(--accent); margin: 0 0.15em; }
+
+  /* Personas — table-as-cards */
+  .personas {
+    display: grid; gap: 1.25rem; margin: 1.5rem 0 2rem;
+    grid-template-columns: 1fr;
+    max-width: 48rem;
+  }
+  .persona {
+    border: 1px solid var(--rule);
+    padding: 1.25rem 1.5rem;
+    background: var(--paper);
+    display: grid; grid-template-columns: 9rem 1fr; gap: 1.5rem;
+    align-items: start;
+  }
+  .persona .rank {
+    font: 500 11px/1.3 "JetBrains Mono", monospace;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--accent-deep);
+  }
+  .persona .name { font: 500 1.1rem/1.2 "Fraunces", serif; color: var(--ink); margin: 0.15rem 0 0; }
+  .persona .role { font-size: 14px; color: var(--ink-soft); margin: 0.5rem 0; }
+  .persona .needs { font-size: 14px; }
+  .persona.primary { border-left: 4px solid var(--accent); }
+  .persona.secondary { border-left: 4px solid var(--gold); }
+  .persona.tertiary { border-left: 4px solid var(--ink-faint); }
+
+  /* Footer */
+  footer {
+    margin-top: 6rem; padding-top: 2rem;
+    border-top: 3px double var(--ink);
+    font: 400 12px/1.5 "JetBrains Mono", monospace;
+    color: var(--ink-faint);
+    display: flex; justify-content: space-between; gap: 1rem;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .frame { grid-template-columns: 1fr; }
+    nav.toc {
+      position: static; height: auto; padding: 2rem 1.5rem;
+      border-right: 0; border-bottom: 1px solid var(--rule);
+    }
+    main { padding: 2.5rem 1.5rem 4rem; }
+    .persona { grid-template-columns: 1fr; gap: 0.5rem; }
+  }
+  @media print {
+    body { background: white; color: black; }
+    body::before { display: none; }
+    nav.toc { display: none; }
+    .frame { grid-template-columns: 1fr; max-width: none; }
+    main { padding: 0; }
+    pre { box-shadow: none; }
+    .layer, .cluster-card, .persona, .callout { box-shadow: none; break-inside: avoid; }
+    h2 { break-after: avoid; }
+  }
+
+  h2 .htitle { flex: 1 1 auto; }
+
+  h2 .htitle { flex: 1 1 auto; }
+
+  h2 .htitle { flex: 1 1 auto; }
+</style>
+</head>
+<body>
+<div class="frame">
+
+<nav class="toc">
+  <p class="toc-eyebrow">Contents</p>
+  <ul class="toc-list toc-tldr"><li><a href="#tldr">Executive summary</a></li></ul>
+<ul class="toc-list">
+<li><a href="#s0">Prerequisites — plugin UX work that must land first</a></li>
+<li><a href="#s1">Problem &amp; goals</a></li>
+<li><a href="#s2">Personas</a></li>
+<li><a href="#s3">Key design principles</a></li>
+<li><a href="#s4">Three layers + cloud-neutral data path</a></li>
+<li><a href="#s5">Project model</a></li>
+<li><a href="#s6">Observability — the MVP</a></li>
+<li><a href="#s6a">Topology view (v1.0 stretch)</a></li>
+<li><a href="#s7">AI-workload detection (well-known frameworks)</a></li>
+<li><a href="#s8">Inspektor Gadget integration (Layer A core; <code>ig-client.ts</code>)</a></li>
+<li><a href="#s9">AKS overlay</a></li>
+<li><a href="#s10">Phasing</a></li>
+<li><a href="#s11">Cross-cutting: data flow, errors, testing</a></li>
+<li><a href="#s12">Non-functional requirements</a></li>
+<li><a href="#s13">Security</a></li>
+<li><a href="#s14">Open questions</a></li>
+<li><a href="#s15">Risks</a></li>
+<li><a href="#s16">Glossary</a></li>
+</ul>
+</nav>
+
+<main>
+
+<header class="masthead">
+  <p class="kicker"><span class="dot"></span>Specification <span class="dot"></span> Draft for stakeholder review</p>
+  <h1>AI Runway —<br><em>Projects</em> &amp; the AKS overlay</h1>
+  <div class="byline">
+    <span><strong>Date</strong> 2026-05-29</span>
+    <span><strong>Surface</strong> Headlamp plugin</span>
+    <span><strong>Repo</strong> kaito-project/airunway (controller + plugins live here)</span>
+  </div>
+</header>
+
+<section id="tldr" class="tldr"><p>AI Runway today deploys ML models well but does not give operators an <em>application</em> view. v1 of this work adds three things to the Headlamp plugin: a <strong>Project</strong> CRD (label-selector grouping of the resources that make up one ML app), a <strong>Project-scoped Observability tab</strong> that unifies inference-server metrics and Inspektor Gadget kernel diagnostics, and an <strong>AKS overlay</strong> that wires KAITO, Workload Identity, ACR, Gateway API, and an Azure OpenAI credential helper — <em>without any cloud-provider SDK dependency, ever</em>. Azure-specific facts come from K8s labels, CR status, and Portal deep-links. Everything optional fails open with a call-to-action. A real topology view of each Project is a v1.0 stretch goal.</p></section>
+<hr />
+<h2 id="s0"><span class="num">§ 00</span><span class="htitle">Prerequisites — plugin UX work that must land first</span></h2>
+<p>This spec sits on top of the existing Headlamp plugin and assumes it behaves correctly per-cluster and doesn’t crash on the deployments list. Several findings in <a href="../plugins/headlamp/docs/ux-improvements-spec.md">plugins/headlamp/docs/ux-improvements-spec.md</a> are genuine blockers for the Project work; others are quality-of-life items we can land alongside. Calling them out so this v1 doesn’t get built on a broken base.</p>
+<p><strong>Hard blockers — must land before v1.0 Project work starts:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Item</th>
+<th>Why it blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Open architectural question (UX spec §0)</strong> — is this a Headlamp plugin at all, or should the Web UI ship standalone / behind a sidebar link?</td>
+<td><strong>Resolved: continue as a Headlamp plugin.</strong> The entire Layer-A/B architecture (§4), sidebar placement (§14.2), AKS overlay as a Headlamp plugin (§9), and IG-via-K8s-proxy data path (§8) all presume this answer, and v1.0 commits to it. If the project ever reopens this question, this spec needs a full revisit — flagged in §15 risks.</td>
+</tr>
+<tr class="even">
+<td><strong>UX spec P0-0 — per-cluster backend configuration</strong></td>
+<td>We assume the backend is reached “via the K8s API proxy” (§4 / §11). Today the backend URL is a global plugin setting that ignores Headlamp’s cluster context. Projects, app metrics, and detection probes all silently target the wrong cluster on a context switch. The §1 success criterion “every Project page renders without errors” cannot hold while this is broken.</td>
+</tr>
+<tr class="odd">
+<td><strong>UX spec P0-1 — deployments list crash + namespace filter</strong></td>
+<td>The Projects list and Resources tab (§5) follow the same list-rendering shape as <code>DeploymentsList</code>. Shipping new list views on top of the same crash mode would double the exposure. Fix the underlying defensive-property-access pattern once.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Soft prerequisites — should land before or during early v1.0 steps:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Item</th>
+<th>Why it matters here</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>UX spec P0-2 — settings consolidated to one location</strong></td>
+<td>The §7.1 detection-registry overrides and the §8 <code>ig-recommended.json</code> override both live in plugin settings. Two competing Settings entries makes that surface ambiguous.</td>
+</tr>
+<tr class="even">
+<td><strong>UX spec P0-3 — single <code>useAutoRefresh</code> hook</strong></td>
+<td>The Project chip (§6), resource counts (§5 status), and IG run results all need polling. We should consume the shared hook rather than add a fourth <code>setInterval</code> pattern.</td>
+</tr>
+<tr class="odd">
+<td><strong>UX spec P1-1 — rebuild deployment detail on Headlamp’s detail layout</strong></td>
+<td>Aligns the “Don’t re-implement Headlamp” principle (§3.5) for the existing surface; the new Project detail (§5) should adopt the same layout pattern, not invent its own.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Out of v1.0 scope but tracked:</strong> UX spec P1-2 (in-plugin port-forward), P1-3 (<code>ConnectionBanner</code> copy fixes), and all P2 items are independent of the Project work and follow their own track.</p>
+<p><strong>Sequencing note (revises §10 build order):</strong> Step 1 (Project CRD + controller) and step 2a (Projects list / Resources tab) cannot start until UX P0-0 + P0-1 have landed. The AKS overlay scaffolding in step 4 can proceed independently of UX P0-2 / P0-3, but the plugin’s day-2 pages built in steps 2a / 3 should consume the shared <code>useAutoRefresh</code> hook (P0-3) from the start. See the new <strong>v0.9 prerequisite phase</strong> in §10 for the explicit dependency.</p>
+<hr />
+<h2 id="s1"><span class="num">§ 01</span><span class="htitle">Problem &amp; goals</span></h2>
+<h3 id="problem">Problem</h3>
+<p>AI Runway today gives operators a unified <code>ModelDeployment</code> CRD across several inference providers, but a real ML application is almost never <em>one</em> ModelDeployment. It is a model <strong>plus</strong> an app pod, <strong>plus</strong> a PVC for weights or RAG indexes, <strong>plus</strong> a Service / HTTPRoute, <strong>plus</strong> secrets. Headlamp shows these as scattered resources with no grouping, no application-level health, and no AI-aware diagnostics. Two pain points follow:</p>
+<ol type="1">
+<li><strong>No application identity.</strong> Operators can’t answer “what does the <em>Customer-Support RAG</em> app look like, and is it healthy?” without a mental join across kinds.</li>
+<li><strong>No AI-aware observability.</strong> Inference-server metrics (TTFT, KV-cache, tokens/s) live behind raw <code>/metrics</code> endpoints; kernel-level signals (DNS to HuggingFace, OOM-kills, model-weight I/O) are not surfaced at all. Operators reach for kubectl, Grafana, and Inspektor Gadget manually.</li>
+</ol>
+<h3 id="goals-v1">Goals (v1)</h3>
+<ul>
+<li><strong>Project as a first-class grouping</strong> so an operator can see one ML application end-to-end and bulk-act on it.</li>
+<li><strong>Two-pane observability</strong> scoped to a Project: app metrics from the inference engine, kernel diagnostics from Inspektor Gadget.</li>
+<li><strong>AKS-aware deploy glue</strong> that removes the most common Azure paper-cuts (KAITO preset, Workload Identity, ACR, HTTPRoute, AOAI credential helper) without any cloud-provider SDK dep.</li>
+</ul>
+<p>(Graceful degradation across all optional dependencies is treated as a design principle, not a goal — see §3.)</p>
+<h3 id="non-goals-v1">Non-goals (v1)</h3>
+<p>Replacing AI Runway’s deploy wizard · generic IG browser · alerting / on-call · GitOps integration · multi-cluster Project views · <em>any</em> cloud SDK use (Azure ARM, AWS, GCP) · long-term metric / gadget-result persistence.</p>
+<h3 id="success-criteria">Success criteria</h3>
+<ul>
+<li><strong>Release-gate demo (manual, run by the release driver before v1.0 ships).</strong> On a real AKS cluster with KAITO + IG pre-installed, a documented “fresh AKS demo script” executes end-to-end: each step in §9 deploy glue succeeds, the resulting Project shows up in the Projects list with Ready status, and the TTFT panel renders. No time bound — the gate is “all steps pass.” Cluster-creation steps themselves are out of scope per the cloud-neutral rule (§3.5).</li>
+<li><strong>CI-enforced functional check.</strong> Given a Project + ModelDeployment applied via YAML against the fixture corpus, the Projects list renders the new Project with the right resource counts and Ready status. (Real perf budgets / TTI gates are deferred to v1.1 — see §12.)</li>
+<li>On a cluster with the AI Runway backend installed (a required install-time dep — see §3 / §6) but <strong>none</strong> of the other optional pieces (no Prometheus, no IG, no KAITO, no Gateway API), every Project page still renders without errors and shows actionable CTAs.</li>
+<li>The AKS overlay can be pulled out into its own repo later as a config change, not a refactor (enforced by the import-direction lint rule, §4, and the cloud-neutral data-path rule, §3).</li>
+</ul>
+<hr />
+<h2 id="s2"><span class="num">§ 02</span><span class="htitle">Personas</span></h2>
+<table>
+<thead>
+<tr class="header">
+<th>Persona</th>
+<th>Primary job</th>
+<th>What they need from this work</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Platform engineer</strong> (primary)</td>
+<td>Runs the cluster; installs AI Runway, KAITO, IG; troubleshoots when ML eng pings them</td>
+<td>Cluster-wide Projects view, deep diagnostics (IG), AKS glue that cuts ticket volume</td>
+</tr>
+<tr class="even">
+<td><strong>ML engineer</strong> (secondary)</td>
+<td>Owns one app (a Project); pushes new model versions; reads metrics</td>
+<td>Project URL they can bookmark; TTFT / throughput / queue depth; “is my model healthy” at a glance</td>
+</tr>
+<tr class="odd">
+<td><strong>Eng manager</strong> (tertiary, read-only)</td>
+<td>Wants a status overview before standup</td>
+<td>Projects list with Ready / Degraded chips; no need to touch IG or AKS detail</td>
+</tr>
+</tbody>
+</table>
+<p>UX detailing optimizes for the platform engineer; ML-engineer access is via shareable Project URLs (no separate role-restricted view in v1).</p>
+<hr />
+<h2 id="s3"><span class="num">§ 03</span><span class="htitle">Key design principles</span></h2>
+<ol type="1">
+<li><p><strong>Two data planes, treated independently.</strong> AI-workload signal comes from two distinct sources: the <strong>application-metrics plane</strong> (TTFT, TPOT, tokens/s, KV-cache — emitted by the inference server on its Prometheus endpoint, served to the plugin through the AI Runway backend) and the <strong>kernel/eBPF plane</strong> (DNS, TCP, OOM, file-I/O — emitted by Inspektor Gadget). They have independent availability and never substitute for each other. IG cannot produce TTFT; an inference server cannot tell you why DNS to HuggingFace is slow.</p></li>
+<li><p><strong>Inspektor Gadget is provider-neutral.</strong> IG lives in the <strong>core</strong> plugin, scoped to a Project, on any Kubernetes distribution. The AKS overlay only adds AKS-<em>flavored enrichers</em> on top (GPU-SKU fit, NCCL flagging on Azure GPU pools).</p></li>
+<li><p><strong>Project is a CRD with label-selector membership</strong> — not namespace-as-Project. The CRD gives the UI a real object to watch, supports multiple-Projects-per-namespace, and leaves room for status aggregation and (later) ownerRef-style cascades. Membership is a single label <code>airunway.ai/project=&lt;name&gt;</code>; a resource belongs to exactly one Project in v1 (§5). Multi-Project membership is a deliberate v1.1+ question.</p></li>
+<li><p><strong>Graceful degradation is a hard requirement.</strong> Every optional dependency (IG, Prometheus, KAITO, Gateway API, AKS itself) is detected; missing = inline CTA; never a crash. The AI Runway backend is the one exception: it is a required install-time component (see §6), and its absence is surfaced as “Install or repair AI Runway backend” rather than as silent partial functionality.</p>
+<p><strong>Rendering surface — one shared component.</strong> All “missing dependency” empty states render through a single <code>MissingDependency</code> component:</p>
+<pre class="ts"><code>&lt;MissingDependency
+  probe=&quot;ig&quot;                       // §7.1 registry key
+  title=&quot;Inspektor Gadget not installed&quot;
+  body=&quot;Kernel-level diagnostics need IG running in this cluster.&quot;
+  primaryCta={{ label: &quot;Install IG&quot;, href: &quot;...&quot; }}
+  secondaryCta={{ label: &quot;Learn more&quot;, href: &quot;...&quot; }}
+/&gt;</code></pre>
+<ul>
+<li>Used <strong>inline inside the panel</strong> that depends on the probe (panel header still renders so the user sees what’s missing; body is the empty state). No tab-level banners, no greyed-out panel previews.</li>
+<li>Per-dep copy lives with the probe definition in the §7.1 registry (the existing <code>"what's missing" CTA</code> field). One consumer, one style — every missing-dep case in the plugin looks the same.</li>
+<li>Panels degrade independently: a Project page with IG missing but the backend present shows the app-metrics panel normally and <code>MissingDependency</code> only in the diagnostics panel.</li>
+</ul></li>
+<li><p><strong>Don’t re-implement Headlamp.</strong> The plugin’s job is to add what Headlamp doesn’t know about: AI workloads, AI-specific metrics, kernel-level AI diagnostics, and Project-as-an-application grouping. Generic K8s status, events, logs, exec, YAML views, and per-resource aggregation are Headlamp’s job — we link to them, not duplicate them. This shapes §5 (Project detail links to Headlamp pages for per-resource detail) and §6 (the overview strip only carries Project-specific items).</p></li>
+<li><p><strong>Detection is explicit and overridable.</strong> Every detector returns a <code>{ detected, confidence, source }</code> triple. Low-confidence detections (e.g., image-name regex) show an inline “override” link. Users can pin a definitive answer with the <code>airunway.ai/engine=&lt;name&gt;</code> label, which detectors treat as authoritative. Framework detection (§7) and AKS-context probes (§9) are entries in a single typed detection registry (§7.1).</p></li>
+</ol>
+<hr />
+<h2 id="s4"><span class="num">§ 04</span><span class="htitle">Three layers + cloud-neutral data path</span></h2>
+<pre><code>┌──────────────────────────── Headlamp (browser) ─────────────────────────┐
+│                                                                          │
+│  Layer A — CORE airunway plugin  (provider-neutral, runs everywhere)     │
+│    • Existing: Deployments, Models, Runtimes(RO), Gateway, Settings      │
+│    • NEW: Projects (list, detail [Topology | Resources | Observability], │
+│           create wizard, &quot;Add to project&quot;)                               │
+│    • NEW: Project → Observability tab                                    │
+│         ├─ App-metrics panel  (via AI Runway backend)                    │
+│         └─ Diagnostics panel  (Inspektor Gadget, when installed)         │
+│    • NEW: Detection registry (framework + cluster probes)                │
+│                                                                          │
+│  Layer B — AKS overlay plugin  (loads ONLY when cluster is AKS)          │
+│    • augments core views via registerDetailsViewSection etc.             │
+│    • Azure tab on ModelDeployment; AKS deploy-wizard step                │
+│    • KAITO (SKU,model)→preset table; WI/ACR/Gateway glue                 │
+│    • AKS-flavored IG enrichers (GPU-SKU fit, NCCL silent-replica)        │
+└──────────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   │  Two data paths, both K8s-only:
+                                   │   (1) Headlamp&#39;s K8s API proxy
+                                   │   (2) AI Runway backend (in-cluster Service,
+                                   │       reached via that same K8s proxy)
+                                   ▼
+   Kubernetes cluster: Project CRD + controller · ModelDeployments ·
+   AI Runway backend · Inspektor Gadget (optional) · KAITO/KubeRay/…</code></pre>
+<p><strong>Import direction:</strong> B → A only, never A → B. Core never learns about Azure. Splitting B out later stays a config change, not a refactor.</p>
+<p><strong>Enforcement (not aspirational):</strong></p>
+<ul>
+<li><strong>Lint rule.</strong> <code>eslint-plugin-import</code>’s <code>no-restricted-paths</code> forbids any file under <code>src/core/**</code> from importing <code>src/aks/**</code>. CI-failing. This is what makes “splitting B out later is a config change” actually true regardless of contributor turnover.</li>
+<li><strong>Detection registry — register-at-load.</strong> A defines the §7.1 registry and exports a <code>registerProbe()</code> function. B calls <code>registerProbe()</code> at module load time, wired in by the plugin entrypoint (not by core code). Core consumers use <code>useDetection(probeName)</code> and get “not detected / probe not registered” when B isn’t loaded. This is the one pattern that lets the registry hold AKS probes without core ever importing AKS code.</li>
+</ul>
+<p><strong>Cloud-neutral data path (new, hard rule):</strong> the plugin makes calls <em>only</em> to the Kubernetes API server (through Headlamp’s proxy) and to the AI Runway backend (also a K8s Service, reached the same way). Cloud provider SDKs (Azure ARM, AWS, GCP) are explicitly out of scope at every version. Cloud-specific facts surface via K8s labels, CR status, or in-cluster exporters — never via a cloud SDK in the plugin. Where a fact is only available outside K8s (e.g., AOAI provisioned-throughput units), the UX is a Portal deep-link, not an API call. This rule makes the AKS overlay an AKS-<em>detection-and-K8s-glue</em> layer rather than an Azure-SDK layer, which is what keeps it fit-for-purpose in the kaito-project repo and keeps the future “lift it out” path open.</p>
+<p><strong>Controller</strong> (<code>controller/project/</code>): one <code>controller-runtime</code> reconciler that watches <code>Project</code>, computes the member set from <code>spec.selector</code>, writes <code>status.resourceCounts</code> + aggregated <code>status.conditions</code>. v1: no ownerRefs, no cascade delete, no finalizer, no quota. <strong>Process model:</strong> the Project reconciler runs in the existing AI Runway controller-manager process (shared informers, one leader election, one RBAC bundle) — not a second binary or second manager. Keeping it co-resident with the ModelDeployment reconciler is what holds the “one required backend component” property; if Projects ever need to ship standalone, the reconciler has no ModelDeployment-specific imports and can be lifted out cheaply.</p>
+<p><strong>Disaggregated role labeling (controller addendum):</strong> the existing ModelDeployment reconciler — when <code>spec.serving.mode: disaggregated</code> — sets <code>airunway.ai/role=prefill</code> / <code>airunway.ai/role=decode</code> on the child Deployments (and propagates to Pods via the PodTemplate). This is what the §6a topology renderer reads for lane assignment, and is also reusable downstream (metric grouping, IG scoping). Aggregated mode does not set the label.</p>
+<p><strong>Enforced extraction-readiness (Project reconciler).</strong> The §4 promise that the Project reconciler can be lifted out cheaply is held by a build-time check: the Go package containing the Project reconciler must not import any ModelDeployment-specific package. Implemented as a <code>go vet</code>-style depguard / forbidden-import rule (or a tiny grep gate in CI), failing the build if a disallowed import appears. This sits next to the §4 <code>no-restricted-paths</code> rule for core ↛ aks; same “make the architecture promise mechanical, not aspirational” shape. See §15 for the matching risk row.</p>
+<hr />
+<h2 id="s5"><span class="num">§ 05</span><span class="htitle">Project model</span><span class="pill">Layer A</span></h2>
+<h3 id="crd-airunwayaiv1alpha1-minimal">CRD (<code>airunway.ai/v1alpha1</code>, minimal)</h3>
+<pre class="yaml"><code>apiVersion: airunway.ai/v1alpha1
+kind: Project
+metadata: { name: my-rag-app, namespace: default }
+spec:
+  displayName: &quot;Customer Support RAG&quot;
+  description: &quot;Internal RAG over support docs&quot;
+  selector:
+    matchLabels: { airunway.ai/project: my-rag-app }
+status:
+  resourceCounts:
+    modelDeployments: { total: 1, ready: 1 }
+    deployments:      { total: 2, ready: 2 }
+    pods:             { total: 4, ready: 3 }
+    services:         { total: 3, withEndpoints: 3 }
+    pvcs:             { total: 1, bound: 1 }
+  conditions:
+    - type: Ready
+      status: &quot;False&quot;            # &quot;True&quot; / &quot;False&quot; / &quot;Unknown&quot;
+      reason: PodsNotReady       # short machine token
+      message: &quot;1 of 4 Pods not ready&quot;   # short human string; details live on the per-resource Headlamp page per §3.5
+      lastTransitionTime: &quot;2026-05-30T12:00:00Z&quot;
+      observedGeneration: 7</code></pre>
+<p><strong>Status shape rationale.</strong></p>
+<ul>
+<li><strong>One <code>Ready</code> condition</strong>, not per-check (PodsReady, PVCsBound, …). The only spec’d consumer is the Ready/Degraded/Empty chip (§6), which is tri-state; per-check conditions would add update churn without a consumer. Details for <em>why</em> something is not Ready live on the relevant member’s Headlamp detail page (§3.5).</li>
+<li><strong>Structured counts</strong> (<code>{ total, ready }</code>, <code>{ total, withEndpoints }</code>, <code>{ total, bound }</code>) directly feed the §6 overview strip (“MDs: 3/3 ready”).</li>
+<li><strong>Reconcile cadence.</strong> Event-driven on member-set changes (Project spec edits, label add/remove on matching kinds) plus a 30 s resync. Accept a small chip lag on Pod-state churn in exchange for no write- storm; standard controller-runtime pattern.</li>
+</ul>
+<h3 id="membership-model">Membership model</h3>
+<ul>
+<li><p><strong>One label, one Project.</strong> Label <code>airunway.ai/project=&lt;name&gt;</code>. The CRD <code>spec.selector</code> matches this label; users write exactly this in their YAML. A resource belongs to exactly one Project in v1.</p></li>
+<li><p><strong>Forward-compat constraints (so v1.1 multi-Project membership stays open).</strong> v1.0 implementation must:</p>
+<ul>
+<li>Treat the label value as <strong>opaque</strong> — no equality or parsing assumptions in consumers beyond what the K8s <code>MatchLabels</code> selector itself requires. No <code>value === project.name</code> comparisons scattered through UI or backend code.</li>
+<li>Reserve <code>Project.spec.references</code> (cross-Project references) as a CRD field name. Not implemented in v1.0, not validated by the webhook, just kept out of bounds for any other v1.x use.</li>
+<li>Webhook (§13) rejection rules must not preclude <code>.secondary</code>-suffixed keys under <code>airunway.ai/</code> namespace, or comma-containing label values — both are candidate mechanisms.</li>
+</ul>
+<p>This is purely about not painting v1.1 into a corner; the mechanism itself stays a v1.1+ decision based on real usage.</p></li>
+<li><p><strong>Shared resources.</strong> A resource that is conceptually shared across Projects (e.g., a common embedding model serving two RAG apps) lives in one Project; the other Project references it as an external dependency in docs or via a <code>spec.references</code> field added later. Multi-Project membership is a v1.1+ question — we want real usage data before picking a mechanism (secondary labels vs. multi-ownerRef vs. references).</p></li>
+</ul>
+<h3 id="scope-rules">Scope rules</h3>
+<ul>
+<li><strong>Namespaced.</strong> A Project is namespaced and its members are in <em>its own namespace</em> only. Cross-namespace membership is explicitly out of v1.</li>
+<li><strong>Cluster-scoped resources excluded.</strong> ClusterRoles, CRDs, Nodes etc. are not Project members in v1. (Cluster-scoped context — e.g., the GatewayClass a Project routes through — is surfaced as a <em>reference</em>, not membership.)</li>
+<li><strong>Selector collisions.</strong> Two Projects in the same namespace whose selectors match the same resource: v1 <strong>allowed</strong> (usually signals a label mistake). The Project detail page shows a “Also in: N other Projects” warning when this happens.</li>
+<li><strong>Label tampering.</strong> Any user with patch rights on a resource can add or remove the label. v1 treats this as an RBAC question for the cluster admin; the plugin does not enforce Project-scoped ACLs. See <a href="#s13">§13 Security</a>.</li>
+</ul>
+<h3 id="ui-core-plugin">UI (core plugin)</h3>
+<ul>
+<li><strong>Projects list</strong> — sidebar entry; status chips (Ready / Degraded / Empty — see §6 for what feeds these).</li>
+<li><strong>Project detail</strong> — three tabs:
+<ul>
+<li><strong>Topology</strong> (default, v1.0 stretch — see §6a). Visual graph of the Project’s members with edges by relationship. Falls back to the Resources tab if topology is deferred to v1.1.</li>
+<li><strong>Resources.</strong> The kind-grouped list (ModelDeployments, Deployments, Services, PVCs, Secrets, HTTPRoutes). Each entry links to Headlamp’s existing per-resource detail page (per the “Don’t re-implement Headlamp” principle, §3.5). Resources with a cross-Project collision get a warning marker.</li>
+<li><strong>Observability</strong> — §6.</li>
+</ul></li>
+<li><strong>Project-shaped quick actions only</strong> — “Add to project”, and (in v1.1) “Rename”. Per-resource actions (delete, edit, scale, etc.) are not duplicated here — operators click into the Headlamp page.</li>
+<li><strong>Create wizard</strong> — three TS-defined templates:
+<ul>
+<li><em>Chat / single-model.</em> <code>Project</code> CR + <code>ModelDeployment</code> + <code>Service</code>, all labeled with <code>airunway.ai/project=&lt;name&gt;</code>.</li>
+<li><em>Model + Storage</em> (the RAG-shaped scaffold). <code>Project</code> CR + <code>ModelDeployment</code> + <code>Service</code> + <code>PersistentVolumeClaim</code> annotated <code>airunway.ai/intended-use: rag-index</code> (size + storage class user- picked), all labeled with <code>airunway.ai/project=&lt;name&gt;</code>. The wizard’s final screen is honest: “Project created. Next: deploy your RAG application pod and mount the <code>&lt;pvc-name&gt;</code> PVC” with a link to a docs page showing an example app Deployment. The plugin does <strong>not</strong> create a placeholder app pod — RAG apps are user-written and a placeholder image would falsely report Ready. Until the user adds their app, the chip reads Degraded (no Pods), which is the correct state.</li>
+<li><em>Empty.</em> Creates the <code>Project</code> CR alone. Templates live in TS, not in-cluster.</li>
+</ul></li>
+<li><strong>“Add to project”</strong> affordance on existing ModelDeployment / Deployment detail pages — patches the <code>airunway.ai/project</code> label. This is the primary day-2 path; the wizard is the greenfield path. Three states based on the resource’s current label value:
+<ul>
+<li><strong>No label</strong> — button reads “Add to project…”, opens a Project picker, patches on confirm.</li>
+<li><strong>Already in this Project</strong> — button reads “In this Project” and is disabled, tooltip explains.</li>
+<li><strong>In a different Project</strong> — button reads “Move to this Project…”, opens a confirm dialog “This is currently in Project <em><other></em>. Move it to <em><this></em>?”; on confirm, the label is overwritten with a single patch. No two-step remove-then-add; moving between Projects is a real day-2 operation and forcing two clicks just hides the intent.</li>
+</ul></li>
+</ul>
+<h3 id="not-in-v1">Not in v1</h3>
+<p>ownerRef cascade delete · Project-scoped RBAC/quota UI · in-cluster template storage · multi-cluster Project views · resource move across namespaces · Project rename (v1.1) · multi-Project membership for a single resource (v1.1+, mechanism TBD).</p>
+<hr />
+<h2 id="s6"><span class="num">§ 06</span><span class="htitle">Observability — the MVP</span><span class="pill">Layer A</span></h2>
+<p>Lives as a <strong>tab on Project detail</strong> — always <em>of</em> a Project. Two independent panels, two data planes.</p>
+<h3 id="data-source-priority-per-plane-fail-soft">Data-source priority (per plane, fail soft)</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Plane</th>
+<th>Source</th>
+<th>Transport</th>
+<th>If unavailable</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>App metrics</td>
+<td><strong>AI Runway backend</strong> (required install-time dep)</td>
+<td>Backend Service via Headlamp K8s proxy; inherits user’s token</td>
+<td>“Install or repair AI Runway backend” CTA; panel dark, rest of tab renders</td>
+</tr>
+<tr class="even">
+<td>Kernel/eBPF</td>
+<td>Inspektor Gadget (on-demand)</td>
+<td>IG <code>GadgetManager</code> gRPC via Headlamp K8s proxy</td>
+<td>“Install IG” CTA; rest works</td>
+</tr>
+<tr class="odd">
+<td>K8s-native</td>
+<td>always (pod status, restarts, Events, container resources)</td>
+<td>Headlamp K8s client</td>
+<td>n/a — but the plugin <strong>does not duplicate</strong> Headlamp’s per-resource detail; see §3.5</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Principle:</strong> a missing optional source is a UI state, not a crash. Detection fails open → assume not-installed → show CTA. The backend is the one <em>required</em> source; everything else is optional.</p>
+</blockquote>
+<h3 id="panel-1--app-metrics-inference-server-via-backend">Panel 1 — App metrics (inference server, via backend)</h3>
+<p>Per-ModelDeployment, sourced from the AI Runway backend, which in turn reads the serving engine’s Prometheus output via a small <strong>engine adapter</strong> registry. The backend schemas already standardized in AI Runway’s existing <code>MetricsPanel</code> / <code>useMetrics</code> apply.</p>
+<p><strong>Engine adapters.</strong> An adapter maps the canonical metric concepts (TTFT, TPOT, end-to-end latency, tokens/s, requests/s, queue depth, KV-cache utilization, error rate) to that engine’s actual Prometheus metric names and any required transform (e.g., histogram → p50/p95/p99). Adapters are backend code (TS/Go), one file per engine, version-pinned against engine releases.</p>
+<p><strong>Adapter contract (v1.0).</strong> An adapter is a typed module that exports a single <code>EngineAdapter</code>:</p>
+<pre class="ts"><code>type CanonicalMetric =
+  | &#39;ttft&#39; | &#39;tpot&#39; | &#39;e2eLatency&#39;
+  | &#39;tokensPerSec&#39; | &#39;requestsPerSec&#39;
+  | &#39;queueDepth&#39; | &#39;kvCacheUtil&#39; | &#39;errorRate&#39;;
+
+type MetricSpec =
+  | { source: string; kind: &#39;gauge&#39; }
+  | { source: string; kind: &#39;counter&#39; | &#39;counter-rate&#39; }
+  | { source: string; kind: &#39;histogram&#39;; quantiles: number[] };
+
+interface EngineAdapter {
+  engine: string;                              // &#39;vllm&#39;, &#39;rayserve&#39;, …
+  versionRange: string;                        // semver range, informational
+  metrics: Partial&lt;Record&lt;CanonicalMetric, MetricSpec&gt;&gt;;
+  customScrape?: (pod: PodRef) =&gt; Promise&lt;Partial&lt;Record&lt;CanonicalMetric, number&gt;&gt;&gt;;
+}</code></pre>
+<ul>
+<li>The canonical metric set is the eight names above — fixed in v1.0. Adapters opt in per metric; an unset key renders as “not reported by this engine” on the panel (no zeros, no fake data).</li>
+<li><code>kind</code> is a closed enum of four transforms the backend implements centrally: gauge passthrough, counter passthrough, counter rate over the polling interval, and histogram → requested quantiles.</li>
+<li><code>versionRange</code> is informational; it powers the CI matrix in §11 and a hover tooltip in the panel. Engine version is detected from a pod label or the engine’s own <code>/version</code>-style endpoint where one exists.</li>
+<li><code>customScrape</code> is the escape hatch when the declarative mapping cannot express the engine’s exposition (e.g., metrics gated behind a non-Prometheus endpoint). <strong>Unused in v1.0</strong> — both in-tree adapters fit the declarative form.</li>
+</ul>
+<p>v1.0 ships adapters for:</p>
+<ul>
+<li><strong>vLLM</strong> (canonical metric names like <code>vllm:time_to_first_token_seconds</code>).</li>
+<li><strong>Ray Serve</strong> (its native Prometheus exposition).</li>
+</ul>
+<p>These are the two engines §6 / the glossary call out as the most common; together they exercise the adapter contract end-to-end.</p>
+<p>For other detected engines (Triton, SGLang, TRT-LLM, TorchServe, Ollama, ONNX Runtime), the panel shows: “Engine detected: <name> · no metric adapter available · contribute one →” linking to the adapter contract above. This matches the graceful-degradation principle (§3.4) and gives third-party engines a concrete extension point. Individual metrics an adapter doesn’t define render as “not reported by this engine” rather than zeros.</p>
+<p><strong>CI coverage.</strong> §11 adds an adapter test that, for every in-tree adapter, asserts each <code>CanonicalMetric</code> is either mapped or explicitly omitted from <code>metrics</code> — no silent gaps allowed; a new canonical metric added to the enum forces a per-adapter decision.</p>
+<p>Canonical metrics the adapter exposes:</p>
+<ul>
+<li><strong>Latency:</strong> TTFT (p50/p95/p99), TPOT / inter-token, end-to-end.</li>
+<li><strong>Throughput:</strong> tokens/s, requests/s.</li>
+<li><strong>Saturation:</strong> queue depth / pending, KV-cache utilization, error rate.</li>
+<li><strong>Time-series sparklines:</strong> fixed window of <strong>15 minutes</strong>, polled every <strong>15 seconds</strong> (~60 points per series). The backend keeps an in-memory rolling ring buffer per ModelDeployment it knows about; no Prometheus dep, no on-disk persistence. Empty state “Collecting…” for the first 15 minutes after a new MD appears, and again after a backend restart (documented behaviour, acceptable for a live view in v1.0). <strong>HA constraint (v1.0):</strong> the in-memory buffer is per-replica, so the backend Deployment is pinned to <code>replicaCount: 1</code> in the Helm chart for v1.0; running multiple replicas would give different 60-point series on consecutive page loads as the Service round-robins. This is a known v1.0 limitation, deleted in v1.1 when Prometheus-as-source replaces the ring buffer entirely (see §10); building session-affinity or a shared KV for a feature that’s getting replaced is wasted work. <strong>Post-v1.0:</strong> when a cluster Prometheus is detected (added as a §7.1 probe), the panel reads from Prometheus instead and the backend ring buffer becomes the no-Prometheus fallback — see §10 v1.1.</li>
+</ul>
+<h3 id="panel-2--diagnostics-inspektor-gadget">Panel 2 — Diagnostics (Inspektor Gadget)</h3>
+<p>On-demand, scoped to the Project’s pods. See §8 for the IG client.</p>
+<h3 id="overview-strip--project-specific-only">Overview strip — Project-specific only</h3>
+<p>Per the “Don’t re-implement Headlamp” principle (§3.5), the strip carries only items Headlamp cannot compute because it doesn’t know what a Project or a ModelDeployment is:</p>
+<p><code>MDs: 3/3 ready · GPU pods: 4 · Engines: vLLM ×2, SGLang ×1 · Project status: Ready</code></p>
+<p>Generic K8s aggregations (Pods running, Restarts(1h), OOMs(24h), Recent events) are not duplicated — they are one click away on any member’s Headlamp detail page.</p>
+<h3 id="ready--degraded--empty-chip">Ready / Degraded / Empty chip</h3>
+<p>Pure aggregation, no thresholds, no time windows, no app-metrics signal:</p>
+<ul>
+<li><strong>Ready</strong> = every member Pod is Ready, every member ModelDeployment has <code>status.ready=true</code>, every member PVC is Bound, every member Service has endpoints.</li>
+<li><strong>Degraded</strong> = any of the above false.</li>
+<li><strong>Empty</strong> = no members.</li>
+</ul>
+<p>This stays deterministic — the chip never becomes a de-facto alert (non-goal §1). Operators who want to see <em>why</em> something is wobbling (CrashLoopBackOff counts, OOMs in the last hour, recent events) click into the relevant member’s Headlamp detail page, which already shows all of that.</p>
+<h3 id="not-in-v1-1">Not in v1</h3>
+<p>Grafana embedding · alerting / thresholds / on-call · cost rollups · historical storage of gadget results · long-term metric retention beyond the 15-minute live buffer (persistence is a v2 question, see §10).</p>
+<hr />
+<h2 id="s6a"><span class="num">§ 6a</span><span class="htitle">Topology view (v1.0 stretch)</span><span class="pill">v1.0 stretch</span></h2>
+<p>The default tab of Project detail. A real graph view of an application’s resources is the visually right answer for “what is this Project” — a kind-grouped list is a table of contents, not a topology. Marked <strong>stretch</strong> in v1.0: if the rest of v1.0 ships clean, topology ships with it; if v1.0 runs hot, topology slides to v1.1 and Project detail defaults to the Resources tab instead. Neither the Observability tab nor the AKS overlay blocks on topology.</p>
+<h3 id="scope-and-rendering">Scope and rendering</h3>
+<ul>
+<li><p><strong>Members shown:</strong> all Project members.</p></li>
+<li><p><strong>Node kinds:</strong> ModelDeployments, Deployments, Pods (collapsed by ReplicaSet when count &gt; N, default N=3), Services, HTTPRoutes, Gateways, PVCs, and Secrets/ConfigMaps <em>only if referenced</em> by a shown resource. No generic “all resources” view.</p></li>
+<li><p><strong>Edges by relationship:</strong> <code>routes-to</code>, <code>selects</code>, <code>owns</code>, <code>mounts</code>, <code>references</code>. Each edge clickable for a one-line tooltip. The computed edge set is fixed by this table — implementers do not invent new edge kinds in v1.0:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Source kind</th>
+<th>Target kind</th>
+<th>Edge</th>
+<th>Derived from</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>HTTPRoute</td>
+<td>Gateway</td>
+<td><code>references</code></td>
+<td><code>spec.parentRefs</code></td>
+</tr>
+<tr class="even">
+<td>HTTPRoute</td>
+<td>Service</td>
+<td><code>routes-to</code></td>
+<td><code>spec.rules[].backendRefs</code></td>
+</tr>
+<tr class="odd">
+<td>Service</td>
+<td>Pod</td>
+<td><code>selects</code></td>
+<td><code>spec.selector</code> ∩ Pod labels</td>
+</tr>
+<tr class="even">
+<td>ModelDeployment</td>
+<td>Deployment</td>
+<td><code>owns</code></td>
+<td><code>ownerReferences</code></td>
+</tr>
+<tr class="odd">
+<td>Deployment</td>
+<td>Pod</td>
+<td><code>owns</code></td>
+<td><code>ownerReferences</code> (via ReplicaSet, collapsed)</td>
+</tr>
+<tr class="even">
+<td>Pod</td>
+<td>PVC</td>
+<td><code>mounts</code></td>
+<td><code>spec.volumes[].persistentVolumeClaim</code></td>
+</tr>
+<tr class="odd">
+<td>Pod</td>
+<td>Secret / ConfigMap</td>
+<td><code>references</code></td>
+<td><code>spec.volumes[]</code> + <code>envFrom</code> + <code>env.valueFrom</code></td>
+</tr>
+</tbody>
+</table>
+<p>A Secret/ConfigMap node is rendered only if at least one <code>references</code> edge points at it (per the “shown only if referenced” rule above).</p></li>
+<li><p><strong>Layout:</strong> left-to-right, oriented around request entry — HTTPRoute / Gateway on the left, Services / Pods / MDs in the middle, storage / secrets on the right. Disaggregated serving (<code>spec.serving.mode: disaggregated</code>) gets prefill and decode lanes; lane membership is read from the label <code>airunway.ai/role=prefill|decode</code> on child Deployments/Pods, which the AI Runway controller sets when reconciling a disaggregated ModelDeployment (see §4 controller note). The topology renderer stays kind-agnostic — no MD-shape knowledge in the renderer. The fixed direction and lane discipline kill the “graphs look chaotic” failure mode.</p></li>
+<li><p><strong>Renderer:</strong> <strong>react-flow</strong> (~80 KB gz, BSD-3, actively maintained, accessible focus order, keyboard-navigable). Stays inside §12’s 1.5 MB core bundle budget with margin.</p></li>
+<li><p><strong>Node-count behavior:</strong></p>
+<ul>
+<li><strong>Per-group Pod collapse (always on):</strong> any Pod group with &gt; N=3 pods (the same N as the ReplicaSet-collapse default above) renders as a single “N Pods” node. Clicking expands inline; the graph re-flows. No side panel.</li>
+<li><strong>50-node soft marker:</strong> informational perf budget (§12) — no behavior change at this threshold beyond the per-group collapse that is already active.</li>
+<li><strong>100-node hard fallback:</strong> the topology pane is replaced with the Resources tab content under a <strong>persistent</strong> banner “Topology view unavailable — N nodes after collapse (limit 100). Showing Resources view.” (N is the actual computed count.) The banner stays until the count drops back under the limit; no animation, no one-shot toast. The tab label stays “Topology” so the URL is stable; the fallback is per-render, not persisted.</li>
+</ul></li>
+<li><p><strong>Interactions:</strong> click a node → opens that resource in Headlamp’s existing detail page (§3.5). No editing in the topology view.</p></li>
+<li><p><strong>Keyboard navigation:</strong> Tab walks nodes in DOM order, which matches the fixed left→right, top→bottom layout — predictable linear sweep for accessibility. From a focused node, arrow keys walk outgoing edges to the next node along the request path (power-user “trace the flow” mode). Edges themselves are focusable in the same Tab order for tooltip access.</p></li>
+<li><p><strong>Empty / degraded states:</strong> a Project with one MD + one Service still renders meaningfully (2 nodes, 1 edge). An Empty Project shows the create-wizard CTA in the topology pane.</p></li>
+</ul>
+<h3 id="performance">Performance</h3>
+<p>Computed client-side from the same K8s reads the Project detail page already does — no new API calls. First-paint target ≤ 2 s at 50 nodes (§12).</p>
+<hr />
+<h2 id="s7"><span class="num">§ 07</span><span class="htitle">AI-workload detection (well-known frameworks)</span></h2>
+<p>Detection drives engine-specific metric schemas and per-kind icons in the Project view. It is <strong>independent of Project membership</strong> — a Pod is detected as “vLLM” purely from its image/env; that detection does <em>not</em> add it to any Project. Membership requires the <code>airunway.ai/project=&lt;name&gt;</code> label, always.</p>
+<p>Detect by image + env + label, extensible via ConfigMap:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Framework</th>
+<th>Signal</th>
+<th>Default confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>vLLM</td>
+<td>image <code>*vllm*</code> or env <code>VLLM_*</code></td>
+<td>low (image regex) → <strong>high</strong> if <code>airunway.ai/engine=vllm</code> is set</td>
+</tr>
+<tr class="even">
+<td>Triton</td>
+<td>image <code>*tritonserver*</code></td>
+<td>low</td>
+</tr>
+<tr class="odd">
+<td>SGLang</td>
+<td>image <code>*sglang*</code></td>
+<td>low</td>
+</tr>
+<tr class="even">
+<td>TorchServe</td>
+<td>image <code>*torchserve*</code></td>
+<td>low</td>
+</tr>
+<tr class="odd">
+<td>Ray Serve / KubeRay</td>
+<td><code>RayService</code> / <code>RayCluster</code> CRs</td>
+<td><strong>high</strong> (CR presence)</td>
+</tr>
+<tr class="even">
+<td>KServe</td>
+<td>label <code>serving.kserve.io/inferenceservice</code></td>
+<td><strong>high</strong> (canonical label)</td>
+</tr>
+<tr class="odd">
+<td>ONNX Runtime</td>
+<td>image <code>*onnxruntime-server*</code></td>
+<td>low</td>
+</tr>
+<tr class="even">
+<td>Ollama</td>
+<td>image <code>*ollama*</code></td>
+<td>low</td>
+</tr>
+<tr class="odd">
+<td>Generic GPU (fallback)</td>
+<td><code>nvidia.com/gpu</code> request &gt; 0</td>
+<td>informational only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="71-detection-contract">7.1 Detection contract</h3>
+<p>All detectors — framework detection here and the <code>useAksContext</code> probes in §9 — return:</p>
+<pre class="ts"><code>type Detection&lt;T&gt; = {
+  detected: T;
+  confidence: &#39;high&#39; | &#39;low&#39;;
+  source: &#39;crd&#39; | &#39;label&#39; | &#39;image&#39; | &#39;env&#39; | &#39;node-label&#39; | &#39;oidc&#39; | &#39;pull-secret&#39;;
+};</code></pre>
+<ul>
+<li><strong>High confidence</strong> = canonical signal (CRD presence, dedicated label, OIDC issuer set). Rendered without an override link.</li>
+<li><strong>Low confidence</strong> = inferred from a string match (image name, env prefix, pull-secret pattern). Rendered with a small “detected via image name — override?” link that points the user to set the authoritative label.</li>
+<li><strong>Override label:</strong> <code>airunway.ai/engine=&lt;name&gt;</code> is the universal override for framework detection. When present on a Pod or its workload, all detectors treat it as authoritative and skip inference. (AKS-context overrides, if needed, follow the same pattern with their own well-known label keys; see §9.)</li>
+</ul>
+<h3 id="unified-registry">Unified registry</h3>
+<p>Framework detection and the AKS-context probes (§9) are entries in a single typed detection registry. Each probe declares:</p>
+<ul>
+<li><strong>Probe name</strong> (e.g., <code>engine</code>, <code>aks.gpu-pool</code>, <code>aks.workload-identity</code>)</li>
+<li><strong>Signal type</strong> (CRD / node label / pull-secret / etc.)</li>
+<li><strong>Cache TTL</strong></li>
+<li><strong>Fail-open default</strong> (what to assume when the probe errors out)</li>
+<li><strong>“What’s missing” CTA</strong> (used by the <code>MissingDependency</code> renderer in §3.4 when the probe returns “not detected” and a Project page wants to surface the gap)</li>
+</ul>
+<blockquote>
+<p>A <code>cost</code> field is <strong>not</strong> declared in v1.0 — every current probe is a single API call or single label read, so there’s nothing for a scheduler or UI to gate on. Add it back in v1.1 if a genuinely expensive probe (Prometheus discovery, cross-namespace label scan) lands and needs lazy / on-demand scheduling.</p>
+</blockquote>
+<p>The plugin exposes a single <code>useDetection(probeName)</code> hook. The §7 framework table and the §9 AKS-context table are both views over the same registry.</p>
+<hr />
+<h2 id="s8"><span class="num">§ 08</span><span class="htitle">Inspektor Gadget integration (Layer A core; <code>ig-client.ts</code>)</span><span class="pill">Layer A</span></h2>
+<blockquote>
+<p>Validated against the inspektor-gadget repo (image-based gadgets era, post-v0.31). The legacy <code>gadget.kinvolk.io/v1alpha1 Trace</code> CRD and its <code>gadgettracermanager</code> controller were removed in mid-2025 (commit <code>3ba4e5500</code>, “treewide: Remove built-in gadgets”) and must not be used by the plugin. Any leftover CRD-era RBAC in IG’s chart is stale.</p>
+</blockquote>
+<h3 id="design">Design</h3>
+<ul>
+<li><p><strong>Surface:</strong> the IG gadget DaemonSet exposes a <strong>gRPC API</strong> (proto in <code>pkg/gadget-service/api/api.proto</code>) reached through Headlamp’s K8s API proxy — no extra endpoint, no extra auth. The service that matters in v1:</p>
+<ul>
+<li><code>GadgetManager.RunGadget</code> — bidi stream of <code>GadgetEvent</code>s for one-shot, user-scoped runs. Wrapped in <code>useGadgetRun(spec)</code> that cleans up on unmount. <code>GadgetInstanceManager</code> (named, durable runs that survive browser refresh) is <strong>deferred to v1.1+</strong> alongside gadget-result persistence (§10) — its ownership/naming/cleanup design needs more thought than v1.0 has room for, and the diagnostics use cases v1.0 targets fit inside a 60s <code>RunGadget</code>. There is no HTTP fallback; gRPC-through- the-K8s-proxy is the only supported path. (Helm-declared <code>GadgetInstance</code> ConfigMaps exist for cluster-admin pre-provisioning but are not a per-user run surface.)</li>
+</ul></li>
+<li><p><strong>Dynamic discovery + curated subset.</strong> On mount, call <code>GadgetManager.GetGadgetInfo</code> to fetch each gadget’s data sources, fields, and param schemas (no hardcoded list). Surface a “Recommended for AI workloads” group with the full catalog under “All gadgets”. Curated list in <code>ig-recommended.json</code>, overridable in settings.</p>
+<p><strong>v1.0 “Recommended for AI workloads” set</strong> (9 gadgets, one per signal class — verified present in the IG repo <code>gadgets/</code> tree):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Gadget</th>
+<th>Why it earns a slot for AI workloads</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>trace_dns</code></td>
+<td>DNS for HuggingFace / ACR / OpenAI — top cause of “model pull is slow”</td>
+</tr>
+<tr class="even">
+<td><code>trace_tcp</code></td>
+<td>Gateway → model and inter-replica connection visibility</td>
+</tr>
+<tr class="odd">
+<td><code>trace_tcpretrans</code></td>
+<td>NCCL / inter-replica retransmits — direct signal for “silent replica” cases (§9)</td>
+</tr>
+<tr class="even">
+<td><code>profile_tcprtt</code></td>
+<td>Inter-pod latency distribution — disaggregated prefill↔︎decode lanes</td>
+</tr>
+<tr class="odd">
+<td><code>trace_oomkill</code></td>
+<td>OOM events on model pods with container attribution</td>
+</tr>
+<tr class="even">
+<td><code>top_blockio</code></td>
+<td>Weight-loading / PVC-read I/O bottlenecks</td>
+</tr>
+<tr class="odd">
+<td><code>trace_fsslower</code></td>
+<td>Slow FS ops (RAG index reads, model loading from PVC)</td>
+</tr>
+<tr class="even">
+<td><code>profile_cuda</code></td>
+<td>Stack-attributed CUDA Driver-API allocations</td>
+</tr>
+<tr class="odd">
+<td><code>top_cuda_memory</code></td>
+<td>Per-process CUDA alloc/free over time — leak hunting</td>
+</tr>
+</tbody>
+</table>
+<p>Gadgets deliberately left in “All gadgets” rather than Recommended: <code>trace_sni</code> / <code>trace_ssl</code> (overlap with <code>trace_dns</code> for the AI- traffic case), <code>trace_tcpdrop</code> (covered by <code>trace_tcpretrans</code> for the primary use), <code>profile_blockio</code> (better fit for v1.1 result- persistence), <code>trace_exec</code> (not AI-specific), <code>traceloop</code> (heavy, advanced/opt-in), <code>top_cpu_throttle</code> and <code>trace_malloc</code> (weaker AI- specific signal; defer based on feedback). Additions in v1.1+ come via the feedback loop already in §10.</p></li>
+<li><p><strong>Scoping:</strong> every run auto-fills namespace = Project; user may narrow by pod label / container, never widen.</p></li>
+<li><p><strong>Rate limiting (two layers, v1.0 numbers hardcoded).</strong></p>
+<ul>
+<li><em>Plugin-side (UX hint).</em> The Diagnostics panel allows at most <strong>2 concurrent runs per browser tab</strong>; a third Run button is disabled with tooltip “Stop a running gadget first.” Catches the obvious “click run 20 times” foot-gun before it reaches the backend.</li>
+<li><em>Backend-side (hard cap).</em> The AI Runway backend proxies all <code>RunGadget</code> calls and enforces, per authenticated user: <strong>≤ 4 concurrent runs</strong>, <strong>≤ 20 runs/minute</strong>. Excess returns HTTP <code>429</code> with <code>Retry-After</code>; the panel surfaces the wait inline. Numbers are intentionally generous for an interactive UI and intentionally low compared to “a DoS”; not load-tested, not user-configurable in v1.0 (the only role that could change them is the cluster admin, who is also the backend installer).</li>
+<li><em>IG-side.</em> <code>GadgetManager.RunGadget</code> exposes no rate-limit knob today; an IG-side limit would need an upstream API change. Tracked as a §14 upstream gap if the two layers above prove insufficient.</li>
+</ul></li>
+<li><p><strong>Run model:</strong> on-demand only, user-picked duration (15s / 30s / 60s). All runs use <code>RunGadget</code> direct. No always-on streams, no durable (5-min+) instances in v1.0.</p></li>
+<li><p><strong>Rendering (<code>GadgetRunner.tsx</code>):</strong> generic table from the gadget’s column schema (from <code>GetGadgetInfo</code>); optional <em>enrichers</em> for curated gadgets (e.g. <code>trace_dns</code> groups by host + flags <code>huggingface.co</code>, <code>*.azurecr.io</code>, <code>openai.azure.com</code>; network gadgets annotate pod/container per PID). Absent enricher = raw table. Export JSON / CSV.</p></li>
+<li><p><strong>Results:</strong> ephemeral cache in Headlamp plugin-storage, keyed <code>&lt;project-uid&gt;:&lt;gadget&gt;</code>. Keeps the <strong>last 5 runs per gadget per Project</strong> (not 5 total per Project — otherwise switching gadgets while debugging silently evicts the previous gadget’s history). Eviction is oldest-by-start-time: the 6th run of a given gadget drops the 1st. UID-keying means deleting and recreating a Project with the same name does not resurrect stale results. Size budget ~2–3 MB per Project worst-case (9 gadgets × 5 × ~50 KB) — well inside browser localStorage limits at realistic Project counts. No server-side persistence.</p></li>
+<li><p><strong>Permissions:</strong> IG needs cluster privileges; plugin never elevates. Reaching the gadget pod via apiserver proxy requires the user’s token to have rights on the <code>gadget</code> namespace’s pods (proxy/exec semantics). If the call fails, show a clear permission message (see <a href="#s13">§13 Security</a> for PII handling).</p></li>
+</ul>
+<h3 id="validated-against-the-ig-repo">Validated against the IG repo</h3>
+<ol type="1">
+<li><strong>Surface choice — RESOLVED.</strong> Use the gRPC <code>GadgetManager</code> / <code>GadgetInstanceManager</code> services. The <code>Trace</code> CRD is removed.</li>
+<li><strong>GPU coverage — RESOLVED.</strong> IG ships <code>profile_cuda</code> (CUDA Driver- API memory allocations: <code>cuMemAlloc_v2</code>, <code>cuMemAllocHost_v2</code>, <code>cuMemAllocManaged</code>, <code>cuMemAllocPitch_v2</code>, aggregated by user stack trace) and <code>top_cuda_memory</code> (per-process CUDA alloc/free activity over time). Both are uprobe-on-CUDA-runtime, not DCGM/NVML. <strong><code>top_gpu</code> does not exist</strong> — drop from any curated set or UI copy. GPU <strong>utilization %, SM occupancy, temp, power</strong> are hardware- counter metrics outside IG’s model (and outside eBPF in general); they are not in v1.0 and route to the operator’s existing DCGM / Grafana stack outside the plugin. See §15 for the explicit framing. The v1.0 panel positions IG as the <em>primary</em> AI- diagnostics surface — allocation attribution, OOM root cause, inter-replica network behaviour — which is what §1 / §6 already call for.</li>
+<li><strong>Curated catalog — RESOLVED.</strong> v1.0 ships the 9-gadget “Recommended for AI workloads” set listed above (<code>trace_dns</code>, <code>trace_tcp</code>, <code>trace_tcpretrans</code>, <code>profile_tcprtt</code>, <code>trace_oomkill</code>, <code>top_blockio</code>, <code>trace_fsslower</code>, <code>profile_cuda</code>, <code>top_cuda_memory</code>). All verified present in <code>gadgets/</code>. The deferred-to-“All gadgets” list and the rationale for excluding each are documented above.</li>
+<li><strong>Version floor — RESOLVED for v1.0.</strong> Pin to the <strong>latest stable IG release at v1.0 ship date</strong>, documented as “minimum tested.” A user on an older release sees an “Upgrade IG to ≥ vX.Y.Z” CTA; a user on a newer release gets forward-compatibility assumed, with CI smoke tests against IG-main (§11) catching breaks early. Exact tag is filled in at v1.0 ship. Per-gadget <code>GetGadgetInfo</code> degradation (probe each curated gadget individually, show “X of 8 available”) is deferred to v1.1.</li>
+</ol>
+<hr />
+<h2 id="s9"><span class="num">§ 09</span><span class="htitle">AKS overlay</span><span class="pill b">Layer B</span></h2>
+<p>Loads only on AKS. Gate: node label <code>kubernetes.azure.com/cluster</code>. When absent, none of this code runs — core stays clean for non-AKS users. <strong>No cloud-provider SDK calls at any version</strong> (§3.5 / §4): the overlay is an AKS-<em>detection-and-K8s-glue</em> layer.</p>
+<h3 id="detection--useakscontext-all-fail-open-all-entries-in-the-71-registry">Detection → <code>useAksContext()</code> (all fail open, all entries in the §7.1 registry)</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Probe</th>
+<th>Signal</th>
+<th>Source</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>aks.is-aks</code></td>
+<td><code>kubernetes.azure.com/cluster</code> node label</td>
+<td>node-label (high)</td>
+<td>activate overlay</td>
+</tr>
+<tr class="even">
+<td><code>aks.gpu-pool</code></td>
+<td><code>agentpool</code> + <code>accelerator=nvidia</code> + SKU label</td>
+<td>node-label (high)</td>
+<td>KAITO preset / warn</td>
+</tr>
+<tr class="odd">
+<td><code>aks.gpu-sku</code></td>
+<td><code>node.kubernetes.io/instance-type</code> (H100/A100/V100/T4)</td>
+<td>node-label (high)</td>
+<td>preset, model-fit</td>
+</tr>
+<tr class="even">
+<td><code>aks.kaito</code></td>
+<td><code>kaito.sh</code> CRDs</td>
+<td>crd (high)</td>
+<td>Workspace shortcuts</td>
+</tr>
+<tr class="odd">
+<td><code>aks.workload-identity</code></td>
+<td>OIDC issuer + <code>azure.workload.identity/use</code></td>
+<td>oidc + label (high)</td>
+<td>one-click SA wiring</td>
+</tr>
+<tr class="even">
+<td><code>aks.acr</code></td>
+<td>pull-secret / kubelet identity patterns</td>
+<td>pull-secret (low → override via label)</td>
+<td>image-pull config</td>
+</tr>
+<tr class="odd">
+<td><code>aks.gateway-api</code></td>
+<td><code>gateway.networking.k8s.io</code> CRDs</td>
+<td>crd (high)</td>
+<td>HTTPRoute template</td>
+</tr>
+<tr class="even">
+<td><code>aks.ig</code></td>
+<td>IG CRDs / gRPC reachability</td>
+<td>crd (high)</td>
+<td>enable AKS IG enrichers</td>
+</tr>
+</tbody>
+</table>
+<p>Each probe follows the §7.1 contract: probes whose source is <code>low</code> confidence (<code>aks.acr</code> today) get an override affordance.</p>
+<h3 id="deploy-glue--in-cluster-writes-only">Deploy glue — in-cluster writes only</h3>
+<p>Adds an “Azure” step to the deploy wizard + “Azure” tab on ModelDeployment:</p>
+<ol type="1">
+<li><p>KAITO preset for detected SKU. The preset data ships as <code>kaito-presets.json</code> inside the AKS overlay, <strong>generated at plugin-release time from KAITO’s own <code>kaitollmconfig.json</code></strong> (model → minimumGpu mapping). v1.0 ships the families currently in KAITO: <code>falcon</code>, <code>mistral</code>, <code>phi-2</code>, <code>phi-3</code>, <code>qwen</code>, <code>llama3</code> — the table the wizard exposes is the inverse view <code>(SKU, family) → preset</code> derived from those entries. Each row carries the KAITO <code>kaitoVersion</code> floor; the wizard warns on cluster-version mismatch detected via <code>aks.kaito</code>. The generator script lives in the overlay repo; running it is part of cutting an overlay release. Out-of-band model families (not in KAITO’s catalog) render the “report stale preset” CTA (§15).</p></li>
+<li><p>Model-fit estimate (model size vs GPU mem; R/Y/G).</p></li>
+<li><p>ServiceAccount with <code>azure.workload.identity/client-id</code> (user supplies client ID) + patch <code>spec.serviceAccountName</code>.</p></li>
+<li><p>ACR image-ref validation + inline “configure pull secret”.</p></li>
+<li><p>One-click HTTPRoute via detected Gateway class (default AGIC’s).</p></li>
+<li><p>Azure OpenAI <strong>credential helper</strong>: writes a <code>Secret</code> (<code>api-key</code>, <code>endpoint</code>, <code>deployment-name</code>) and a <code>ConfigMap</code> with example env-var names + a code snippet showing how to mount them in an app pod or reference them from a gateway. The plugin does <strong>not</strong> implement routing or fallback — it stores credentials in a well-known shape so the user’s app or gateway can consume them. “Fallback” routing (primary model down → AOAI) would require a <code>ModelDeployment</code> CRD field plus controller work in AI Runway proper; tracked as a §14 upstream gap.</p>
+<p><strong>Naming &amp; re-run semantics.</strong> Secret name is user-supplied with default <code>&lt;project&gt;-aoai</code>; the same name covers the paired ConfigMap. Resources the wizard creates carry the annotation <code>airunway.ai/managed-by: wizard</code> (shape consistent with the wizard-run-id annotation from the partial-failure section above). Re-run behaviour:</p>
+<ul>
+<li>target name does not exist → create.</li>
+<li>target name exists <em>and</em> carries the wizard annotation → confirm-overwrite dialog, then patch.</li>
+<li>target name exists <em>without</em> the wizard annotation → wizard refuses with “A Secret named <em>X</em> exists but wasn’t created by this wizard. Pick a different name or delete it manually first.” No silent stomping on user- or other-tool-created secrets.</li>
+</ul>
+<p>The two-AOAI-per-Project case (e.g., GPT-4 primary + GPT-3.5 helper) is supported by re-running the step with a different name — each run produces its own Secret/ConfigMap pair.</p></li>
+</ol>
+<h3 id="things-the-cloud-neutral-rule-punts-to-portal-deep-links">Things the cloud-neutral rule punts to Portal deep-links</h3>
+<p>Node pool creation, ACR attach, Workload-Identity enablement, AOAI provisioning, ARM-only infra details (pricing, quota, provisioned- throughput units) — all of these require Azure ARM and are therefore <strong>permanently out of scope</strong> for the plugin. UX surface:</p>
+<ul>
+<li>A <strong>right-side drawer</strong> opens when an Azure-out-of-band step is needed.</li>
+<li>Each step renders as: 1-line description, a code block with the exact <code>az</code> command pre-filled with detected values <em>from K8s</em> (cluster name from labels, etc.), a <strong>Copy</strong> button, and an <strong>“Open in Azure Portal”</strong> deep link as a secondary action.</li>
+<li>The drawer is dismissible and re-openable; nothing in the cluster state depends on the user having actually run the command — the next detection pass picks up the new state from K8s labels / CRs.</li>
+</ul>
+<p>Where infra detail is genuinely missing (e.g., a fact the K8s API doesn’t surface), the right fix is <strong>upstream</strong>: KAITO exposes more in CR status, AKS exposes more in node labels, or a Prometheus exporter fills the gap. The plugin links to the gap, it does not work around it with a cloud SDK. See §14 for the running list of such gaps.</p>
+<h3 id="partial-failure-ux-no-auto-rollback">Partial-failure UX (no auto-rollback)</h3>
+<p>Multi-step wizards (Deploy, Add Azure glue) can leave the cluster with some resources created and some not. v1 policy:</p>
+<ul>
+<li>Each step is a separate K8s write with its own success/failure pill in the wizard summary.</li>
+<li>A failure surfaces an inline error + <strong>Retry this step</strong> button.</li>
+<li><strong>Wizard-run tracking is server-side via annotation.</strong> Every resource the wizard creates is annotated <code>airunway.ai/wizard-run-id: &lt;uuid&gt;</code> (one UUID per wizard run, minted on wizard open). A <strong>Clean up partial resources</strong> action queries by that annotation and lists what <em>would</em> be deleted, requires explicit confirmation, and only deletes resources that carry the matching run-id. Resources the wizard found pre-existing are never annotated, so never deleted. This survives browser refresh and wizard re-entry: the run-id is persisted on the resources themselves, not in session state, and the Cleanup action can be re-opened from the Project detail page as long as at least one annotated resource exists.</li>
+<li>No automatic / hidden rollback. Stakeholders should expect “Wizard failed at step 4” to leave steps 1–3 in place until the user chooses.</li>
+</ul>
+<h3 id="aks-flavored-ig-enrichers">AKS-flavored IG enrichers</h3>
+<p>GPU-SKU-aware fit overlay on GPU diagnostics; NCCL inter-pod traffic view that flags silent replicas in multi-replica deployments. These <em>decorate</em> the core IG panel; they don’t replace it.</p>
+<hr />
+<h2 id="s10"><span class="num">§ 10</span><span class="htitle">Phasing</span></h2>
+<p>T-shirt sizes are engineering-effort estimates from current code state, <strong>per engineer</strong>, not calendar commitments. <strong>S</strong> ≈ days, <strong>M</strong> ≈ 1–2 weeks, <strong>L</strong> ≈ 3+ weeks per engineer. The TL;DR’s 6–10 engineer-weeks figure is the total v1.0 sum assuming one engineer working sequentially; calendar time depends on staffing.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Phase</th>
+<th>Per-engineer size</th>
+<th>Scope</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>v0.9 (prereq)</strong></td>
+<td>S–M</td>
+<td>UX-spec items that block Project work (per §0): hard blockers P0-0 (per-cluster backend config) and P0-1 (deployments-list crash + namespace filter); soft prereqs P0-2 (single Settings location) and P0-3 (<code>useAutoRefresh</code> hook) land here or alongside early v1.0 steps. Step 1 of v1.0 cannot start until P0-0 and P0-1 are merged.</td>
+</tr>
+<tr class="even">
+<td><strong>v1.0</strong></td>
+<td>~6–10 eng-weeks total</td>
+<td>Project CRD + controller (single-label membership + status aggregation); Projects list/detail-as-Resources/wizard + “Add to project”; <strong>Observability tab — app-metrics panel (backend) + IG diagnostics panel (gRPC)</strong> (MVP); framework detection (registry + override label); AKS overlay: <code>useAksContext</code>, Azure tab, KAITO preset step, WI SA / ACR / HTTPRoute / AOAI-credential-helper glue, AKS IG enrichers; graceful-degradation CTAs everywhere; IG smoke CI (§11). <strong>Stretch:</strong> Topology tab as the default Project view (§6a).</td>
+</tr>
+<tr class="odd">
+<td><strong>v1.1</strong></td>
+<td>M</td>
+<td><strong>Prometheus-as-app-metrics-source when detected</strong> (new §7.1 probe; backend ring buffer becomes the no-Prometheus fallback — removes the “blank panels for 15 min after backend restart” gap); <strong>durable IG runs via <code>GadgetInstanceManager</code></strong> (5-min+ tier, with named-instance ownership/cleanup + a “Running gadgets” list in the Project Observability tab); Project rename; cascade-delete finalizer; multi-Project membership (mechanism TBD based on v1.0 user feedback); more curated gadgets + enrichers from feedback; per-gadget IG version degradation; more KAITO presets; AMD GPU in IG panel; full AKS E2E in CI; if v1.0 deferred topology, ship it here.</td>
+</tr>
+<tr class="even">
+<td><strong>v2.0</strong></td>
+<td>L</td>
+<td>Prometheus / Azure-Monitor-as-Prometheus historical metrics (still K8s-cluster-local — no cloud SDK); gadget-result persistence; cross-Project ops view; vector-DB / training-shaped Projects.</td>
+</tr>
+<tr class="odd">
+<td><strong>Not planned</strong></td>
+<td>—</td>
+<td>Replacing AI Runway’s deploy wizard; generic IG browser; alerting; GitOps integration; <strong>any cloud-provider SDK use (Azure ARM, AWS, GCP)</strong>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="suggested-build-order">Suggested build order</h3>
+<table>
+<thead>
+<tr class="header">
+<th>#</th>
+<th>Step</th>
+<th>Per-engineer size</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>0</td>
+<td><strong>v0.9 prereqs:</strong> UX-spec P0-0 (per-cluster backend) + P0-1 (list crash / namespace filter); P0-2 + P0-3 land here or alongside step 2a</td>
+<td>S–M</td>
+</tr>
+<tr class="even">
+<td>1</td>
+<td>Project CRD + controller (single-label membership; unblocks UI)</td>
+<td>M</td>
+</tr>
+<tr class="odd">
+<td>2a</td>
+<td>Projects list / Resources tab / wizard + “Add to project” in core</td>
+<td>M</td>
+</tr>
+<tr class="even">
+<td>2b</td>
+<td><em>(stretch)</em> Topology tab (react-flow, caps, fallback)</td>
+<td>M</td>
+</tr>
+<tr class="odd">
+<td>3</td>
+<td>Observability tab — app-metrics panel (reuses backend / <code>useMetrics</code>, adds sparkline ring buffer in backend), then IG diagnostics panel (gRPC <code>GadgetManager.RunGadget</code>) + IG smoke CI</td>
+<td>M</td>
+</tr>
+<tr class="even">
+<td>4</td>
+<td>AKS overlay scaffold + <code>useAksContext</code> (probes in shared §7.1 registry) + Azure tab placeholder</td>
+<td>S</td>
+</tr>
+<tr class="odd">
+<td>5</td>
+<td>KAITO preset step; WI / ACR / HTTPRoute / AOAI-credential-helper glue; Portal deep-link drawer</td>
+<td>M</td>
+</tr>
+<tr class="even">
+<td>6</td>
+<td>AKS IG enrichers; polish; docs; E2E checklist</td>
+<td>S</td>
+</tr>
+</tbody>
+</table>
+<p>Steps 1 → 2a → 3 are the critical path. Step 2b can be cut at any point if v1.0 is running hot; steps 4–6 can fork off in parallel after step 2a if multiple engineers are available. Step 0 gates step 1 — no Project CRD work before P0-0 and P0-1 are merged.</p>
+<hr />
+<h2 id="s11"><span class="num">§ 11</span><span class="htitle">Cross-cutting: data flow, errors, testing</span></h2>
+<ul>
+<li><strong>Two data paths, both K8s-only:</strong> Headlamp’s K8s API client for the CRD reads, IG gRPC, ModelDeployment writes, and detection probes; the AI Runway backend (also a K8s Service, reached the same way) for app metrics. No cloud-provider SDK dep (§4). No new plugin-owned backend; the existing AI Runway backend is reused and gets a small in-memory metric ring buffer for sparklines (§6).</li>
+<li><strong>Caching:</strong> detection + context in React context (<code>useRunwayContext</code>, <code>useAksContext</code>), invalidated on cluster switch. Detection registry TTLs live with the probe definition (§7.1).</li>
+<li><strong>Errors:</strong> missing optional dependency = inline CTA, never a throw; detection fails open; missing AI Runway backend = “Install/repair” CTA on the app-metrics panel; K8s writes are per-resource (wizards surface partial-failure + “retry failed step”, no auto-rollback — see §9); IG failures non-fatal.</li>
+<li><strong>Testing:</strong>
+<ul>
+<li><strong>Unit (vitest/RTL):</strong> the bulk — detection registry &amp; override label, KAITO table, CRD transforms (label-selector matching), <code>ig-client</code> with mocked IG gRPC, hook lifecycles, sparkline ring buffer semantics.</li>
+<li><strong>Component:</strong> per major view against fixtures using Headlamp’s harness — Projects list, Resources tab, Topology (if shipped), Observability with backend present/absent, IG panel with gRPC stubbed.</li>
+<li><strong>Controller:</strong> via controller-runtime envtest, including selector matching and cross-Project overlap warning.</li>
+<li><strong>IG smoke (NEW in v1.0):</strong> CI job spins up a <code>kind</code> cluster, Helm- installs IG, runs one curated gadget (<code>trace_dns</code>) end-to-end through the plugin’s <code>ig-client</code> against the in-cluster gRPC endpoint. Triggered per-PR when <code>ig-client.ts</code> or <code>GadgetRunner.tsx</code> changes; nightly against IG-main to catch upstream churn.
+<ul>
+<li><strong>Runner.</strong> Self-hosted runner preferred (privileged DaemonSet + eBPF + <code>/sys/kernel/debug</code> is more reliable there). GitHub-hosted runners work on current images but flake periodically; a single auto-retry on the IG-smoke step is allowed, a second failure fails the PR.</li>
+<li><strong>Traffic generation.</strong> Test pod issues a <code>curl</code> against a known hostname; assertion is “gadget output contains that hostname within N seconds.” N tuned per runner class.</li>
+<li><strong>Ownership.</strong> Nightly failure triage has a named owner (track as §14 sub-item) — without an owner the job becomes noise.</li>
+</ul></li>
+<li><strong>Full AKS E2E:</strong> v1.1.</li>
+<li><strong>Gate:</strong> <code>bun run lint &amp;&amp; bun run tsc &amp;&amp; bun run test</code>. The lint step includes the <code>no-restricted-paths</code> rule enforcing the §4 import-direction boundary (core must not import aks).</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="s12"><span class="num">§ 12</span><span class="htitle">Non-functional requirements</span></h2>
+<blockquote>
+<p><strong>Status of these targets (v1.0):</strong> <em>informational, not gated.</em> The current plugin is ~84 KB gzipped, so the bundle ceilings below sit well above today’s baseline and won’t fire as regression alarms without real per-feature budgets behind them. Real budgets — tighter bundle limits with explicit per-feature lines (topology, Project views, Observability, IG client), a <code>size-limit</code>-style CI gate, and a benchmark harness for the TTI / first-paint numbers — are deferred to v1.1, by which point the actual shipped sizes give us something concrete to budget against. Until then the numbers below are documented intent; CI does not gate on them.</p>
+</blockquote>
+<table>
+<thead>
+<tr class="header">
+<th>Area</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Headlamp version</td>
+<td>≥ current LTS at v1.0 ship date; pinned in plugin manifest. Breaking-API drift treated as a release blocker.</td>
+</tr>
+<tr class="even">
+<td>Kubernetes version</td>
+<td>≥ 1.27 (matches AI Runway controller floor).</td>
+</tr>
+<tr class="odd">
+<td>AI Runway backend</td>
+<td>Required install-time dep; same version constraint as the controller.</td>
+</tr>
+<tr class="even">
+<td>Browser support</td>
+<td>Latest 2 versions of Chrome, Edge, Firefox, Safari.</td>
+</tr>
+<tr class="odd">
+<td>Plugin bundle size</td>
+<td>Core plugin <strong>≤ 1.5 MB</strong> gzipped (includes react-flow ~80 KB gz for topology); AKS overlay <strong>≤ 750 KB</strong> gzipped. <em>Informational in v1.0; CI gating deferred to v1.1.</em></td>
+</tr>
+<tr class="even">
+<td>Project-detail TTI</td>
+<td><strong>≤ 2.5 s</strong> on a cluster with 50 Projects / 500 labeled resources, on a warm Headlamp session. <em>Informational in v1.0; benchmark harness deferred to v1.1.</em></td>
+</tr>
+<tr class="odd">
+<td>Topology tab first-paint</td>
+<td><strong>≤ 2 s</strong> at 50 nodes; falls back to Resources tab beyond the 100-node cap (§6a). <em>Informational in v1.0.</em></td>
+</tr>
+<tr class="even">
+<td>Observability tab first-paint</td>
+<td><strong>≤ 1.5 s</strong> to render the Project-specific overview strip; app-metrics and IG panels stream in independently. <em>Informational in v1.0.</em></td>
+</tr>
+<tr class="odd">
+<td>Detection latency</td>
+<td>All §7.1 registry probes complete in <strong>≤ 1 s</strong> or fail open. <em>Informational in v1.0.</em></td>
+</tr>
+<tr class="even">
+<td>Accessibility</td>
+<td>Keyboard-navigable; respects Headlamp’s existing a11y baseline. No new keyboard traps. Topology view has keyboard focus order across nodes/edges.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="s13"><span class="num">§ 13</span><span class="htitle">Security</span></h2>
+<ul>
+<li><p><strong>RBAC for Projects.</strong> The plugin issues all calls with the end-user’s token; it never elevates. Creating, listing, or modifying a <code>Project</code> CR requires standard K8s RBAC on <code>projects.airunway.ai</code> in the target namespace. Cluster admins are responsible for granting this — the plugin offers no per-Project ACL of its own in v1.</p></li>
+<li><p><strong>Validating webhook on <code>Project.spec.selector</code> (narrow).</strong> v1.0 ships a validating webhook that rejects only the unambiguous foot-guns:</p>
+<ul>
+<li>empty <code>matchLabels</code> <em>and</em> empty <code>matchExpressions</code> (no selector at all → would match every resource in the namespace);</li>
+<li>selector with no key under the <code>airunway.ai/</code> label namespace (decouples membership from the convention the rest of the system relies on).</li>
+</ul>
+<p>Everything else — selector collisions across Projects, wrong label values, typos — stays as UI warnings (§5). The webhook is intentionally not trying to be smart; it just blocks the two cases that have no legitimate use. Co-located with the existing ModelDeployment webhook in <code>controller/internal/webhook/v1alpha1/</code>; no new process.</p></li>
+<li><p><strong>Label tampering.</strong> Any user with <code>patch</code> on a resource can add or remove the <code>airunway.ai/project</code> label. This is the same trust model as any K8s label-based grouping (Services, NetworkPolicies). v1 does not validate or webhook-enforce membership — cluster admins who care should restrict <code>patch</code> on the label key via RBAC or an OPA / Kyverno policy. Documented, not prevented.</p></li>
+<li><p><strong>Selector collisions</strong> are allowed and surfaced (§5).</p></li>
+<li><p><strong>IG privileges.</strong> IG itself runs privileged on every node; the plugin inherits no extra privilege. If the user’s token cannot reach IG via the apiserver proxy, the Diagnostics panel shows a permission CTA rather than failing silently.</p></li>
+<li><p><strong>PII in IG output.</strong> Kernel-level traces can leak sensitive strings: DNS names (<code>*.openai.azure.com</code>, internal hostnames), file paths (model identifiers, user-data mounts), syscall arguments. Plugin policy:</p>
+<ul>
+<li>IG output is rendered <strong>as-is</strong> in the table. Nothing is auto-uploaded anywhere; the last-5 ephemeral cache lives in Headlamp plugin-storage (browser-local), not the cluster. JSON/CSV export is explicit and user-initiated.</li>
+<li>The Diagnostics panel header carries a one-line PII notice the first time it’s opened <strong>per cluster, per browser profile</strong>. Dismissal is explicit (a “Got it” button, not a passive X) and stored in plugin-storage keyed <code>pii-notice-acked:&lt;cluster-name&gt;</code>. Switching to a different cluster shows the notice again once — different cluster, possibly different operator, possibly different sensitivity context. Clearing plugin-storage or using a different browser profile re-shows it. Matches the kubectl-equivalent trust model: the acceptance scope is the cluster, not the tab.</li>
+</ul></li>
+<li><p><strong>Untrusted input.</strong> Project <code>displayName</code> / <code>description</code>, user-supplied client IDs, override-label values, and gadget output are all rendered as text (React default-escapes); no <code>dangerouslySetInnerHTML</code>. Backend Zod validation enforced on every route per project security rules.</p></li>
+<li><p><strong>Secrets.</strong> The AOAI credential-helper step writes a <code>Secret</code>; the plugin never logs the value, never sends it to telemetry, and clears form fields on navigation.</p></li>
+</ul>
+<hr />
+<h2 id="s14"><span class="num">§ 14</span><span class="htitle">Open questions</span></h2>
+<p>These need decisions from named owners before or during v1 implementation.</p>
+<ol type="1">
+<li><strong>KAITO preset table.</strong> <em>Resolved.</em> v1.0 ships <code>kaito-presets.json</code> generated from KAITO’s <code>kaitollmconfig.json</code> at plugin-release time; covers the six families currently in KAITO (<code>falcon</code>, <code>mistral</code>, <code>phi-2</code>, <code>phi-3</code>, <code>qwen</code>, <code>llama3</code>) across the SKUs KAITO declares (predominantly A100 variants). Generator script lives in the AKS overlay repo. Mismatch with the in-cluster KAITO version surfaces a warning via <code>aks.kaito</code>.</li>
+<li><strong>Sidebar placement.</strong> <em>Resolved.</em> Projects sits <strong>under the existing “AIRunway” sidebar group, as the first child</strong> — above Deployments. One plugin = one sidebar group (per §3.5); Projects is the new top-of-funnel (“pick the app, then drill into pieces”), so it leads the list. Existing entries (Deployments, Models, Runtimes, Gateway, Integrations, Settings) stay where they are.</li>
+<li><strong>Naming.</strong> Core Project work needs no special name; AKS overlay working name <code>airunway-aks</code> — final name TBD.</li>
+<li><strong>Upstream infra-metadata gaps.</strong> With the cloud-neutral rule (§3/§4) holding firm, which infra facts that an operator would reasonably want to see in a Project are currently only available via ARM, and which of those should be fixed upstream (KAITO CR status, AKS node labels, a Prometheus exporter, etc.) rather than worked around in the plugin? Owner: KAITO maintainers + AI Runway. Track as a living list; do not block v1. Seeded entries:
+<ul>
+<li><strong>AOAI routing/fallback as a first-class <code>ModelDeployment</code> concept.</strong> v1.0 ships a credential helper (§9.6) but no routing. A real fallback would need a <code>spec.fallback</code> field on <code>ModelDeployment</code> plus controller wiring (gateway BackendRefs or equivalent). AI Runway controller work, not plugin work.</li>
+</ul></li>
+<li><strong>Topology stretch decision.</strong> Re-evaluate mid-v1.0: is the rest of v1.0 on track such that §6a topology ships in v1.0, or does it slip to v1.1? Owner: project lead, decision needed before step 2b starts.</li>
+<li><strong>IG-smoke nightly triage owner.</strong> Who watches the nightly IG-smoke job (§11) and files / acts on failures? Without a named owner the job becomes noise. Pick before v1.0 ship.</li>
+</ol>
+<blockquote>
+<p>The IG version-floor tag (referenced in §8.4 and §15) is not an open question — it’s a ship-time value filled in when v1.0 is cut, not a decision blocking design or implementation.</p>
+</blockquote>
+<hr />
+<h2 id="s15"><span class="num">§ 15</span><span class="htitle">Risks</span></h2>
+<table>
+<thead>
+<tr class="header">
+<th>Risk</th>
+<th>Likelihood</th>
+<th>Impact</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>AI Runway backend unavailable in a user’s install (misconfig, version skew, RBAC)</td>
+<td>Low</td>
+<td>Medium — app-metrics panel dark</td>
+<td>Required install-time dep; clear “Install/repair AI Runway backend” CTA on the panel; backend health probe in <code>useRunwayContext</code></td>
+</tr>
+<tr class="even">
+<td>IG’s GPU coverage is allocation- and runtime-event shaped (stack-attributed CUDA allocs via <code>profile_cuda</code> / <code>top_cuda_memory</code>, NCCL-adjacent network signals via <code>profile_tcprtt</code>, <code>trace_tcp</code>, etc.); hardware-counter metrics (utilization %, SM occupancy, temp, power) are not in IG’s model and won’t be</td>
+<td>Low</td>
+<td>Low — known limit, clearly attributed</td>
+<td>The IG diagnostics panel surfaces what IG actually does well (allocation attribution, OOM root cause, inter-replica network behavior) and labels these as such. Hardware-counter metrics are explicitly out of v1.0; operators who need them use their existing DCGM / Grafana stack outside the plugin. Revisit an in-plugin GPU-utilization panel in v1.1 only if the Prometheus integration (already v1.1) makes it cheap</td>
+</tr>
+<tr class="odd">
+<td>IG image-based gadget gRPC API churns (proto in <code>pkg/gadget-service/api/api.proto</code>) between releases</td>
+<td>Medium</td>
+<td>Medium — plugin run/instance calls break</td>
+<td>Pin minimum IG release in detection and CTA on mismatch; <strong>IG smoke CI in v1.0</strong> (§11); keep curated set’s required fields narrow</td>
+</tr>
+<tr class="even">
+<td>KAITO presets churn between releases</td>
+<td>Medium</td>
+<td>Low — wrong preset surfaced</td>
+<td>Keep preset table in TS, version it against KAITO release; CTA “report stale preset”</td>
+</tr>
+<tr class="odd">
+<td>Inference-engine metric schemas drift (vLLM rename, SGLang adds/removes) over a 12-month horizon</td>
+<td>High</td>
+<td>Low — panel labels go stale</td>
+<td>Engine-adapter registry (§6 Panel 1) is the single point of update; one adapter file per engine, version-pinned; engine-coverage matrix in tests asserts each adapter still maps every canonical concept; engines without an adapter render the “contribute one →” CTA</td>
+</tr>
+<tr class="even">
+<td>Headlamp plugin API breaks between releases</td>
+<td>Low–Medium</td>
+<td>High — plugin doesn’t load</td>
+<td>Pin tested Headlamp version range; CI runs plugin against Headlamp-main weekly</td>
+</tr>
+<tr class="odd">
+<td>Detection false positives confuse users (e.g., a fork named <code>myco-vllm-patched</code> mis-detected)</td>
+<td>Medium</td>
+<td>Low</td>
+<td>Detection contract (§7.1) surfaces confidence; low-confidence detections offer the <code>airunway.ai/engine=&lt;name&gt;</code> override link inline</td>
+</tr>
+<tr class="even">
+<td>AKS detection false positives on non-AKS clusters using the same node label out of habit</td>
+<td>Low</td>
+<td>Medium — overlay activates wrongly</td>
+<td>Detection requires <em>both</em> the cluster-wide label and at least one Azure-specific CRD/identity signal before activating</td>
+</tr>
+<tr class="odd">
+<td>Wizard partial-failure cleanup is misunderstood as auto-rollback</td>
+<td>Medium</td>
+<td>Medium — orphaned resources</td>
+<td>UI is explicit: “no automatic rollback, use Clean up partial resources to remove what this wizard created”</td>
+</tr>
+<tr class="even">
+<td>Topology view becomes unreadable for medium Projects (20–50 nodes)</td>
+<td>Medium</td>
+<td>Low — view degrades, list still works</td>
+<td>Fixed L→R direction + lane discipline; Pod-group collapse at 50 nodes; full fallback to Resources tab at 100 nodes (§6a)</td>
+</tr>
+<tr class="odd">
+<td>Some Azure infra detail unavailable in K8s — looks like a regression vs. fully ARM-integrated tools</td>
+<td>Medium</td>
+<td>Low</td>
+<td>Cloud-neutral rule is explicit and documented (§3/§4); Portal deep-links cover the “I need to see this in Azure” case; upstream-gaps list (§14.4) tracks where K8s should surface more</td>
+</tr>
+<tr class="even">
+<td>“Plugin form” itself gets reopened post-v1.0 (e.g., decision to ship Web UI standalone instead)</td>
+<td>Low</td>
+<td>High — most of this spec presumes Headlamp-plugin packaging (§4, §8, §9, §14.2)</td>
+<td>v0.9 prereqs (§0) commit explicitly to “continue as a plugin”; any reopening triggers a full spec revisit, not a patch; AKS overlay’s lint-enforced separation (§4) limits blast radius — the core could in principle re-target standalone, but the AKS overlay’s Headlamp-integration assumptions wouldn’t survive</td>
+</tr>
+<tr class="odd">
+<td>Project reconciler co-residency with ModelDeployment reconciler (§4) hardens silently into shipped artifacts (single SA, single Helm value, shared metrics endpoint), making a future split-out a bigger lift than §4 implies</td>
+<td>Medium</td>
+<td>Low — only bites if Project reconciler ever needs to scale or ship independently</td>
+<td>The §4 import-decoupling promise is held mechanically by a CI grep / depguard rule (no MD-specific imports in the Project reconciler package); shared state additions (e.g., a cache both reconcilers write to) get flagged at PR-review time as architecture-affecting; Helm chart keeps reconciler-feature toggles as separate values from day one so a later split is a values edit, not a chart rewrite</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="s16"><span class="num">§ 16</span><span class="htitle">Glossary</span></h2>
+<table>
+<thead>
+<tr class="header">
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>ACR</strong></td>
+<td>Azure Container Registry — Azure’s image registry; attached to AKS for image pulls</td>
+</tr>
+<tr class="even">
+<td><strong>AGIC</strong></td>
+<td>Application Gateway Ingress Controller — Azure’s Gateway API / Ingress implementation</td>
+</tr>
+<tr class="odd">
+<td><strong>AKS</strong></td>
+<td>Azure Kubernetes Service — Microsoft’s managed Kubernetes offering</td>
+</tr>
+<tr class="even">
+<td><strong>AOAI</strong></td>
+<td>Azure OpenAI — Azure-hosted OpenAI-compatible model endpoints. v1.0 surfaces this as a credential helper (Secret + ConfigMap), not as routing/fallback</td>
+</tr>
+<tr class="odd">
+<td><strong>ARM</strong></td>
+<td>Azure Resource Manager — Azure’s control-plane API. Explicitly out of scope for this plugin at every version (§3 / §4)</td>
+</tr>
+<tr class="even">
+<td><strong>CTA</strong></td>
+<td>Call-to-action — a button or link prompting the user to take a next step (e.g., “Install IG”)</td>
+</tr>
+<tr class="odd">
+<td><strong>DCGM</strong></td>
+<td>NVIDIA Data Center GPU Manager — exporter that produces GPU utilization, memory, temperature metrics for Prometheus. Out of scope for v1.0 (operators use their existing DCGM stack outside the plugin); revisited in v1.1 alongside Prometheus integration</td>
+</tr>
+<tr class="even">
+<td><strong>eBPF</strong></td>
+<td>extended Berkeley Packet Filter — Linux kernel mechanism for safely running sandboxed programs in kernel space; the basis for Inspektor Gadget</td>
+</tr>
+<tr class="odd">
+<td><strong>Gateway API</strong></td>
+<td>Kubernetes networking API (successor to Ingress) — <code>gateway.networking.k8s.io</code></td>
+</tr>
+<tr class="even">
+<td><strong>IG / Inspektor Gadget</strong></td>
+<td>A collection of eBPF-based tools for inspecting and debugging Kubernetes workloads</td>
+</tr>
+<tr class="odd">
+<td><strong>KAITO</strong></td>
+<td>Kubernetes AI Toolchain Operator — Azure-originated operator for deploying ML models; the “Workspace” CR is its deployment object</td>
+</tr>
+<tr class="even">
+<td><strong>KV-cache</strong></td>
+<td>Key/Value cache in transformer inference — memory used to avoid recomputing attention over prior tokens; saturation kills throughput</td>
+</tr>
+<tr class="odd">
+<td><strong>MD</strong></td>
+<td>ModelDeployment — AI Runway’s unified CRD for deploying ML models</td>
+</tr>
+<tr class="even">
+<td><strong>NCCL</strong></td>
+<td>NVIDIA Collective Communications Library — used for inter-GPU / inter-pod tensor exchange in distributed inference; silent failures here cause “silent replicas”</td>
+</tr>
+<tr class="odd">
+<td><strong>OIDC</strong></td>
+<td>OpenID Connect — identity-token standard; needed for Workload Identity</td>
+</tr>
+<tr class="even">
+<td><strong>PII</strong></td>
+<td>Personally Identifiable Information</td>
+</tr>
+<tr class="odd">
+<td><strong>RAG</strong></td>
+<td>Retrieval-Augmented Generation — LLM pattern that fetches documents and feeds them to the model as context</td>
+</tr>
+<tr class="even">
+<td><strong>R/Y/G</strong></td>
+<td>Red / Yellow / Green status indicator</td>
+</tr>
+<tr class="odd">
+<td><strong>react-flow</strong></td>
+<td>React library for building node-based UIs; used for the topology view (§6a)</td>
+</tr>
+<tr class="even">
+<td><strong>SKU</strong></td>
+<td>Stock-Keeping Unit — Azure’s name for VM/instance types (e.g., <code>Standard_NC24ads_A100_v4</code>)</td>
+</tr>
+<tr class="odd">
+<td><strong>TPOT</strong></td>
+<td>Time Per Output Token — average latency between successive generated tokens; a key streaming-perf metric</td>
+</tr>
+<tr class="even">
+<td><strong>TTFT</strong></td>
+<td>Time To First Token — latency from request submission to the first generated token reaching the client; a key user-experience metric</td>
+</tr>
+<tr class="odd">
+<td><strong>TRT-LLM</strong></td>
+<td>NVIDIA TensorRT-LLM — high-perf inference engine for NVIDIA GPUs</td>
+</tr>
+<tr class="even">
+<td><strong>vLLM</strong></td>
+<td>High-throughput LLM inference engine with PagedAttention; the most common engine in AI Runway today</td>
+</tr>
+<tr class="odd">
+<td><strong>WI</strong></td>
+<td>Workload Identity — AKS feature that lets pods authenticate to Azure without long-lived secrets, via an OIDC-issued ServiceAccount token</td>
+</tr>
+</tbody>
+</table>
+
+
+<footer>
+  <span>AI Runway · Projects + AKS overlay specification</span>
+  <span>kaito-project / airunway</span>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
