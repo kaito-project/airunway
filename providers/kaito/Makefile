@@ -59,7 +59,7 @@ KAITO_REPO_URL  ?= https://kaito-project.github.io/kaito/charts/kaito
 
 setup-kaito: verify-versions
 	@echo "Installing KAITO workspace operator v$(KAITO_VERSION)..."
-	@helm repo add kaito $(KAITO_REPO_URL) 2>/dev/null || true
+	@helm repo add kaito $(KAITO_REPO_URL) --force-update
 	@helm repo update kaito
 	@helm upgrade --install $(KAITO_RELEASE) kaito/workspace \
 		--version $(KAITO_VERSION) \

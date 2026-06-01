@@ -210,6 +210,7 @@ model-downloader-docker-build:
 # regexes, preventing e.g. "1.5.0" from also matching "1X5Y0".
 GAIE_VERSION_RE := $(subst .,\.,$(GAIE_VERSION))
 DYNAMO_VERSION_RE := $(subst .,\.,$(DYNAMO_VERSION))
+KAITO_VERSION_RE := $(subst .,\.,$(KAITO_VERSION))
 
 verify-versions:
 	@# 1. controller/go.mod must pin GAIE_VERSION
@@ -221,6 +222,9 @@ verify-versions:
 	@# 3. controller/internal/gateway/detection.go fallback literal must match GAIE_VERSION
 	@grep -qE '^var DefaultGAIEVersion = "$(GAIE_VERSION_RE)"$$' controller/internal/gateway/detection.go || \
 	  { echo "❌ controller/internal/gateway/detection.go DefaultGAIEVersion fallback != $(GAIE_VERSION) (from versions.env)"; exit 1; }
+	@# 4. providers/kaito/config.go chart version literal must match KAITO_VERSION
+	@grep -qE 'Version:[[:space:]]+"$(KAITO_VERSION_RE)"' providers/kaito/config.go || \
+	  { echo "❌ providers/kaito/config.go chart Version != $(KAITO_VERSION) (from versions.env)"; exit 1; }
 	@# 4. generated TS must be in sync with versions.env.
 	@#    Generate to a temp file and diff against the working-tree copy so
 	@#    that synced uncommitted edits pass (the local-dev case) while
@@ -239,7 +243,7 @@ verify-versions:
 	    echo "❌ shared/types/versions.generated.ts is stale — run 'cd shared && bun run generate-versions' and commit the result"; \
 	    exit 1; \
 	  }
-	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION))"
+	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION), KAITO_VERSION=$(KAITO_VERSION))"
 
 # Test the verify-versions guard itself by deliberately breaking each
 # input it inspects and asserting the target exits non-zero.
