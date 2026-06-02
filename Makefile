@@ -243,9 +243,10 @@ setup-gateway: verify-versions
 # Tear down the inference Gateway and BBR. Gateway API CRDs and Istio are left
 # intact because they may be shared with other workloads.
 cleanup-gateway:
+	@command -v envsubst >/dev/null 2>&1 || { echo "❌ envsubst not found on PATH (provided by gettext)."; exit 1; }
 	@GATEWAY_NAME=$(GATEWAY_NAME) GATEWAY_NAMESPACE=$(GATEWAY_NAMESPACE) \
 		envsubst < $(GATEWAY_MANIFEST) | kubectl delete -f - --ignore-not-found
-	@helm uninstall body-based-router --ignore-not-found
+	@helm uninstall body-based-router --ignore-not-found || helm uninstall body-based-router || true
 	@echo "⚠️ Gateway API CRDs, GAIE CRDs, and Istio left intact (may be shared). Remove manually if needed:"
 	@echo "    kubectl delete -f \"$(GATEWAY_API_URL)\" --ignore-not-found"
 	@echo "    kubectl delete -f \"$(GAIE_MANIFEST_URL)\" --ignore-not-found"
