@@ -303,6 +303,19 @@ func (v *ModelDeploymentCustomValidator) validateSpec(ctx context.Context, obj *
 	isDynamoMocker := obj.Annotations["airunway.ai/dynamo-test-backend"] == "mocker" &&
 		spec.Provider != nil && spec.Provider.Name == "dynamo"
 
+	// The Dynamo mocker backend only simulates the vLLM engine. Enforce the
+	// vLLM-only constraint at admission so a non-vllm engine + mocker annotation
+	// is rejected here rather than admitted and failing later during provider
+	// reconciliation (the dynamo provider re-validates this too). An empty engine
+	// type is allowed — the provider defaults it to vllm.
+	if isDynamoMocker && spec.Engine.Type != "" && spec.Engine.Type != airunwayv1alpha1.EngineTypeVLLM {
+		allErrs = append(allErrs, field.Invalid(
+			specPath.Child("engine", "type"),
+			spec.Engine.Type,
+			"the dynamo mocker test backend only supports the vllm engine",
+		))
+	}
+
 	if !isDynamoMocker && spec.Provider != nil && spec.Provider.Name != "" && spec.Engine.Type != "" && v.Reader != nil {
 		var providerConfig airunwayv1alpha1.InferenceProviderConfig
 		err := v.Reader.Get(ctx, client.ObjectKey{Name: spec.Provider.Name}, &providerConfig)

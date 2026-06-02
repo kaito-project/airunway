@@ -512,8 +512,9 @@ func (t *Transformer) buildAggregatedWorker(md *airunwayv1alpha1.ModelDeployment
 
 	command := t.engineCommand(md.ResolvedEngineType())
 
-	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and drop
-	// all GPU/CPU resource requests so the worker schedules on CPU-only nodes.
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU) so the
+	// worker schedules on CPU-only nodes while staying Burstable, not BestEffort.
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = buildMockerArgs(md)
@@ -610,9 +611,10 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 
 	command := t.engineCommand(md.ResolvedEngineType())
 
-	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and drop
-	// GPU resource requests. The mocker keeps --disaggregation-mode but does
-	// NOT use --kv-transfer-config (that NIXL flag is real-vLLM-only).
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU). The mocker
+	// keeps --disaggregation-mode but does NOT use --kv-transfer-config (that NIXL
+	// flag is real-vLLM-only).
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypePrefill)
@@ -686,9 +688,10 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 
 	command := t.engineCommand(md.ResolvedEngineType())
 
-	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and drop
-	// GPU resource requests. The mocker keeps --disaggregation-mode but does
-	// NOT use --kv-transfer-config (that NIXL flag is real-vLLM-only).
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU). The mocker
+	// keeps --disaggregation-mode but does NOT use --kv-transfer-config (that NIXL
+	// flag is real-vLLM-only).
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypeDecode)

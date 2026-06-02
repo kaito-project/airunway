@@ -152,8 +152,8 @@ func testCreateMockerModelDeployment(t *testing.T, tc mockerCase) {
 		t.Fatalf("failed to read fixture %s: %v", path, err)
 	}
 
-	yaml := injectMockerAnnotation(t, string(raw))
-	out, err := kubectlApplyLiteral(t, yaml)
+	manifest := injectMockerAnnotation(t, string(raw))
+	out, err := kubectlApplyLiteral(t, manifest)
 	if err != nil {
 		t.Fatalf("failed to apply mocker ModelDeployment: %v\nOutput: %s", err, out)
 	}
