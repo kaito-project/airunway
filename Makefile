@@ -229,10 +229,12 @@ setup-gateway: verify-versions
 		--set profile=minimal \
 		--set tag=$(ISTIO_VERSION) \
 		--set values.pilot.env.ENABLE_GATEWAY_API_INFERENCE_EXTENSION=true
-	@echo "Installing Body-Based Router (BBR) $(GAIE_VERSION)..."
+	@echo "Installing Body-Based Router (BBR) $(GAIE_VERSION) into namespace $(GATEWAY_NAMESPACE)..."
 	helm upgrade -i body-based-router \
+		--namespace $(GATEWAY_NAMESPACE) --create-namespace \
 		--set provider.name=istio \
 		--version "$(GAIE_VERSION)" \
+		--wait \
 		$(BBR_CHART)
 	@echo "Creating Gateway resource $(GATEWAY_NAME) in namespace $(GATEWAY_NAMESPACE)..."
 	@command -v envsubst >/dev/null 2>&1 || { echo "❌ envsubst not found on PATH (provided by gettext)."; exit 1; }
@@ -246,7 +248,7 @@ cleanup-gateway:
 	@command -v envsubst >/dev/null 2>&1 || { echo "❌ envsubst not found on PATH (provided by gettext)."; exit 1; }
 	@GATEWAY_NAME=$(GATEWAY_NAME) GATEWAY_NAMESPACE=$(GATEWAY_NAMESPACE) \
 		envsubst < $(GATEWAY_MANIFEST) | kubectl delete -f - --ignore-not-found
-	@helm uninstall body-based-router --ignore-not-found || helm uninstall body-based-router || true
+	@helm uninstall body-based-router --namespace $(GATEWAY_NAMESPACE) --ignore-not-found || helm uninstall body-based-router --namespace $(GATEWAY_NAMESPACE) || true
 	@echo "⚠️ Gateway API CRDs, GAIE CRDs, and Istio left intact (may be shared). Remove manually if needed:"
 	@echo "    kubectl delete -f \"$(GATEWAY_API_URL)\" --ignore-not-found"
 	@echo "    kubectl delete -f \"$(GAIE_MANIFEST_URL)\" --ignore-not-found"
