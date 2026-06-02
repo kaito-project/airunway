@@ -76,7 +76,8 @@ setup-dynamo: verify-versions
 	@helm upgrade -i dynamo-platform "$(DYNAMO_CHART_URL)" \
 			--namespace $(DYNAMO_NAMESPACE) \
 			--create-namespace \
-			--set "dynamo-operator.controllerManager.manager.image.tag=$(DYNAMO_VERSION)"
+			--set "dynamo-operator.controllerManager.manager.image.tag=$(DYNAMO_VERSION)" \
+			--wait
 	@echo "✅ Dynamo platform v$(DYNAMO_VERSION) installed in namespace $(DYNAMO_NAMESPACE)"
 
 ## Uninstall Dynamo platform from the cluster
