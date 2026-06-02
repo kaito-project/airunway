@@ -37,10 +37,12 @@ const (
 	DynamoTestBackendMocker = "mocker"
 
 	// MockerWorkerCPU and MockerWorkerMemory are the CPU/memory requests and
-	// limits applied to mocker workers (and mirrored by the mocker Frontend
-	// defaults). They keep the pods Burstable — not BestEffort — so they survive
-	// memory pressure and satisfy namespace LimitRanges, while staying tiny
-	// enough to co-schedule on small CPU-only CI nodes.
+	// limits applied to mocker workers, and the request values used by the mocker
+	// Frontend (which sets requests only). On a worker, equal requests and limits
+	// make the pod Guaranteed QoS; the goal is only to avoid BestEffort — which is
+	// evicted first under memory pressure and rejected by namespace LimitRanges
+	// that mandate requests/limits — while staying tiny enough to co-schedule on
+	// small CPU-only CI nodes.
 	MockerWorkerCPU    = "100m"
 	MockerWorkerMemory = "256Mi"
 )
@@ -90,11 +92,11 @@ func mockerCommand() []string {
 
 // mockerWorkerResources returns the resource block for mocker workers. It sets
 // small CPU/memory requests and limits (and no GPU) so the worker schedules on
-// CPU-only nodes while remaining Burstable rather than BestEffort: BestEffort
-// pods are first to be evicted under memory pressure and are rejected outright
-// in namespaces whose LimitRange mandates requests/limits, both of which would
-// make the CPU-only E2E lane flaky. The values mirror the mocker Frontend
-// defaults and are ample for the lightweight python3 -m dynamo.mocker process.
+// CPU-only nodes. Equal requests and limits make the pod Guaranteed QoS; the
+// intent is only to avoid BestEffort — which is evicted first under memory
+// pressure and rejected outright in namespaces whose LimitRange mandates
+// requests/limits, both of which would make the CPU-only E2E lane flaky. The
+// values are ample for the lightweight python3 -m dynamo.mocker process.
 func mockerWorkerResources() map[string]interface{} {
 	return map[string]interface{}{
 		"requests": map[string]interface{}{

@@ -514,7 +514,9 @@ func (t *Transformer) buildAggregatedWorker(md *airunwayv1alpha1.ModelDeployment
 
 	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
 	// the GPU resources with small CPU/memory requests+limits (no GPU) so the
-	// worker schedules on CPU-only nodes while staying Burstable, not BestEffort.
+	// worker schedules on CPU-only nodes. Equal requests and limits make the pod
+	// Guaranteed QoS — the point is simply to avoid BestEffort, which is evicted
+	// first under memory pressure and rejected by request-mandating LimitRanges.
 	if isMockerMode(md) {
 		command = mockerCommand()
 		args = buildMockerArgs(md)
