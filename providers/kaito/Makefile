@@ -71,10 +71,7 @@ setup-kaito: verify-versions
 		--set gpu-feature-discovery.gfd.enabled=false \
 		--set gpu-feature-discovery.nfd.master.deploy=false \
 		--set gpu-feature-discovery.nfd.worker.deploy=false \
-		--wait
-	@echo "Waiting for KAITO operator to be ready..."
-	@kubectl wait --for=condition=Available deployment \
-		-n $(KAITO_NAMESPACE) -l app.kubernetes.io/name=workspace --timeout=5m
+		--wait --timeout=5m
 	@echo "✅ KAITO workspace operator v$(KAITO_VERSION) installed in namespace $(KAITO_NAMESPACE)"
 
 ## Uninstall KAITO workspace operator from the cluster
