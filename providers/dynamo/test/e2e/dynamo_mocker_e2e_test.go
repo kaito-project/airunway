@@ -138,6 +138,15 @@ func runMockerCase(t *testing.T, tc mockerCase) {
 		testMockerInferenceServing(t, tc)
 	})
 
+	// Skip the explicit Cleanup subtest if an earlier step failed: the registered
+	// t.Cleanup above still deletes the ModelDeployment best-effort, but leaving
+	// the in-cluster state intact (and collectDebugInfo's dump) is more useful for
+	// debugging than tearing it down here.
+	if t.Failed() {
+		t.Log("skipping explicit Cleanup subtest due to earlier failure; relying on t.Cleanup teardown")
+		return
+	}
+
 	t.Run("Cleanup", func(t *testing.T) {
 		testMockerCleanup(t, tc)
 	})
@@ -228,9 +237,15 @@ func testMockerDGDCreated(t *testing.T, tc mockerCase) {
 			t.Fatalf("worker %s command=%q, expected to contain dynamo.mocker", svc, command)
 		}
 
-		// Mocker workers must not request GPUs.
-		gpu := getDGDServiceField(t, tc.name, mdNamespace, svc,
-			fmt.Sprintf("{.spec.services.%s.resources.requests.gpu}", svc))
+		// Mocker workers must not request GPUs. Query kubectl directly (rather
+		// than getDGDServiceField, which swallows errors and returns "") so a
+		// failed jsonpath lookup is a hard failure instead of silently passing.
+		gpu, err := kubectlMayFail(t, "get", "dynamographdeployments.nvidia.com", tc.name,
+			"-n", mdNamespace,
+			"-o", fmt.Sprintf("jsonpath={.spec.services.%s.resources.requests.gpu}", svc))
+		if err != nil {
+			t.Fatalf("worker %s: failed to read GPU request: %v", svc, err)
+		}
 		if gpu != "" {
 			t.Fatalf("worker %s requests gpu=%q, expected no GPU request in mocker mode", svc, gpu)
 		}
