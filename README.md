@@ -100,6 +100,10 @@ The controller automatically selects the best engine and provider, creates provi
 
 ## Documentation
 
+📖 **Browse the docs at [kaito-project.github.io/airunway](https://kaito-project.github.io/airunway/)**
+
+The same content also lives in [`docs/`](docs/) for in-repo browsing.
+
 | Topic | Link |
 | --- | --- |
 | Architecture | [docs/architecture.md](docs/architecture.md) |
