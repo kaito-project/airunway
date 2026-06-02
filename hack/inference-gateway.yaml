@@ -7,6 +7,12 @@ kind: Gateway
 metadata:
   name: ${GATEWAY_NAME}
   namespace: ${GATEWAY_NAMESPACE}
+  labels:
+    # Identifies this as the airunway inference gateway. The controller's
+    # auto-selection and the backend status check use this label to
+    # disambiguate when more than one Gateway exists in the cluster (see
+    # controller/internal/gateway/detection.go and gateway_reconciler.go).
+    airunway.ai/inference-gateway: "true"
 spec:
   gatewayClassName: istio
   infrastructure:

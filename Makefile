@@ -216,11 +216,14 @@ GATEWAY_NAME ?= inference-gateway
 GATEWAY_API_URL := https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml
 GATEWAY_MANIFEST := hack/inference-gateway.yaml
 BBR_CHART := oci://registry.k8s.io/gateway-api-inference-extension/charts/body-based-routing
+GAIE_MANIFEST_URL := https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/$(GAIE_VERSION)/manifests.yaml
 
 setup-gateway: verify-versions
 	@command -v istioctl >/dev/null 2>&1 || { echo "❌ istioctl not found on PATH. Install Istio $(ISTIO_VERSION): https://istio.io/latest/docs/setup/getting-started/"; exit 1; }
 	@echo "Installing Gateway API CRDs $(GATEWAY_API_VERSION)..."
 	kubectl apply -f $(GATEWAY_API_URL)
+	@echo "Installing Gateway API Inference Extension (GAIE) CRDs $(GAIE_VERSION)..."
+	kubectl apply -f $(GAIE_MANIFEST_URL)
 	@echo "Installing Istio $(ISTIO_VERSION) (inference extension enabled)..."
 	istioctl install --skip-confirmation \
 		--set profile=minimal \
@@ -243,8 +246,9 @@ cleanup-gateway:
 	@GATEWAY_NAME=$(GATEWAY_NAME) GATEWAY_NAMESPACE=$(GATEWAY_NAMESPACE) \
 		envsubst < $(GATEWAY_MANIFEST) | kubectl delete -f - --ignore-not-found
 	@helm uninstall body-based-router --ignore-not-found
-	@echo "⚠️ Gateway API CRDs and Istio left intact (may be shared). Remove manually if needed:"
+	@echo "⚠️ Gateway API CRDs, GAIE CRDs, and Istio left intact (may be shared). Remove manually if needed:"
 	@echo "    kubectl delete -f \"$(GATEWAY_API_URL)\" --ignore-not-found"
+	@echo "    kubectl delete -f \"$(GAIE_MANIFEST_URL)\" --ignore-not-found"
 	@echo "    istioctl uninstall --purge -y"
 	@echo "✅ Inference gateway and BBR removed"
 
