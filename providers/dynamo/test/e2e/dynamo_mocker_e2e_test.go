@@ -160,11 +160,20 @@ func testCreateMockerModelDeployment(t *testing.T, tc mockerCase) {
 	t.Logf("applied mocker ModelDeployment %s from %s", tc.name, tc.fixture)
 }
 
-// injectMockerAnnotation parses a single-document ModelDeployment manifest and
-// sets the mocker annotation via the unstructured API, then re-serializes it.
-// SetAnnotations handles all the fixture-evolution cases for free: it creates
-// metadata.annotations if absent, merges into an existing block, and overwrites
-// (no duplicate) if the key is already present — no string/line surgery.
+// injectMockerAnnotation parses a single-document ModelDeployment manifest, sets
+// the mocker annotation, and strips every GPU field so the applied spec is
+// genuinely CPU-only. Both happen via the unstructured API, then it re-serializes.
+//
+// Setting the annotation handles all the fixture-evolution cases for free:
+// SetAnnotations creates metadata.annotations if absent, merges into an existing
+// block, and overwrites (no duplicate) if the key is already present.
+//
+// Stripping the GPU fields (spec.resources.gpu, spec.scaling.prefill.gpu,
+// spec.scaling.decode.gpu) is what makes this test meaningful: the shared
+// fixtures carry gpu.count so the GPU lane can reuse them, but the mocker backend
+// is GPU-less. Removing the counts forces the request through the same CPU-only
+// path real users hit, so the webhook AND reconciler mocker bypasses are actually
+// exercised end-to-end — not satisfied trivially by a leftover gpu.count.
 func injectMockerAnnotation(t *testing.T, manifest string) string {
 	t.Helper()
 
@@ -179,6 +188,11 @@ func injectMockerAnnotation(t *testing.T, manifest string) string {
 	}
 	ann[mockerAnnotationKey] = mockerAnnotationValue
 	obj.SetAnnotations(ann)
+
+	// Drop GPU requests everywhere so the mocker spec is CPU-only.
+	unstructured.RemoveNestedField(obj.Object, "spec", "resources", "gpu")
+	unstructured.RemoveNestedField(obj.Object, "spec", "scaling", "prefill", "gpu")
+	unstructured.RemoveNestedField(obj.Object, "spec", "scaling", "decode", "gpu")
 
 	out, err := yaml.Marshal(obj.Object)
 	if err != nil {

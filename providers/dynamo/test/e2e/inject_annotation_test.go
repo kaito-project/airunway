@@ -83,4 +83,45 @@ func TestInjectMockerAnnotation(t *testing.T) {
 			t.Errorf("metadata fields lost: name=%q ns=%q", obj.GetName(), obj.GetNamespace())
 		}
 	})
+
+	t.Run("strips GPU fields so the spec is CPU-only", func(t *testing.T) {
+		in := `apiVersion: airunway.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: gpu
+spec:
+  resources:
+    gpu:
+      count: 1
+  scaling:
+    prefill:
+      replicas: 1
+      gpu:
+        count: 1
+    decode:
+      replicas: 1
+      gpu:
+        count: 1
+`
+		out := injectMockerAnnotation(t, in)
+
+		var obj unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(out), &obj.Object); err != nil {
+			t.Fatalf("failed to re-parse output: %v", err)
+		}
+		for _, path := range [][]string{
+			{"spec", "resources", "gpu"},
+			{"spec", "scaling", "prefill", "gpu"},
+			{"spec", "scaling", "decode", "gpu"},
+		} {
+			if _, found, _ := unstructured.NestedFieldNoCopy(obj.Object, path...); found {
+				t.Errorf("expected %v to be stripped, but it is still present", path)
+			}
+		}
+		// Sibling fields under the same parents must survive. (yaml decodes
+		// numbers as float64, so compare without asserting the Go integer type.)
+		if _, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "scaling", "prefill", "replicas"); !found {
+			t.Errorf("prefill.replicas was lost when stripping prefill.gpu")
+		}
+	})
 }
