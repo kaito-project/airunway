@@ -186,7 +186,8 @@ func TestTransformMockerAggregated(t *testing.T) {
 		}
 	}
 
-	// No GPU, but small CPU/memory requests+limits (Burstable, not BestEffort).
+	// No GPU, but small CPU/memory requests+limits. Equal requests and limits
+	// make the pod Guaranteed QoS (the point is only to avoid BestEffort).
 	res, _ := worker["resources"].(map[string]interface{})
 	requests, _ := res["requests"].(map[string]interface{})
 	limits, _ := res["limits"].(map[string]interface{})
