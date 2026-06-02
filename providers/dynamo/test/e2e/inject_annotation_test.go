@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"fmt"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -42,16 +43,31 @@ func TestInjectMockerAnnotation(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"bare metadata, no annotations": "" +
-			"apiVersion: airunway.ai/v1alpha1\nkind: ModelDeployment\n" +
-			"metadata:\n  name: x\n  namespace: default\nspec:\n  model:\n    id: m\n",
-		"existing annotations block": "" +
-			"apiVersion: airunway.ai/v1alpha1\nkind: ModelDeployment\n" +
-			"metadata:\n  name: x\n  annotations:\n    foo/bar: baz\nspec: {}\n",
-		"key already present": "" +
-			"apiVersion: airunway.ai/v1alpha1\nkind: ModelDeployment\n" +
-			"metadata:\n  annotations:\n    " + mockerAnnotationKey + ": " + mockerAnnotationValue +
-			"\n  name: x\nspec: {}\n",
+		"bare metadata, no annotations": `apiVersion: airunway.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: x
+  namespace: default
+spec:
+  model:
+    id: m
+`,
+		"existing annotations block": `apiVersion: airunway.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: x
+  annotations:
+    foo/bar: baz
+spec: {}
+`,
+		"key already present": fmt.Sprintf(`apiVersion: airunway.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  annotations:
+    %s: %s
+  name: x
+spec: {}
+`, mockerAnnotationKey, mockerAnnotationValue),
 	}
 
 	for name, in := range cases {
@@ -64,8 +80,15 @@ func TestInjectMockerAnnotation(t *testing.T) {
 	}
 
 	t.Run("preserves sibling annotations and metadata fields", func(t *testing.T) {
-		in := "apiVersion: airunway.ai/v1alpha1\nkind: ModelDeployment\n" +
-			"metadata:\n  name: keepme\n  namespace: default\n  annotations:\n    foo/bar: baz\nspec: {}\n"
+		in := `apiVersion: airunway.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: keepme
+  namespace: default
+  annotations:
+    foo/bar: baz
+spec: {}
+`
 		out := injectMockerAnnotation(t, in)
 
 		var obj unstructured.Unstructured
