@@ -12,7 +12,7 @@ import {
   estimatePerChatTokensPerSec,
   estimateConcurrentCapacity,
 } from '../services/gpuPerformance';
-import type { GpuThroughputEstimate } from '@airunway/shared';
+import type { GpuThroughputEstimate, NodePoolInfo } from '@airunway/shared';
 import logger from '../lib/logger';
 import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
 
@@ -49,9 +49,23 @@ interface GpuEstimateSelection {
 }
 
 /**
+ * GPUs hosted on a single node of this pool, i.e. the most GPUs that can back a
+ * single replica (tensor-parallel group). Pools report `gpuCount` as the total
+ * across all nodes, so divide by `nodeCount` (assuming homogeneous pools).
+ */
+function perNodeGpuCount(pool: NodePoolInfo): number {
+  if (!pool.nodeCount || pool.nodeCount <= 0) return pool.gpuCount || 1;
+  return Math.max(1, Math.floor(pool.gpuCount / pool.nodeCount));
+}
+
+/**
  * Pick the node pool / GPU model to base the throughput estimate on. Prefers a
  * pool matching an explicitly-requested gpuModel, else the highest-VRAM GPU
  * pool. Returns undefined when no pool maps to a GPU we have specs for.
+ *
+ * `maxContiguous` is the per-node GPU count of the selected pool (not a
+ * cluster-wide or pool-total value) so it correctly bounds the per-replica
+ * tensor-parallel size.
  */
 function selectGpuForEstimate(
   capacity: Awaited<ReturnType<typeof kubernetesService.getDetailedClusterGpuCapacity>>,
@@ -59,18 +73,22 @@ function selectGpuForEstimate(
 ): GpuEstimateSelection | undefined {
   const pools = (capacity.nodePools || []).filter((p) => p.gpuModel);
 
-  // 1. Explicit request: resolve directly from the GPU spec table.
+  // 1. Explicit request: only honor it if a cluster pool actually runs that GPU
+  //    model. Otherwise fall through so we never estimate for absent hardware.
   if (requestedGpuModel) {
-    const info = getGpuInfo(requestedGpuModel);
-    if (info) {
+    const requestedNormalized = normalizeGpuModel(requestedGpuModel);
+    const matchedPool = pools.find(
+      (p) => normalizeGpuModel(p.gpuModel as string) === requestedNormalized
+    );
+    const info = matchedPool ? getGpuInfo(matchedPool.gpuModel as string) : undefined;
+    if (matchedPool && info) {
+      const perNode = perNodeGpuCount(matchedPool);
       return {
-        resolvedGpuModel: normalizeGpuModel(requestedGpuModel),
+        resolvedGpuModel: requestedNormalized,
         perGpuMemoryGb: info.memoryGb,
         memBandwidthGBs: info.memBandwidthGBs,
-        capacityLabel: capacity.maxContiguousAvailable
-          ? `${capacity.maxContiguousAvailable}x${info.memoryGb} GB`
-          : undefined,
-        maxContiguous: capacity.maxContiguousAvailable || capacity.maxNodeGpuCapacity || 1,
+        capacityLabel: `${perNode}x${info.memoryGb} GB`,
+        maxContiguous: perNode,
       };
     }
   }
@@ -81,12 +99,13 @@ function selectGpuForEstimate(
     const info = getGpuInfo(pool.gpuModel as string);
     if (!info) continue;
     if (!best || info.memoryGb > best.perGpuMemoryGb) {
+      const perNode = perNodeGpuCount(pool);
       best = {
         resolvedGpuModel: normalizeGpuModel(pool.gpuModel as string),
         perGpuMemoryGb: info.memoryGb,
         memBandwidthGBs: info.memBandwidthGBs,
-        capacityLabel: `${pool.gpuCount}x${info.memoryGb} GB`,
-        maxContiguous: capacity.maxContiguousAvailable || pool.gpuCount || 1,
+        capacityLabel: `${perNode}x${info.memoryGb} GB`,
+        maxContiguous: perNode,
       };
     }
   }

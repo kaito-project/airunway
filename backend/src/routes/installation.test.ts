@@ -1080,4 +1080,91 @@ describe('Gateway Installation Routes', () => {
       expect(res.status).toBe(500);
     });
   });
+
+  // ==========================================================================
+  // GET /api/installation/gpu-throughput
+  // ==========================================================================
+  describe('GET /api/installation/gpu-throughput', () => {
+    // A cluster with two pools: a multi-node A100 pool (8 GPUs across 4 nodes =
+    // 2 per node) and a single-node H100 pool (8 GPUs on 1 node = 8 per node).
+    function mockCapacity() {
+      return {
+        totalGpus: 16,
+        allocatedGpus: 0,
+        availableGpus: 16,
+        maxContiguousAvailable: 8,
+        maxNodeGpuCapacity: 8,
+        gpuNodeCount: 5,
+        totalMemoryGb: 1280,
+        nodePools: [
+          { name: 'a100-pool', gpuCount: 8, nodeCount: 4, availableGpus: 8, gpuModel: 'NVIDIA-A100-SXM4-80GB' },
+          { name: 'h100-pool', gpuCount: 8, nodeCount: 1, availableGpus: 8, gpuModel: 'NVIDIA-H100-80GB-HBM3' },
+        ],
+      };
+    }
+
+    test('bounds tpSize and label to the requested pool per-node GPU count', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      // A100 pool hosts 2 GPUs per node, so a requested tpSize=8 is clamped to 2.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&tpSize=8',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.gpuModel).toBe('A100-80GB');
+      expect(data.tpSize).toBe(2);
+      expect(data.capacityLabel).toBe('2x80 GB');
+    });
+
+    test('ignores a requested gpuModel absent from the cluster and falls back to highest-VRAM pool', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      // H200 is not in any pool; should fall through to the highest-VRAM pool.
+      // A100 and H100 are both 80GB; the first-seen (A100) wins the >, so the
+      // resolved model is whichever pool has strictly greater VRAM — here equal,
+      // so the first pool (A100) is kept. Either way it must be a real pool model.
+      const res = await app.request('/api/installation/gpu-throughput?gpuModel=H200');
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(['A100-80GB', 'H100-80GB']).toContain(data.gpuModel);
+      // maxContiguous comes from the selected pool's per-node count (2 for A100).
+      expect(data.tpSize).toBeLessThanOrEqual(8);
+    });
+
+    test('uses per-node count for the fallback (no explicit gpuModel) path', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?tpSize=8');
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Highest-VRAM pool selected (A100, first of the equal-VRAM pools): 2/node.
+      expect(data.capacityLabel).toBe('2x80 GB');
+      expect(data.tpSize).toBe(2);
+    });
+
+    test('returns 404 when no pool maps to a known GPU spec', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => ({
+          totalGpus: 0,
+          allocatedGpus: 0,
+          availableGpus: 0,
+          maxContiguousAvailable: 0,
+          maxNodeGpuCapacity: 0,
+          gpuNodeCount: 0,
+          totalMemoryGb: 0,
+          nodePools: [],
+        })),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?gpuModel=A100-80GB');
+      expect(res.status).toBe(404);
+    });
+  });
 });
