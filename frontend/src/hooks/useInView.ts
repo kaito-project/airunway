@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
  * Returns a ref to attach to an element and a boolean that flips to true the
  * first time the element scrolls into the viewport. Used to defer expensive
  * per-card work (e.g. throughput estimates that fetch HF config.json) until a
- * card is actually visible. Once seen, it stays true (no fl/unflickering).
+ * card is actually visible. Once seen, it stays true (no flickering).
  */
 export function useInView<T extends Element = HTMLDivElement>(
   options?: IntersectionObserverInit

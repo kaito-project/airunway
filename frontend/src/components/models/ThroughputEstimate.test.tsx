@@ -33,6 +33,23 @@ describe('ThroughputEstimate', () => {
     expect(screen.queryByText(/concurrent/)).not.toBeInTheDocument();
   });
 
+  it('shows a does-not-fit warning when the model has no room for KV cache', () => {
+    render(
+      <ThroughputEstimate
+        estimate={{
+          ...base,
+          concurrentSequences: 0,
+          aggregateTokensPerSec: 0,
+          doesNotFit: true,
+        }}
+      />
+    );
+    expect(screen.getByText(/Does not fit/)).toBeInTheDocument();
+    // The misleading per-chat / concurrency numbers must not be shown.
+    expect(screen.queryByText(/tok\/s per chat/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/concurrent/)).not.toBeInTheDocument();
+  });
+
   it('renders a loading state', () => {
     render(<ThroughputEstimate isLoading />);
     expect(screen.getByText(/Estimating speed/)).toBeInTheDocument();

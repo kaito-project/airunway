@@ -30,6 +30,13 @@ interface ProviderHelmChartDetails {
 /** Default context length (tokens) assumed when a model doesn't specify one. */
 const DEFAULT_CONTEXT_LEN = 4096;
 
+/**
+ * Cap applied to a model's advertised max context length when used to size KV
+ * cache. Some models advertise very large windows (128K–1M); serving rarely uses
+ * the full window, and using it would collapse concurrency estimates to ~zero.
+ */
+const MAX_INFERRED_CONTEXT_LEN = 32768;
+
 /** Query schema for GET /gpu-throughput. */
 const gpuThroughputQuerySchema = z.object({
   modelId: z.string().min(1).optional(),
@@ -300,18 +307,27 @@ const installation = new Hono()
       memBandwidthGBs,
     });
 
-    const effectiveContextLen = contextLen ?? DEFAULT_CONTEXT_LEN;
-
     // Architecture details (config.json) are needed for the concurrency number;
     // degrade gracefully to per-chat-only when unavailable.
     const arch = modelId ? await huggingFaceService.getModelArchitecture(modelId, hfToken) : undefined;
+
+    // Resolve the context length used for KV sizing *after* fetching arch, so
+    // HuggingFace models (which carry no explicit contextLen) use their real
+    // advertised window (capped) rather than the 4K default. An explicit query
+    // param always wins; otherwise fall back to the model's max, capped.
+    const resolvedContextLen = contextLen
+      ? contextLen
+      : arch?.maxPositionEmbeddings
+        ? Math.min(arch.maxPositionEmbeddings, MAX_INFERRED_CONTEXT_LEN)
+        : DEFAULT_CONTEXT_LEN;
+
     const capacityResult = arch
       ? estimateConcurrentCapacity({
           paramCount,
           arch,
           perGpuMemoryGb,
           tpSize: effectiveTpSize,
-          contextLen: effectiveContextLen,
+          contextLen: resolvedContextLen,
           bytesPerWeight,
           perChatTokensPerSec,
         })
@@ -325,9 +341,12 @@ const installation = new Hono()
       perGpuMemoryGb,
       memBandwidthGBs,
       tpSize: effectiveTpSize,
-      contextLen: effectiveContextLen,
+      contextLen: resolvedContextLen,
       capacityLabel,
       lowConfidence: !capacityResult,
+      // High-confidence "model does not fit": arch was available and KV budget
+      // left no room for even a single sequence.
+      doesNotFit: capacityResult ? capacityResult.concurrentSequences === 0 : undefined,
     };
     return c.json(estimate);
   })

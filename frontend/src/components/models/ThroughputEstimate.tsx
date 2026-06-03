@@ -1,5 +1,5 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Zap } from 'lucide-react';
+import { AlertTriangle, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GpuThroughputEstimate } from '@airunway/shared';
 
@@ -49,7 +49,36 @@ export function ThroughputEstimate({ estimate, isLoading, className }: Throughpu
     tpSize,
     contextLen,
     lowConfidence,
+    doesNotFit,
   } = estimate;
+
+  // High-confidence "does not fit": model weights plus reserved headroom exceed
+  // the GPU's VRAM, leaving no room for KV cache. Surface this explicitly rather
+  // than showing a misleading per-chat speed.
+  if (!lowConfidence && doesNotFit) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                'flex items-center gap-2 text-sm text-destructive',
+                className
+              )}
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span className="truncate">Does not fit — no room for KV cache</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="max-w-xs">
+              {`This model does not fit on ${gpuModel} (assuming ${tpSize} GPU${tpSize > 1 ? 's' : ''} per replica): the model weights plus reserved memory headroom exceed the available VRAM, leaving no room for the KV cache. It cannot be served on this GPU/topology — try a larger GPU, more GPUs per replica, or a smaller / more heavily quantized model.`}
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
 
   const hasConcurrency =
     !lowConfidence && typeof concurrentSequences === 'number' && concurrentSequences > 0;

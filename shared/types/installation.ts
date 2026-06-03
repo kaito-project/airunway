@@ -132,6 +132,12 @@ export interface GpuThroughputEstimate {
   capacityLabel?: string;
   /** True when architecture data was unavailable, so only perChat is meaningful. */
   lowConfidence: boolean;
+  /**
+   * True (high-confidence) when model weights plus reserved headroom exceed the
+   * GPU's available VRAM, leaving no room for KV cache — the model does not fit
+   * and cannot be served on this GPU/topology. Distinct from lowConfidence.
+   */
+  doesNotFit?: boolean;
 }
 
 /**

@@ -3,6 +3,7 @@ import { PINNED_GAIE_VERSION } from '@airunway/shared';
 import app from '../hono-app';
 import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
+import { huggingFaceService } from '../services/huggingface';
 import { mockServiceMethod } from '../test/helpers';
 import {
   mockInferenceProviderConfig,
@@ -1165,6 +1166,69 @@ describe('Gateway Installation Routes', () => {
 
       const res = await app.request('/api/installation/gpu-throughput?gpuModel=A100-80GB');
       expect(res.status).toBe(404);
+    });
+
+    test('flags doesNotFit when model weights exceed available VRAM', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        // Valid architecture so capacity is high-confidence (not lowConfidence).
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      // ~200B params in bf16 (2 bytes) → ~400GB weights; even split across the
+      // A100 pool's 2 GPUs/node leaves ~200GB/GPU, far exceeding 80GB VRAM.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&modelId=org/huge&paramCount=200000000000&quantization=bf16',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.doesNotFit).toBe(true);
+      expect(data.concurrentSequences).toBe(0);
+      expect(data.lowConfidence).toBe(false);
+    });
+
+    test('caps inferred context length at the model max when no contextLen is provided', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        // Model advertises a 1M-token window but caller sends no contextLen.
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+          maxPositionEmbeddings: 1_000_000,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/long-ctx&paramCount=8000000000&quantization=bf16',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Falls back to maxPositionEmbeddings but capped at MAX_INFERRED_CONTEXT_LEN (32768).
+      expect(data.contextLen).toBe(32768);
+    });
+
+    test('respects an explicit contextLen query param over the model max', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+          maxPositionEmbeddings: 1_000_000,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/long-ctx&paramCount=8000000000&quantization=bf16&contextLen=8192',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.contextLen).toBe(8192);
     });
   });
 });
