@@ -307,8 +307,13 @@ class HuggingFaceService {
   async getModelArchitecture(modelId: string, hfToken?: string): Promise<ModelArchitecture | undefined> {
     const cacheKey = architectureCacheKey(modelId, hfToken);
     const cached = architectureCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.value;
+    if (cached) {
+      if (cached.expiresAt > Date.now()) {
+        return cached.value;
+      }
+      // Drop the stale entry so the cache stays bounded by "used within TTL"
+      // rather than growing unbounded across many distinct modelIds/tokens.
+      architectureCache.delete(cacheKey);
     }
 
     const url = `${HF_BASE_URL}/${modelId}/resolve/main/config.json`;

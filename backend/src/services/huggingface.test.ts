@@ -234,4 +234,74 @@ describe('HuggingFaceService', () => {
       ).rejects.toThrow();
     });
   });
+
+  describe('getModelArchitecture', () => {
+    const configJson = JSON.stringify({
+      num_hidden_layers: 80,
+      num_attention_heads: 64,
+      num_key_value_heads: 8,
+      head_dim: 128,
+      max_position_embeddings: 8192,
+      torch_dtype: 'bfloat16',
+    });
+
+    test('parses architecture from config.json', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('meta-llama/Meta-Llama-3-70B');
+
+      expect(arch).toEqual({
+        numLayers: 80,
+        numKvHeads: 8,
+        headDim: 128,
+        maxPositionEmbeddings: 8192,
+        torchDtype: 'bfloat16',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('serves a cached result without re-fetching while fresh', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      await huggingFaceService.getModelArchitecture('org/model');
+      await huggingFaceService.getModelArchitecture('org/model');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('drops the expired entry and re-fetches after the TTL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      const realNow = Date.now;
+      const base = realNow();
+      try {
+        // First call caches with expiresAt = base + 1h.
+        Date.now = () => base;
+        await huggingFaceService.getModelArchitecture('org/model');
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        // Advance past the 1-hour TTL: entry is expired, must re-fetch.
+        Date.now = () => base + 60 * 60 * 1000 + 1;
+        await huggingFaceService.getModelArchitecture('org/model');
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    test('returns undefined on a non-ok response', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response('not found', { status: 404 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/missing');
+      expect(arch).toBeUndefined();
+    });
+  });
 });
