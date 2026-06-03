@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Allow one concurrent deployment in flight; don't cancel in-progress deploys
+# from earlier main pushes (those are real publishes we want to complete).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build website
@@ -41,12 +47,12 @@ jobs:
       - name: Build website
         run: bun run build
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload Pages artifact
+        # GitHub Pages needs the artifact uploaded under the specific name
+        # "github-pages" so deploy-pages picks it up.
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          name: website-build
           path: website/build
-          retention-days: 7
 
   deploy:
     name: Deploy to GitHub Pages
@@ -54,21 +60,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Only publish on push to main on the canonical repo. PR builds verify the
-    # build but never deploy. The contents: write permission is scoped to this
-    # job alone so PR builds keep a read-only token.
+    # build but never deploy. Permissions scoped to this job alone so PR
+    # builds keep a read-only token.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && github.repository == 'kaito-project/airunway'
     permissions:
-      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        with:
-          name: website-build
-          path: build
-
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
