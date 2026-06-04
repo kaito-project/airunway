@@ -65,6 +65,16 @@ export function useGpuThroughput(params: ThroughputParams, options?: { enabled?:
     queryFn: () => gpuOperatorApi.getThroughput(params, hfToken ?? undefined),
     enabled,
     staleTime: 5 * 60 * 1000, // estimates are stable; cache for 5 minutes
+    // A 404 means no cluster GPU pool maps to a known spec — a deterministic
+    // "no estimate" state, not a transient error. Don't retry any client error
+    // (4xx); keep a small retry budget for transient server/network failures.
+    retry: (failureCount, error) => {
+      const statusCode = (error as { statusCode?: number }).statusCode
+      if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+        return false
+      }
+      return failureCount < 2
+    },
   })
 }
 
