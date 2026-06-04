@@ -1,5 +1,4 @@
-import type { Model, ModelArchitecture } from '@airunway/shared';
-import { parseParameterCountFromName } from './modelCompatibility';
+import type { ModelArchitecture } from '@airunway/shared';
 
 /**
  * Offline inference-throughput estimator.
@@ -65,31 +64,6 @@ export function bytesPerKvFor(dtype?: string): number {
     default:
       return 2;
   }
-}
-
-/**
- * Resolve a numeric parameter count for a model, trying the most accurate
- * source first and falling back to parsing the name / size string.
- * Returns undefined for unknown / unparseable models (e.g. MoE strings).
- */
-export function resolveParamCount(
-  model: Pick<Model, 'parameterCount' | 'parameters' | 'id' | 'size'>
-): number | undefined {
-  if (typeof model.parameterCount === 'number' && model.parameterCount > 0) {
-    return model.parameterCount;
-  }
-  if (typeof model.parameters === 'number' && model.parameters > 0) {
-    return model.parameters;
-  }
-  if (model.id) {
-    const fromId = parseParameterCountFromName(model.id);
-    if (fromId) return fromId;
-  }
-  if (model.size) {
-    const fromSize = parseParameterCountFromName(model.size);
-    if (fromSize) return fromSize;
-  }
-  return undefined;
 }
 
 export interface PerChatInput {

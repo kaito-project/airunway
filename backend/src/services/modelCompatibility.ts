@@ -1,4 +1,5 @@
 import type { Engine, HfApiModelResult, HfModelSearchResult } from '@airunway/shared';
+import { parseParameterCountFromName } from '@airunway/shared';
 import { estimateGpuMemory, formatGpuMemory } from './gpuValidation';
 
 /**
@@ -521,40 +522,6 @@ export function getIncompatibilityReason(
   
   if (!supportedEngines || supportedEngines.length === 0) {
     return `Architecture "${architectures[0]}" is not supported by any engine`;
-  }
-  
-  return undefined;
-}
-
-/**
- * Parse parameter count from model name/ID
- * Handles common naming conventions like "8B", "70B", "1.5B", "0.6B", "405B", "7b", etc.
- * 
- * @param modelId - Model ID or name (e.g., "meta-llama/Llama-3.1-8B-Instruct")
- * @returns Parameter count or undefined if not parseable
- */
-export function parseParameterCountFromName(modelId: string): number | undefined {
-  // Match patterns like "8B", "70B", "1.5B", "0.6B", "405b", "7B", "1B" etc.
-  // Must be preceded by a word boundary, hyphen, or underscore
-  // Case insensitive
-  const match = modelId.match(/(?:^|[-_./])(\d+(?:\.\d+)?)\s*[Bb](?:$|[-_./]|illion)?/);
-  
-  if (match) {
-    const billions = parseFloat(match[1]);
-    if (!isNaN(billions) && billions > 0 && billions < 10000) {
-      // Convert billions to actual parameter count
-      return billions * 1_000_000_000;
-    }
-  }
-  
-  // Also try matching "M" for millions (e.g., "125M", "350M")
-  const millionMatch = modelId.match(/(?:^|[-_./])(\d+(?:\.\d+)?)\s*[Mm](?:$|[-_./]|illion)?/);
-  
-  if (millionMatch) {
-    const millions = parseFloat(millionMatch[1]);
-    if (!isNaN(millions) && millions > 0 && millions < 10000) {
-      return millions * 1_000_000;
-    }
   }
   
   return undefined;

@@ -1,27 +1,6 @@
 import type { DetailedClusterCapacity, Model } from '@airunway/shared';
+import { resolveModelParamCount } from '@airunway/shared';
 import type { ThroughputParams } from '@/hooks/useGpuOperator';
-
-/** Parse a parameter count (absolute) from a model's fields or size string. */
-export function resolveModelParamCount(
-  model: Partial<Pick<Model, 'parameterCount' | 'parameters' | 'size'>> & Pick<Model, 'id'>
-): number | undefined {
-  if (typeof model.parameterCount === 'number' && model.parameterCount > 0) {
-    return model.parameterCount;
-  }
-  if (typeof model.parameters === 'number' && model.parameters > 0) {
-    return model.parameters;
-  }
-  const text = `${model.size ?? ''} ${model.id ?? ''}`;
-  const bMatch = text.match(/(?:^|[-_./\s])(\d+(?:\.\d+)?)\s*B(?:$|[-_./\s])/i);
-  if (bMatch) {
-    return parseFloat(bMatch[1]) * 1_000_000_000;
-  }
-  const mMatch = text.match(/(?:^|[-_./\s])(\d+(?:\.\d+)?)\s*M(?:$|[-_./\s])/i);
-  if (mMatch) {
-    return parseFloat(mMatch[1]) * 1_000_000;
-  }
-  return undefined;
-}
 
 /**
  * Whether the cluster has any GPU pool we could estimate on. Used purely as a

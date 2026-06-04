@@ -1,35 +1,35 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  resolveParamCount,
   bytesPerWeightFor,
   bytesPerKvFor,
   estimatePerChatTokensPerSec,
   estimateConcurrentCapacity,
 } from './gpuPerformance';
+import { resolveModelParamCount } from '@airunway/shared';
 import { gpuSupportsFp8 } from './costEstimation';
 import type { ModelArchitecture } from '@airunway/shared';
 
-describe('resolveParamCount', () => {
+describe('resolveModelParamCount', () => {
   test('prefers explicit parameterCount', () => {
-    expect(resolveParamCount({ parameterCount: 8_000_000_000, id: 'x/y-3B' })).toBe(8_000_000_000);
+    expect(resolveModelParamCount({ parameterCount: 8_000_000_000, id: 'x/y-3B' })).toBe(8_000_000_000);
   });
 
   test('falls back to parameters', () => {
-    expect(resolveParamCount({ parameters: 7_000_000_000, id: 'x/y' })).toBe(7_000_000_000);
+    expect(resolveModelParamCount({ parameters: 7_000_000_000, id: 'x/y' })).toBe(7_000_000_000);
   });
 
   test('parses from model id', () => {
-    expect(resolveParamCount({ id: 'meta-llama/Meta-Llama-3-70B' })).toBe(70_000_000_000);
+    expect(resolveModelParamCount({ id: 'meta-llama/Meta-Llama-3-70B' })).toBe(70_000_000_000);
   });
 
   test('parses from size string', () => {
-    expect(resolveParamCount({ id: 'x/curated', size: '3.8B' })).toBe(3_800_000_000);
-    expect(resolveParamCount({ id: 'x/curated', size: '0.6B' })).toBe(600_000_000);
+    expect(resolveModelParamCount({ id: 'x/curated', size: '3.8B' })).toBe(3_800_000_000);
+    expect(resolveModelParamCount({ id: 'x/curated', size: '0.6B' })).toBe(600_000_000);
   });
 
   test('returns undefined for unknown / unparseable', () => {
-    expect(resolveParamCount({ id: 'x/mystery', size: 'Unknown' })).toBeUndefined();
-    expect(resolveParamCount({ id: 'org/model' })).toBeUndefined();
+    expect(resolveModelParamCount({ id: 'x/mystery', size: 'Unknown' })).toBeUndefined();
+    expect(resolveModelParamCount({ id: 'org/model' })).toBeUndefined();
   });
 });
 
