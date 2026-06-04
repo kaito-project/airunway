@@ -15,8 +15,8 @@ interface ModelCardProps {
   gpuCapacityGb?: number
   gpuCount?: number
   gpuCapacityLabel?: string
-  /** GPU model name (e.g. "H100-80GB") used for the throughput estimate. */
-  gpuModel?: string
+  /** Whether the cluster has any GPU pool to estimate on (backend picks which). */
+  gpuPresent?: boolean
 }
 
 /**
@@ -60,7 +60,7 @@ function estimateGgufRamGb(sizeStr?: string): number | undefined {
   return Math.ceil(billions * 0.6 + 2)
 }
 
-export function ModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuModel }: ModelCardProps) {
+export function ModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuPresent }: ModelCardProps) {
   const navigate = useNavigate()
 
   const handleDeploy = () => {
@@ -74,7 +74,7 @@ export function ModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gp
   // Lazy throughput estimate: only fetch once the card scrolls into view, and
   // skip CPU-only models (no GPU throughput to estimate).
   const { ref: inViewRef, inView } = useInView<HTMLDivElement>()
-  const throughputParams = !isCpuModel ? buildThroughputParamsForGpu(model, gpuModel) : undefined
+  const throughputParams = !isCpuModel ? buildThroughputParamsForGpu(model, gpuPresent) : undefined
   const { data: throughput, isLoading: throughputLoading } = useGpuThroughput(
     throughputParams ?? {},
     { enabled: inView && !!throughputParams }

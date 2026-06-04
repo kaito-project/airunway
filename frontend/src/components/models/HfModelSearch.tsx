@@ -14,10 +14,10 @@ interface HfModelSearchProps {
   gpuCapacityGb?: number;
   gpuCount?: number;
   gpuCapacityLabel?: string;
-  gpuModel?: string;
+  gpuPresent?: boolean;
 }
 
-export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuModel }: HfModelSearchProps) {
+export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuPresent }: HfModelSearchProps) {
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const limit = 20;
@@ -137,7 +137,7 @@ export function HfModelSearch({ onLoginClick, gpuCapacityGb, gpuCount, gpuCapaci
                 gpuCapacityGb={maxGpuMemoryGb}
                 gpuCount={effectiveGpuCount}
                 gpuCapacityLabel={effectiveCapacityLabel}
-                gpuModel={gpuModel}
+                gpuPresent={gpuPresent}
               />
             ))}
           </div>

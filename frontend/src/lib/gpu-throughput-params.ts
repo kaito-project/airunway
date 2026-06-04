@@ -34,17 +34,6 @@ export function hasEstimableGpu(capacity?: DetailedClusterCapacity): boolean {
   return (capacity?.nodePools ?? []).some((p) => p.gpuModel);
 }
 
-/**
- * @deprecated Prefer `hasEstimableGpu`. Retained for the catalog pages that pass
- * a `gpuModel` prop down to cards; the value is now used only as a presence
- * signal and is not forwarded to the backend estimate.
- */
-export function pickGpuModel(capacity?: DetailedClusterCapacity): string | undefined {
-  const pools = (capacity?.nodePools ?? []).filter((p) => p.gpuModel);
-  if (pools.length === 0) return undefined;
-  return pools.reduce((best, p) => (p.gpuCount > best.gpuCount ? p : best)).gpuModel;
-}
-
 /** Optional precision overrides for the throughput estimate. */
 export interface QuantOverrides {
   /** Weight quantization (affects model memory footprint + decode speed). */
@@ -71,7 +60,7 @@ export interface QuantOverrides {
 export function buildThroughputParamsForGpu(
   model: Partial<Pick<Model, 'size' | 'parameterCount' | 'parameters' | 'contextLength' | 'minGpus'>> &
     Pick<Model, 'id'>,
-  gpuPresent?: string | boolean,
+  gpuPresent?: boolean,
   overrides?: QuantOverrides
 ): ThroughputParams | undefined {
   const paramCount = resolveModelParamCount(model);

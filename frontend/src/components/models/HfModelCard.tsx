@@ -15,8 +15,8 @@ interface HfModelCardProps {
   gpuCapacityGb?: number;
   gpuCount?: number;
   gpuCapacityLabel?: string;
-  /** GPU model name (e.g. "H100-80GB") used for the throughput estimate. */
-  gpuModel?: string;
+  /** Whether the cluster has any GPU pool to estimate on (backend picks which). */
+  gpuPresent?: boolean;
 }
 
 /**
@@ -32,7 +32,7 @@ function formatCount(count: number): string {
   return count.toString();
 }
 
-export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuModel }: HfModelCardProps) {
+export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, gpuPresent }: HfModelCardProps) {
   const navigate = useNavigate();
 
   const handleDeploy = () => {
@@ -44,7 +44,7 @@ export function HfModelCard({ model, gpuCapacityGb, gpuCount, gpuCapacityLabel, 
   const { ref: inViewRef, inView } = useInView<HTMLDivElement>();
   const throughputParams = buildThroughputParamsForGpu(
     { id: model.id, parameterCount: model.parameterCount },
-    gpuModel
+    gpuPresent
   );
   const { data: throughput, isLoading: throughputLoading } = useGpuThroughput(
     throughputParams ?? {},

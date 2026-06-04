@@ -10,7 +10,7 @@ import { BookMarked, Search, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Engine } from '@airunway/shared'
 import { getGpuFitCapacityDisplay } from '@/lib/gpu-fit-capacity'
-import { pickGpuModel } from '@/lib/gpu-throughput-params'
+import { hasEstimableGpu } from '@/lib/gpu-throughput-params'
 
 type Tab = 'curated' | 'huggingface'
 
@@ -22,7 +22,7 @@ export function ModelsPage() {
   const [selectedEngines, setSelectedEngines] = useState<Engine[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('curated')
   const gpuFitCapacity = getGpuFitCapacityDisplay(gpuCapacity)
-  const gpuModel = pickGpuModel(detailedCapacity)
+  const gpuPresent = hasEstimableGpu(detailedCapacity)
 
   const filteredModels = useMemo(() => {
     if (!models) return []
@@ -146,7 +146,7 @@ export function ModelsPage() {
             gpuCapacityGb={gpuCapacity?.totalMemoryGb}
             gpuCount={gpuFitCapacity.gpuCount}
             gpuCapacityLabel={gpuFitCapacity.capacityLabel}
-            gpuModel={gpuModel}
+            gpuPresent={gpuPresent}
           />
         </>
       )}
@@ -157,7 +157,7 @@ export function ModelsPage() {
           gpuCapacityGb={gpuCapacity?.totalMemoryGb}
           gpuCount={gpuFitCapacity.gpuCount}
           gpuCapacityLabel={gpuFitCapacity.capacityLabel}
-          gpuModel={gpuModel}
+          gpuPresent={gpuPresent}
         />
       )}
     </div>
