@@ -10,6 +10,7 @@ import { huggingFaceService, isValidHfRepoId } from '../services/huggingface';
 import {
   bytesPerWeightFor,
   bytesPerKvFor,
+  deriveTpSizeToFitWeights,
   estimatePerChatTokensPerSec,
   estimateConcurrentCapacity,
 } from '../services/gpuPerformance';
@@ -288,9 +289,25 @@ const installation = new Hono()
     }
     const { resolvedGpuModel, perGpuMemoryGb, memBandwidthGBs, capacityLabel, maxContiguous } = selection;
 
-    // TP size = GPUs per replica, bounded by what a single node can host.
-    const effectiveTpSize = Math.max(1, Math.min(tpSize ?? 1, maxContiguous || tpSize || 1));
     const bytesPerWeight = bytesPerWeightFor(quantization);
+
+    // TP size = GPUs per replica, bounded by what a single node can host. An
+    // explicit request (deployment form, curated cards carrying minGpus) is
+    // honored as-is. When omitted — notably HuggingFace search cards, whose
+    // model objects carry no minGpus hint — derive the smallest TP size whose
+    // weight shard still leaves room for a KV cache, so a large model is
+    // estimated at a topology that fits (e.g. tp=2 on 80 GB) instead of
+    // defaulting to tp=1 and spuriously reporting "does not fit" while the
+    // curated/Deploy tabs show full capacity for the same model and cluster.
+    const requestedTpSize =
+      tpSize ??
+      deriveTpSizeToFitWeights({
+        paramCount: paramCount ?? 0,
+        bytesPerWeight,
+        perGpuMemoryGb,
+        maxContiguous,
+      });
+    const effectiveTpSize = Math.max(1, Math.min(requestedTpSize, maxContiguous || requestedTpSize || 1));
 
     // KV-cache precision is independent of weight quantization. Default to
     // fp16/bf16 (2 bytes); an explicit fp8 KV cache is only realistic on Hopper,

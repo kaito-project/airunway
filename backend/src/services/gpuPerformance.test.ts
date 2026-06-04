@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   bytesPerWeightFor,
   bytesPerKvFor,
+  deriveTpSizeToFitWeights,
   estimatePerChatTokensPerSec,
   estimateConcurrentCapacity,
   TP_DECODE_EFFICIENCY,
@@ -57,6 +58,125 @@ describe('bytesPerKvFor', () => {
     expect(bytesPerKvFor('fp16')).toBe(2);
     expect(bytesPerKvFor('bf16')).toBe(2);
     expect(bytesPerKvFor(undefined)).toBe(2);
+  });
+});
+
+describe('deriveTpSizeToFitWeights', () => {
+  test('bumps TP until a large model fits (70B fp16 on 80GB -> tp=2)', () => {
+    // 140GB of weights don't fit one 80GB GPU (75GB usable after headroom) but
+    // fit across two, so the derived TP should be 2 rather than the bare default 1.
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 70e9,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 80,
+        maxContiguous: 8,
+      })
+    ).toBe(2);
+  });
+
+  test('stops at maxContiguous even when weights still do not fit', () => {
+    // 140GB of weights never fit across 8x24GB; cap at maxContiguous and let the
+    // downstream capacity estimate report "does not fit".
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 70e9,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 24,
+        maxContiguous: 8,
+      })
+    ).toBe(8);
+  });
+
+  test('never exceeds a single-GPU cap', () => {
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 70e9,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 80,
+        maxContiguous: 1,
+      })
+    ).toBe(1);
+  });
+
+  test('small model that fits one GPU stays at tp=1', () => {
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 7e9,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 80,
+        maxContiguous: 8,
+      })
+    ).toBe(1);
+  });
+
+  test('fp8 weights let a 70B model fit one 80GB GPU (tp=1)', () => {
+    // 70GB of fp8 weights fit within 75GB usable, so no TP bump is needed.
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 70e9,
+        bytesPerWeight: 1,
+        perGpuMemoryGb: 80,
+        maxContiguous: 8,
+      })
+    ).toBe(1);
+  });
+
+  test('returns 1 when paramCount is unknown (<= 0)', () => {
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 0,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 80,
+        maxContiguous: 8,
+      })
+    ).toBe(1);
+  });
+
+  test('estimates at the cap when headroom alone exceeds VRAM', () => {
+    // A tiny GPU whose headroom reserve already exceeds its VRAM: no TP size
+    // helps, so fall back to the cap.
+    expect(
+      deriveTpSizeToFitWeights({
+        paramCount: 70e9,
+        bytesPerWeight: 2,
+        perGpuMemoryGb: 4,
+        maxContiguous: 8,
+      })
+    ).toBe(8);
+  });
+
+  test('derived TP fits where tp=1 reports "does not fit" (cross-tab consistency)', () => {
+    // Mirrors the HF-search bug: with tp=1 a 70B model on 80GB returns
+    // concurrentSequences=0 ("does not fit"); the derived TP must leave room.
+    const arch: ModelArchitecture = { numLayers: 80, numKvHeads: 8, headDim: 128 };
+    const atTp1 = estimateConcurrentCapacity({
+      paramCount: 70e9,
+      arch,
+      perGpuMemoryGb: 80,
+      tpSize: 1,
+      contextLen: 4096,
+      bytesPerWeight: 2,
+      perChatTokensPerSec: 10,
+    })!;
+    expect(atTp1.concurrentSequences).toBe(0);
+
+    const tp = deriveTpSizeToFitWeights({
+      paramCount: 70e9,
+      bytesPerWeight: 2,
+      perGpuMemoryGb: 80,
+      maxContiguous: 8,
+    });
+    const atDerived = estimateConcurrentCapacity({
+      paramCount: 70e9,
+      arch,
+      perGpuMemoryGb: 80,
+      tpSize: tp,
+      contextLen: 4096,
+      bytesPerWeight: 2,
+      perChatTokensPerSec: 10,
+    })!;
+    expect(atDerived.concurrentSequences).toBeGreaterThan(0);
   });
 });
 

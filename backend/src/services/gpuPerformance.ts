@@ -115,6 +115,64 @@ export function estimatePerChatTokensPerSec(input: PerChatInput): number {
   return (bandwidthBytesPerSec / modelBytesDecimal) * efficiency;
 }
 
+export interface DeriveTpSizeInput {
+  /** Full model parameter count (not per-GPU). */
+  paramCount: number;
+  /** Bytes per weight for the chosen quantization (see bytesPerWeightFor). */
+  bytesPerWeight: number;
+  /** Per-GPU VRAM in GiB for the target GPU. */
+  perGpuMemoryGb: number;
+  /** Upper bound on GPUs per replica (per-node GPU count of the pool). */
+  maxContiguous: number;
+  /** Per-GPU activation/workspace reserve held back from VRAM (GiB). */
+  headroomGib?: number;
+}
+
+/**
+ * Smallest tensor-parallel size (GPUs per replica) whose per-GPU weight shard
+ * leaves positive room for a KV cache, bounded by `maxContiguous`.
+ *
+ * Callers that know the intended TP size (the deployment form, curated cards
+ * with `minGpus`) should pass it through explicitly. This is for the paths that
+ * have no TP hint — notably HuggingFace search cards, whose model objects carry
+ * no `minGpus` — so that a 70B model is estimated at a TP size that actually
+ * fits (e.g. tp=2 on 80 GB) instead of defaulting to tp=1 and spuriously
+ * reporting "does not fit". The fit test mirrors `estimateConcurrentCapacity`
+ * exactly (`perGpuHBM - weights/tp - headroom > 0`) so the derived size agrees
+ * with the concurrency math that follows.
+ *
+ * TP is doubled (1 → 2 → 4 → 8 …) rather than incremented because real
+ * tensor-parallel groups are powers of two. Returns at least 1, and never more
+ * than `maxContiguous`, even when the weights still don't fit at that cap (the
+ * downstream estimate then legitimately reports "does not fit").
+ */
+export function deriveTpSizeToFitWeights(input: DeriveTpSizeInput): number {
+  const {
+    paramCount,
+    bytesPerWeight,
+    perGpuMemoryGb,
+    maxContiguous,
+    headroomGib = DECODE_HEADROOM_GIB,
+  } = input;
+
+  const cap = Math.max(1, Math.floor(maxContiguous || 1));
+  if (paramCount <= 0 || bytesPerWeight <= 0 || perGpuMemoryGb <= 0) {
+    return 1;
+  }
+
+  const usablePerGpuBytes = perGpuMemoryGb * BYTES_PER_GIB - headroomGib * BYTES_PER_GIB;
+  // Even an empty (weightless) shard wouldn't fit the headroom reserve — no TP
+  // size helps, so estimate at the cap and let the caller surface "does not fit".
+  if (usablePerGpuBytes <= 0) return cap;
+
+  const totalWeightBytes = paramCount * bytesPerWeight;
+  let tp = 1;
+  while (tp < cap && totalWeightBytes / tp >= usablePerGpuBytes) {
+    tp *= 2;
+  }
+  return Math.min(tp, cap);
+}
+
 export interface ConcurrentCapacityInput {
   paramCount: number;
   arch: ModelArchitecture;
