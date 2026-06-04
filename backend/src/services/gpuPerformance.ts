@@ -24,6 +24,14 @@ const BYTES_PER_GIB = 1024 * 1024 * 1024;
  */
 export const MEM_BW_EFFICIENCY = 0.8;
 
+/**
+ * Tensor-parallel decode scaling efficiency. Under TP the weights are sharded
+ * across `tpSize` GPUs whose HBM bandwidth aggregates, so single-stream decode
+ * speeds up ~`tpSize×` — minus a per-GPU haircut for all-reduce / interconnect
+ * overhead. Aggregate effective bandwidth ≈ `tpSize × perGpuBW × this`.
+ */
+export const TP_DECODE_EFFICIENCY = 0.85;
+
 /** Per-GPU activation + workspace reserve (GiB) held back from the KV budget. */
 export const DECODE_HEADROOM_GIB = 5;
 
@@ -70,23 +78,39 @@ export interface PerChatInput {
   paramCount: number;
   bytesPerWeight: number;
   memBandwidthGBs: number;
+  /**
+   * Tensor-parallel size (GPUs per replica). Defaults to 1. With TP > 1 the
+   * weights shard across `tpSize` GPUs whose HBM bandwidth aggregates, so the
+   * effective decode bandwidth scales by `tpSize × TP_DECODE_EFFICIENCY`.
+   */
+  tpSize?: number;
   efficiency?: number;
 }
 
 /**
  * Single-stream decode speed (tokens/sec). Each generated token requires
  * streaming the full set of model weights from HBM, so speed ≈ bandwidth /
- * model_bytes. This is the conservative single-GPU heuristic and intentionally
- * does NOT credit tensor-parallel speedup (it answers "how fast for one user").
+ * model_bytes. Under tensor parallelism the weights shard across `tpSize` GPUs
+ * whose HBM bandwidth aggregates, so single-stream decode scales ~`tpSize×`
+ * (minus TP_DECODE_EFFICIENCY for interconnect overhead); tpSize=1 reduces to
+ * the exact single-GPU figure.
  *
  * Note the one decimal/binary boundary: memory bandwidth is decimal GB/s
  * (vendor spec) and model bytes are decimal (paramCount × bytesPerWeight), so
  * they divide cleanly without GiB conversion.
  */
 export function estimatePerChatTokensPerSec(input: PerChatInput): number {
-  const { paramCount, bytesPerWeight, memBandwidthGBs, efficiency = MEM_BW_EFFICIENCY } = input;
+  const {
+    paramCount,
+    bytesPerWeight,
+    memBandwidthGBs,
+    tpSize = 1,
+    efficiency = MEM_BW_EFFICIENCY,
+  } = input;
   const modelBytesDecimal = paramCount * bytesPerWeight; // decimal bytes
-  const bandwidthBytesPerSec = memBandwidthGBs * 1e9; // decimal GB/s -> bytes/s
+  // TP aggregates per-GPU bandwidth; tpSize=1 keeps the exact single-GPU number.
+  const tpScale = tpSize > 1 ? tpSize * TP_DECODE_EFFICIENCY : 1;
+  const bandwidthBytesPerSec = memBandwidthGBs * 1e9 * tpScale; // decimal GB/s -> bytes/s
   if (modelBytesDecimal <= 0) return 0;
   return (bandwidthBytesPerSec / modelBytesDecimal) * efficiency;
 }

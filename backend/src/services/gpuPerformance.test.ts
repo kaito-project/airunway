@@ -4,6 +4,7 @@ import {
   bytesPerKvFor,
   estimatePerChatTokensPerSec,
   estimateConcurrentCapacity,
+  TP_DECODE_EFFICIENCY,
 } from './gpuPerformance';
 import { resolveModelParamCount } from '@airunway/shared';
 import { gpuSupportsFp8 } from './costEstimation';
@@ -89,6 +90,39 @@ describe('estimatePerChatTokensPerSec', () => {
     const big = estimatePerChatTokensPerSec({ paramCount: 70e9, bytesPerWeight: 2, memBandwidthGBs: 3350 });
     const small = estimatePerChatTokensPerSec({ paramCount: 8e9, bytesPerWeight: 2, memBandwidthGBs: 3350 });
     expect(small).toBeGreaterThan(big);
+  });
+
+  test('tensor parallelism speeds up single-stream decode by ~tpSize × efficiency', () => {
+    const single = estimatePerChatTokensPerSec({
+      paramCount: 70e9,
+      bytesPerWeight: 2,
+      memBandwidthGBs: 3350,
+      tpSize: 1,
+    });
+    const quad = estimatePerChatTokensPerSec({
+      paramCount: 70e9,
+      bytesPerWeight: 2,
+      memBandwidthGBs: 3350,
+      tpSize: 4,
+    });
+    expect(quad).toBeGreaterThan(single);
+    // Aggregated bandwidth scales by tpSize × TP_DECODE_EFFICIENCY.
+    expect(quad / single).toBeCloseTo(4 * TP_DECODE_EFFICIENCY, 5);
+  });
+
+  test('tpSize=1 matches the omitted-tpSize single-GPU number exactly', () => {
+    const omitted = estimatePerChatTokensPerSec({
+      paramCount: 70e9,
+      bytesPerWeight: 2,
+      memBandwidthGBs: 3350,
+    });
+    const explicit = estimatePerChatTokensPerSec({
+      paramCount: 70e9,
+      bytesPerWeight: 2,
+      memBandwidthGBs: 3350,
+      tpSize: 1,
+    });
+    expect(explicit).toBe(omitted);
   });
 });
 

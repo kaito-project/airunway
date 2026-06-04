@@ -329,6 +329,7 @@ const installation = new Hono()
       paramCount,
       bytesPerWeight,
       memBandwidthGBs,
+      tpSize: effectiveTpSize,
     });
 
     // Architecture details (config.json) are needed for the concurrency number;
