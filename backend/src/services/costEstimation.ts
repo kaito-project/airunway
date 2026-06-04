@@ -163,6 +163,16 @@ export function getGpuInfo(gpuModel: string): GpuModelInfo | undefined {
 }
 
 /**
+ * Whether a GPU model has a native FP8 datapath. Used to gate FP8 KV-cache
+ * sizing in the throughput estimator: only Hopper (H100, H200) has hardware FP8
+ * support, so requesting an FP8 KV cache on older generations should fall back
+ * to 2-byte (fp16/bf16) for a realistic estimate.
+ */
+export function gpuSupportsFp8(gpuModel: string): boolean {
+  return getGpuInfo(gpuModel)?.generation === 'Hopper';
+}
+
+/**
  * @deprecated Use cloudPricing.ts for real-time pricing
  * This function is kept for backward compatibility but returns low-confidence estimates
  */

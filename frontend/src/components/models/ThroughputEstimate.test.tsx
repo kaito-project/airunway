@@ -21,6 +21,8 @@ describe('ThroughputEstimate', () => {
     render(<ThroughputEstimate estimate={base} />);
     expect(screen.getByText(/~40 tok\/s per chat/)).toBeInTheDocument();
     expect(screen.getByText(/~360 concurrent/)).toBeInTheDocument();
+    // Aggregate total (concurrency × per-chat rate) is shown in the visible label.
+    expect(screen.getByText(/~14k tok\/s total/)).toBeInTheDocument();
   });
 
   it('shows only per-chat speed when low confidence', () => {

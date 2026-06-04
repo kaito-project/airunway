@@ -128,6 +128,17 @@ export interface GpuThroughputEstimate {
   tpSize: number;
   /** Context length (tokens) assumed for KV sizing. */
   contextLen: number;
+  /**
+   * Effective KV-cache dtype used for the concurrency estimate, after hardware
+   * gating. May differ from the requested dtype (e.g. fp8 downgraded to fp16 on
+   * non-Hopper GPUs). Independent of weight quantization.
+   */
+  kvCacheDtype?: 'fp16' | 'bf16' | 'fp8' | 'int8';
+  /**
+   * Whether the resolved GPU has a native FP8 datapath (Hopper, e.g. H100/H200).
+   * The UI uses this to block FP8 deployments on non-Hopper hardware.
+   */
+  fp8Supported?: boolean;
   /** Topology / capacity label, e.g. "4x80 GB". */
   capacityLabel?: string;
   /** True when architecture data was unavailable, so only perChat is meaningful. */

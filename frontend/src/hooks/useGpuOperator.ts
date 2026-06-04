@@ -25,6 +25,7 @@ export interface ThroughputParams {
   paramCount?: number
   contextLen?: number
   quantization?: 'fp8' | 'int8' | 'fp16' | 'bf16'
+  kvCacheDtype?: 'fp8' | 'int8' | 'fp16' | 'bf16'
   gpuModel?: string
   tpSize?: number
 }
@@ -43,8 +44,11 @@ export function useGpuThroughput(params: ThroughputParams, options?: { enabled?:
   // model yields a high-confidence result with a token but a low-confidence one
   // without, and the two must not share a cache entry.
   const authState = hfToken ? 'auth' : 'anon'
+  // gpuModel is no longer sent by callers (the backend selects the GPU), so the
+  // enable-gate keys off paramCount only. Callers still pass `enabled: false`
+  // (or omit params entirely) when there's no GPU pool to estimate on.
   const enabled =
-    (options?.enabled ?? true) && !!params.gpuModel && !!params.paramCount
+    (options?.enabled ?? true) && !!params.paramCount
 
   return useQuery<GpuThroughputEstimate>({
     queryKey: [
@@ -56,6 +60,7 @@ export function useGpuThroughput(params: ThroughputParams, options?: { enabled?:
       params.contextLen,
       params.tpSize,
       params.quantization,
+      params.kvCacheDtype,
     ],
     queryFn: () => gpuOperatorApi.getThroughput(params, hfToken ?? undefined),
     enabled,

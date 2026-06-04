@@ -28,11 +28,35 @@ export const MEM_BW_EFFICIENCY = 0.8;
 /** Per-GPU activation + workspace reserve (GiB) held back from the KV budget. */
 export const DECODE_HEADROOM_GIB = 5;
 
-/** Quantization → bytes per weight. KV bytes default to the same precision. */
+/** Quantization → bytes per weight. */
 export type Quantization = 'fp8' | 'int8' | 'fp16' | 'bf16';
 
 export function bytesPerWeightFor(quantization?: string): number {
   switch ((quantization || '').toLowerCase()) {
+    case 'fp8':
+    case 'int8':
+      return 1;
+    case 'fp16':
+    case 'bf16':
+    default:
+      return 2;
+  }
+}
+
+/**
+ * KV-cache precision. Deliberately independent of weight quantization — common
+ * serving defaults keep an fp16/bf16 KV cache even when weights are fp8/int8,
+ * unless KV-cache quantization is explicitly enabled.
+ */
+export type KvCacheDtype = 'fp8' | 'int8' | 'fp16' | 'bf16';
+
+/**
+ * Bytes per KV value for a given KV-cache dtype. Defaults to 2 (fp16/bf16) and
+ * is NOT tied to weight quantization — callers must pass the KV dtype explicitly
+ * to opt into a 1-byte KV cache.
+ */
+export function bytesPerKvFor(dtype?: string): number {
+  switch ((dtype || '').toLowerCase()) {
     case 'fp8':
     case 'int8':
       return 1;
@@ -100,9 +124,17 @@ export interface ConcurrentCapacityInput {
   tpSize: number;
   contextLen: number;
   bytesPerWeight: number;
-  /** Bytes per KV value; defaults to bytesPerWeight. */
+  /**
+   * Bytes per KV value. Independent of weight quantization; defaults to 2
+   * (fp16/bf16). Pass 1 only when an FP8/INT8 KV cache is explicitly requested
+   * (and supported by the target hardware).
+   */
   bytesPerKv?: number;
   headroomGib?: number;
+  /**
+   * Single-stream decode speed (tokens/sec). Used to derive the aggregate
+   * tokens/sec figure (aggregate = concurrentSequences × perChatTokensPerSec).
+   */
   perChatTokensPerSec: number;
 }
 
@@ -119,6 +151,10 @@ export interface ConcurrentCapacityResult {
  *   concurrent  = KV_budget / KV_per_seq
  *   aggregate   = concurrent × perChatTokensPerSec
  *
+ * Aggregate throughput is the number of concurrent sequences scaled by the
+ * single-stream decode rate. The single-stream `perChatTokensPerSec` is also
+ * reported separately as the "per-user speed".
+ *
  * Returns undefined when architecture details are insufficient to size the KV
  * cache, so the caller can fall back to a per-chat-only (low-confidence) result.
  */
@@ -132,7 +168,7 @@ export function estimateConcurrentCapacity(
     tpSize,
     contextLen,
     bytesPerWeight,
-    bytesPerKv = bytesPerWeight,
+    bytesPerKv = 2,
     headroomGib = DECODE_HEADROOM_GIB,
     perChatTokensPerSec,
   } = input;
@@ -159,6 +195,7 @@ export function estimateConcurrentCapacity(
   if (kvBytesPerSeq <= 0) return undefined;
 
   const concurrentSequences = Math.floor(kvBudgetTotalBytes / kvBytesPerSeq);
+  // Aggregate throughput: concurrency scaled by the single-stream decode rate.
   const aggregateTokensPerSec = Math.round(concurrentSequences * perChatTokensPerSec);
 
   return { concurrentSequences, aggregateTokensPerSec };

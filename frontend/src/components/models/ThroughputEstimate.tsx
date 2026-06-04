@@ -83,9 +83,13 @@ export function ThroughputEstimate({ estimate, isLoading, className }: Throughpu
   const hasConcurrency =
     !lowConfidence && typeof concurrentSequences === 'number' && concurrentSequences > 0;
 
-  const label = hasConcurrency
-    ? `~${Math.round(perChatTokensPerSec)} tok/s per chat · ~${formatCount(concurrentSequences!)} concurrent`
-    : `~${Math.round(perChatTokensPerSec)} tok/s per chat`;
+  const hasAggregate = hasConcurrency && typeof aggregateTokensPerSec === 'number' && aggregateTokensPerSec > 0;
+
+  const label = hasAggregate
+    ? `~${Math.round(perChatTokensPerSec)} tok/s per chat · ~${formatCount(concurrentSequences!)} concurrent · ~${formatCount(aggregateTokensPerSec!)} tok/s total`
+    : hasConcurrency
+      ? `~${Math.round(perChatTokensPerSec)} tok/s per chat · ~${formatCount(concurrentSequences!)} concurrent`
+      : `~${Math.round(perChatTokensPerSec)} tok/s per chat`;
 
   const tooltip = hasConcurrency
     ? `Rough estimate on ${gpuModel} (assuming ${tpSize} GPU${tpSize > 1 ? 's' : ''} per replica at ${contextLen.toLocaleString()} token context): about ${Math.round(perChatTokensPerSec)} tokens/sec for a single chat, and roughly ${concurrentSequences!.toLocaleString()} requests at once (~${aggregateTokensPerSec?.toLocaleString()} tokens/sec total). Based on memory-bandwidth and KV-cache heuristics — actual speed varies with batch size, prompt length, and quantization.`

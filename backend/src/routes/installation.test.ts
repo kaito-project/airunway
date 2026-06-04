@@ -1230,5 +1230,51 @@ describe('Gateway Installation Routes', () => {
       const data = await res.json();
       expect(data.contextLen).toBe(8192);
     });
+
+    test('reports fp8Supported=true for a Hopper GPU', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/m&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fp8Supported).toBe(true);
+      // aggregate ≈ concurrentSequences × perChatTokensPerSec (single-stream rate).
+      // The response rounds perChat, so allow a small rounding margin.
+      expect(data.aggregateTokensPerSec).toBeGreaterThan(0);
+      expect(
+        Math.abs(data.aggregateTokensPerSec - data.concurrentSequences * data.perChatTokensPerSec)
+      ).toBeLessThanOrEqual(data.concurrentSequences);
+    });
+
+    test('reports fp8Supported=false for a non-Hopper GPU', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&modelId=org/m&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fp8Supported).toBe(false);
+      expect(data.aggregateTokensPerSec).toBeGreaterThan(0);
+      expect(
+        Math.abs(data.aggregateTokensPerSec - data.concurrentSequences * data.perChatTokensPerSec)
+      ).toBeLessThanOrEqual(data.concurrentSequences);
+    });
   });
 });

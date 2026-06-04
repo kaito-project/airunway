@@ -529,6 +529,7 @@ export const gpuOperatorApi = {
       paramCount?: number;
       contextLen?: number;
       quantization?: 'fp8' | 'int8' | 'fp16' | 'bf16';
+      kvCacheDtype?: 'fp8' | 'int8' | 'fp16' | 'bf16';
       gpuModel?: string;
       tpSize?: number;
     },
@@ -539,6 +540,7 @@ export const gpuOperatorApi = {
     if (params.paramCount) search.set('paramCount', String(params.paramCount));
     if (params.contextLen) search.set('contextLen', String(params.contextLen));
     if (params.quantization) search.set('quantization', params.quantization);
+    if (params.kvCacheDtype) search.set('kvCacheDtype', params.kvCacheDtype);
     if (params.gpuModel) search.set('gpuModel', params.gpuModel);
     if (params.tpSize) search.set('tpSize', String(params.tpSize));
 
