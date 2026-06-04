@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { isValidHfRepoId, encodeHfRepoPath } from './huggingface';
 
 // Store original fetch
 const originalFetch = global.fetch;
@@ -302,6 +303,93 @@ describe('HuggingFaceService', () => {
 
       const arch = await huggingFaceService.getModelArchitecture('org/missing');
       expect(arch).toBeUndefined();
+    });
+
+    test('rejects a malformed model id without fetching', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      for (const bad of ['../../etc/passwd', 'a/b/c', 'foo bar', '.', '..', 'owner/', 'owner/name?x=1']) {
+        const arch = await huggingFaceService.getModelArchitecture(bad);
+        expect(arch).toBeUndefined();
+      }
+      // Security: no token-bearing request is ever issued for an invalid id.
+      expect(mockFetch).toHaveBeenCalledTimes(0);
+    });
+
+    test('encodes the model id when building the config.json URL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      await huggingFaceService.getModelArchitecture('meta-llama/Meta-Llama-3-70B');
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://huggingface.co/meta-llama/Meta-Llama-3-70B/resolve/main/config.json');
+    });
+  });
+
+  describe('getGgufFiles', () => {
+    test('throws on a malformed model id without fetching', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ siblings: [] }), { status: 200 }))
+      );
+
+      await expect(huggingFaceService.getGgufFiles('../../etc/passwd')).rejects.toThrow(
+        'Invalid Hugging Face model id'
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(0);
+    });
+
+    test('encodes the model id when building the api URL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ siblings: [{ rfilename: 'model.Q4_K_M.gguf' }] }), {
+            status: 200,
+          })
+        )
+      );
+
+      const files = await huggingFaceService.getGgufFiles('unsloth/Qwen3-4B-GGUF');
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://huggingface.co/api/models/unsloth/Qwen3-4B-GGUF');
+      expect(files).toEqual(['model.Q4_K_M.gguf']);
+    });
+  });
+
+  describe('isValidHfRepoId', () => {
+    test('accepts canonical single- and two-segment ids', () => {
+      for (const ok of ['gpt2', 'meta-llama/Meta-Llama-3-70B', 'unsloth/Qwen3-4B-GGUF', 'a_b.c-d/e.f_g-h']) {
+        expect(isValidHfRepoId(ok)).toBe(true);
+      }
+    });
+
+    test('rejects traversal, extra segments, and unsafe characters', () => {
+      for (const bad of [
+        '',
+        '.',
+        '..',
+        'owner/',
+        '/name',
+        'a/b/c',
+        '../../etc/passwd',
+        'foo bar',
+        'owner/name?x=1',
+        'owner/name#frag',
+        'owner/na me',
+        'a'.repeat(97) + '/b',
+      ]) {
+        expect(isValidHfRepoId(bad)).toBe(false);
+      }
+    });
+  });
+
+  describe('encodeHfRepoPath', () => {
+    test('percent-encodes each segment but preserves the slash', () => {
+      expect(encodeHfRepoPath('owner/name')).toBe('owner/name');
+      expect(encodeHfRepoPath('gpt2')).toBe('gpt2');
     });
   });
 });

@@ -6,7 +6,7 @@ import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import { getProviderHealth } from '../services/providerHealth';
 import { getGpuInfo, normalizeGpuModel, gpuSupportsFp8 } from '../services/costEstimation';
-import { huggingFaceService } from '../services/huggingface';
+import { huggingFaceService, isValidHfRepoId } from '../services/huggingface';
 import {
   bytesPerWeightFor,
   bytesPerKvFor,
@@ -40,7 +40,12 @@ const MAX_INFERRED_CONTEXT_LEN = 32768;
 
 /** Query schema for GET /gpu-throughput. */
 const gpuThroughputQuerySchema = z.object({
-  modelId: z.string().min(1).optional(),
+  modelId: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine(isValidHfRepoId, 'Invalid Hugging Face model id')
+    .optional(),
   paramCount: z.coerce.number().positive().optional(),
   contextLen: z.coerce.number().int().positive().max(1_048_576).optional(),
   quantization: z.enum(['fp8', 'int8', 'fp16', 'bf16']).optional(),

@@ -17,6 +17,44 @@ const HF_WHOAMI_URL = 'https://huggingface.co/api/whoami-v2';
 const HF_MODELS_URL = 'https://huggingface.co/api/models';
 const HF_BASE_URL = 'https://huggingface.co';
 
+/** Max characters per repo-id segment (HF's own repo-name limit is 96). */
+const HF_REPO_SEGMENT_MAX = 96;
+
+/**
+ * Validate a HuggingFace repo id (`owner/name`, or a canonical single-segment id
+ * like `gpt2`) before it is interpolated into an outbound URL.
+ *
+ * Security: `modelId` arrives from untrusted query/path input and is sent to
+ * huggingface.co with the caller's `Authorization` token. Without this guard a
+ * crafted value (`../../other`, extra `/segments`, `name?x=1`, whitespace) could
+ * steer that authenticated request to an unintended path. We therefore allow
+ * only 1–2 non-empty segments of safe characters and reject `.`/`..` traversal.
+ */
+export function isValidHfRepoId(modelId: string): boolean {
+  if (typeof modelId !== 'string') return false;
+  const segments = modelId.split('/');
+  if (segments.length < 1 || segments.length > 2) return false;
+  return segments.every(
+    (seg) =>
+      seg.length > 0 &&
+      seg.length <= HF_REPO_SEGMENT_MAX &&
+      seg !== '.' &&
+      seg !== '..' &&
+      /^[A-Za-z0-9._-]+$/.test(seg)
+  );
+}
+
+/**
+ * Percent-encode each path segment of a repo id before interpolation. Mirrors
+ * the per-segment encoder in aikit.ts (`buildHuggingFaceUrl`). Callers should
+ * still validate with `isValidHfRepoId` first — this is defense in depth so even
+ * a validated id can never inject path/query syntax.
+ */
+export function encodeHfRepoPath(modelId: string): string {
+  return modelId.split('/').map(encodeURIComponent).join('/');
+}
+
+
 /**
  * Cache for model architecture (config.json) lookups.
  *
@@ -268,7 +306,14 @@ class HuggingFaceService {
   async getGgufFiles(modelId: string, accessToken?: string): Promise<string[]> {
     logger.debug({ modelId }, 'Fetching GGUF files from HuggingFace repo');
 
-    const url = `https://huggingface.co/api/models/${modelId}`;
+    // Reject malformed ids before issuing a token-bearing request (see
+    // isValidHfRepoId). Throwing keeps this method's existing throw-on-failure
+    // contract; callers already surface errors.
+    if (!isValidHfRepoId(modelId)) {
+      throw new Error('Invalid Hugging Face model id');
+    }
+
+    const url = `https://huggingface.co/api/models/${encodeHfRepoPath(modelId)}`;
     const headers: Record<string, string> = {};
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
@@ -305,6 +350,14 @@ class HuggingFaceService {
    * @param hfToken - Optional HF access token for gated/private models
    */
   async getModelArchitecture(modelId: string, hfToken?: string): Promise<ModelArchitecture | undefined> {
+    // Reject malformed ids before any cache work or token-bearing fetch. The
+    // method's contract is graceful degradation (undefined → bandwidth-only
+    // estimate), so an invalid id is treated the same as a lookup miss.
+    if (!isValidHfRepoId(modelId)) {
+      logger.debug({ modelId }, 'Rejecting invalid HuggingFace model id');
+      return undefined;
+    }
+
     const cacheKey = architectureCacheKey(modelId, hfToken);
     const cached = architectureCache.get(cacheKey);
     if (cached) {
@@ -316,7 +369,7 @@ class HuggingFaceService {
       architectureCache.delete(cacheKey);
     }
 
-    const url = `${HF_BASE_URL}/${modelId}/resolve/main/config.json`;
+    const url = `${HF_BASE_URL}/${encodeHfRepoPath(modelId)}/resolve/main/config.json`;
     const headers: Record<string, string> = {};
     if (hfToken) {
       headers['Authorization'] = `Bearer ${hfToken}`;

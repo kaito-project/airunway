@@ -1276,5 +1276,39 @@ describe('Gateway Installation Routes', () => {
         Math.abs(data.aggregateTokensPerSec - data.concurrentSequences * data.perChatTokensPerSec)
       ).toBeLessThanOrEqual(data.concurrentSequences);
     });
+
+    test('rejects a malformed modelId with 400 and never calls the HF service', async () => {
+      let archCalls = 0;
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => {
+          archCalls += 1;
+          return undefined;
+        }),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=../../etc/passwd&paramCount=8000000000',
+      );
+      // zValidator rejects the bad id before the handler runs.
+      expect(res.status).toBe(400);
+      expect(archCalls).toBe(0);
+    });
+
+    test('accepts a well-formed modelId (200)', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=meta-llama/Meta-Llama-3-70B&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+    });
   });
 });
