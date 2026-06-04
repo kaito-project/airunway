@@ -1295,6 +1295,24 @@ describe('Gateway Installation Routes', () => {
       expect(archCalls).toBe(0);
     });
 
+    test('rejects a paramCount above the maximum with 400 and never estimates', async () => {
+      let archCalls = 0;
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => {
+          archCalls += 1;
+          return undefined;
+        }),
+      );
+
+      // 9T + 1 exceeds the .max(9_000_000_000_000) cap; zValidator rejects before the handler runs.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&paramCount=9000000000001',
+      );
+      expect(res.status).toBe(400);
+      expect(archCalls).toBe(0);
+    });
+
     test('accepts a well-formed modelId (200)', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),

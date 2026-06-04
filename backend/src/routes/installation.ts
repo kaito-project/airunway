@@ -46,7 +46,7 @@ const gpuThroughputQuerySchema = z.object({
     .max(200)
     .refine(isValidHfRepoId, 'Invalid Hugging Face model id')
     .optional(),
-  paramCount: z.coerce.number().positive().optional(),
+  paramCount: z.coerce.number().positive().max(9_000_000_000_000).optional(),
   contextLen: z.coerce.number().int().positive().max(1_048_576).optional(),
   quantization: z.enum(['fp8', 'int8', 'fp16', 'bf16']).optional(),
   kvCacheDtype: z.enum(['fp8', 'int8', 'fp16', 'bf16']).optional(),
