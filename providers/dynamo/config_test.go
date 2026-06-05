@@ -44,8 +44,24 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(vllmCap.ServingModes) != 2 {
 		t.Fatalf("expected vllm to support 2 serving modes, got %d", len(vllmCap.ServingModes))
 	}
-	if len(vllmCap.APIFormats) != 2 {
-		t.Fatalf("expected vllm to support 2 API formats, got %d", len(vllmCap.APIFormats))
+	expectedVLLMFormats := []airunwayv1alpha1.APIFormat{
+		airunwayv1alpha1.APIFormatOpenAIChat,
+		airunwayv1alpha1.APIFormatAnthropicMessages,
+	}
+	if len(vllmCap.APIFormats) != len(expectedVLLMFormats) {
+		t.Fatalf("expected vllm to support %d API formats, got %d", len(expectedVLLMFormats), len(vllmCap.APIFormats))
+	}
+	for _, expected := range expectedVLLMFormats {
+		found := false
+		for _, actual := range vllmCap.APIFormats {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected vllm to support API format %s", expected)
+		}
 	}
 
 	sglangCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeSGLang)
@@ -58,8 +74,24 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(sglangCap.ServingModes) != 2 {
 		t.Fatalf("expected sglang to support 2 serving modes, got %d", len(sglangCap.ServingModes))
 	}
-	if len(sglangCap.APIFormats) != 2 {
-		t.Fatalf("expected sglang to support 2 API formats, got %d", len(sglangCap.APIFormats))
+	expectedSGLangFormats := []airunwayv1alpha1.APIFormat{
+		airunwayv1alpha1.APIFormatOpenAIChat,
+		airunwayv1alpha1.APIFormatAnthropicMessages,
+	}
+	if len(sglangCap.APIFormats) != len(expectedSGLangFormats) {
+		t.Fatalf("expected sglang to support %d API formats, got %d", len(expectedSGLangFormats), len(sglangCap.APIFormats))
+	}
+	for _, expected := range expectedSGLangFormats {
+		found := false
+		for _, actual := range sglangCap.APIFormats {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected sglang to support API format %s", expected)
+		}
 	}
 
 	trtllmCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeTRTLLM)
