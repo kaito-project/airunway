@@ -36,8 +36,25 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	}
 
 	// API formats (per-engine)
-	if len(vllmCap.APIFormats) != 1 || vllmCap.APIFormats[0] != airunwayv1alpha1.APIFormatOpenAIChat {
-		t.Errorf("expected vllm to support openai-chat API format")
+	expectedVLLMFormats := []airunwayv1alpha1.APIFormat{
+		airunwayv1alpha1.APIFormatOpenAIChat,
+		airunwayv1alpha1.APIFormatOpenAIResponses,
+		airunwayv1alpha1.APIFormatAnthropicMessages,
+	}
+	if len(vllmCap.APIFormats) != len(expectedVLLMFormats) {
+		t.Fatalf("expected vllm to support %d API formats, got %d", len(expectedVLLMFormats), len(vllmCap.APIFormats))
+	}
+	for _, expected := range expectedVLLMFormats {
+		found := false
+		for _, actual := range vllmCap.APIFormats {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected vllm to support API format %s", expected)
+		}
 	}
 
 	// Serving modes (per-engine)
