@@ -58,8 +58,8 @@ type EngineCapability struct {
 	ServingModes []ServingMode `json:"servingModes,omitempty"`
 
 	// apiFormats is the list of API formats this engine supports
-	// (e.g., openai-chat, anthropic-messages). When empty, defaults to
-	// openai-chat for backward compatibility.
+	// (e.g., openai-chat, anthropic-messages). Consumers should treat
+	// an empty list as equivalent to [openai-chat] for backward compatibility.
 	// +optional
 	APIFormats []APIFormat `json:"apiFormats,omitempty"`
 
