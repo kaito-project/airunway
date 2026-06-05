@@ -166,8 +166,12 @@ type AgentProviderConfigStatus struct {
 	// ready indicates whether the framework provider controller is
 	// healthy and willing to accept AgentDeployments. The dashboard
 	// uses this for the marketplace tile state.
+	//
+	// Pointer-to-bool so providers can distinguish "not yet reported"
+	// (nil) from "explicitly not ready" (false). A plain bool with
+	// omitempty would silently collapse those two states.
 	// +optional
-	Ready bool `json:"ready,omitempty"`
+	Ready *bool `json:"ready,omitempty"`
 
 	// version is the running provider controller version. Useful for
 	// surfacing shim drift between the dashboard and the provider.

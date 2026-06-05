@@ -709,6 +709,10 @@ spec:
                   ready indicates whether the framework provider controller is
                   healthy and willing to accept AgentDeployments. The dashboard
                   uses this for the marketplace tile state.
+
+                  Pointer-to-bool so providers can distinguish "not yet reported"
+                  (nil) from "explicitly not ready" (false). A plain bool with
+                  omitempty would silently collapse those two states.
                 type: boolean
               version:
                 description: |-

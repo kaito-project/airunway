@@ -3,7 +3,6 @@ apiVersion: airunway.ai/v1alpha1
 kind: AgentDeployment
 metadata:
   name: sre-bot
-  namespace: agents
   labels:
     app.kubernetes.io/name: airunway
     app.kubernetes.io/managed-by: kustomize
@@ -13,7 +12,6 @@ spec:
   model:
     deploymentRef:
       name: llama-3-8b
-      namespace: inference
   config:
     systemPrompt: |
       You are a Kubernetes SRE assistant. Diagnose pod, deployment, and
@@ -39,7 +37,6 @@ apiVersion: airunway.ai/v1alpha1
 kind: AgentDeployment
 metadata:
   name: personal-assistant
-  namespace: agents
   labels:
     app.kubernetes.io/name: airunway
     app.kubernetes.io/managed-by: kustomize
