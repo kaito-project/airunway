@@ -29,6 +29,12 @@ export const MEM_BW_EFFICIENCY = 0.8;
  * across `tpSize` GPUs whose HBM bandwidth aggregates, so single-stream decode
  * speeds up ~`tpSize×` — minus a per-GPU haircut for all-reduce / interconnect
  * overhead. Aggregate effective bandwidth ≈ `tpSize × perGpuBW × this`.
+ *
+ * Caveat: this is a flat factor, independent of `tpSize` and interconnect. Real
+ * single-stream TP decode is latency/communication bound, so the per-GPU haircut
+ * grows with larger TP groups (and is worse across PCIe / multi-node than NVLink).
+ * 0.85 is therefore optimistic for big TP groups; treat it as a rough upper bound,
+ * consistent with the estimator's overall heuristic, disclaimer-backed nature.
  */
 export const TP_DECODE_EFFICIENCY = 0.85;
 

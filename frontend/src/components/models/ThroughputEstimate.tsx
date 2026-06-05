@@ -9,7 +9,7 @@ interface ThroughputEstimateProps {
   className?: string;
 }
 
-/** Compact number formatting: 18234 -> "18.2k". */
+/** Compact number formatting: 1234 -> "1.2k", 18234 -> "18k". */
 function formatCount(n: number): string {
   if (n >= 1000) {
     return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;

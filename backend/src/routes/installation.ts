@@ -166,7 +166,9 @@ function extractProviderDetails(config: any) {
     defaultNamespace: installation.defaultNamespace || 'default',
     requiresCRD: providerRequiresRuntimeCRD(name, aggregateRequiresCRDFromCapabilities(capabilities), annotatedDisplayName),
     crdConfig: {
-      apiGroup: capabilities.engines?.length ? '' : '',
+      // The real CRD apiGroup isn't stored on the InferenceProviderConfig, so we
+      // can't derive it here; emit an empty string to satisfy the CRDConfig type.
+      apiGroup: '',
     },
     helmRepos: (installation.helmRepos || []).map((r: any) => ({
       name: r.name,
