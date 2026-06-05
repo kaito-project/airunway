@@ -20,7 +20,6 @@ const config = {
 
   organizationName: 'kaito-project',
   projectName: 'airunway',
-  deploymentBranch: 'gh-pages',
 
   // Strict by default — broken links should fail CI, not slip into prod.
   onBrokenLinks: 'throw',
