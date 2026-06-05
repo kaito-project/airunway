@@ -27,8 +27,9 @@ import (
 // DeepCopy methods produce an independent object. Catches accidental
 // shallow copies introduced by hand-edited zz_generated files.
 func TestAgentDeployment_DeepCopy(t *testing.T) {
-	roFS := true
-	noEsc := false
+	runAsNonRoot := true
+	readOnlyRootFS := true
+	noPrivEsc := false
 	orig := &AgentDeployment{
 		Spec: AgentDeploymentSpec{
 			Framework: AgentFrameworkRef{Name: "kagent"},
@@ -39,11 +40,11 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 			Security: &AgentSecuritySpec{
 				PodSecurityStandard: PodSecurityStandardRestricted,
 				SecurityContext: &corev1.PodSecurityContext{
-					RunAsNonRoot: &roFS,
+					RunAsNonRoot: &runAsNonRoot,
 				},
 				ContainerSecurityContext: &corev1.SecurityContext{
-					ReadOnlyRootFilesystem:   &roFS,
-					AllowPrivilegeEscalation: &noEsc,
+					ReadOnlyRootFilesystem:   &readOnlyRootFS,
+					AllowPrivilegeEscalation: &noPrivEsc,
 				},
 			},
 		},
