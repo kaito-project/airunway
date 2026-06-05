@@ -50,26 +50,11 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(vllmCap.ServingModes) != 1 || vllmCap.ServingModes[0] != airunwayv1alpha1.ServingModeAggregated {
 		t.Errorf("expected vllm to support only aggregated serving mode")
 	}
-	expectedVLLMFormats := []airunwayv1alpha1.APIFormat{
+	assertAPIFormats(t, "vllm", vllmCap.APIFormats, []airunwayv1alpha1.APIFormat{
 		airunwayv1alpha1.APIFormatOpenAIChat,
 		airunwayv1alpha1.APIFormatOpenAIResponses,
 		airunwayv1alpha1.APIFormatAnthropicMessages,
-	}
-	if len(vllmCap.APIFormats) != len(expectedVLLMFormats) {
-		t.Fatalf("expected vllm to support %d API formats, got %d", len(expectedVLLMFormats), len(vllmCap.APIFormats))
-	}
-	for _, expected := range expectedVLLMFormats {
-		found := false
-		for _, actual := range vllmCap.APIFormats {
-			if actual == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected vllm to support API format %s", expected)
-		}
-	}
+	})
 
 	llamaCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeLlamaCpp)
 	if llamaCap == nil {
@@ -293,4 +278,23 @@ func newFakeClientWithWorkspace(scheme *runtime.Scheme, objs ...client.Object) c
 		WithObjects(objs...).
 		WithStatusSubresource(&airunwayv1alpha1.InferenceProviderConfig{}).
 		Build()
+}
+
+func assertAPIFormats(t *testing.T, engine string, got, expected []airunwayv1alpha1.APIFormat) {
+	t.Helper()
+	if len(got) != len(expected) {
+		t.Fatalf("expected %s to support %d API formats, got %d: %v", engine, len(expected), len(got), got)
+	}
+	for _, e := range expected {
+		found := false
+		for _, a := range got {
+			if a == e {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %s to support API format %s", engine, e)
+		}
+	}
 }

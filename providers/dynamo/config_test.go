@@ -44,26 +44,11 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(vllmCap.ServingModes) != 2 {
 		t.Fatalf("expected vllm to support 2 serving modes, got %d", len(vllmCap.ServingModes))
 	}
-	expectedVLLMFormats := []airunwayv1alpha1.APIFormat{
+	assertAPIFormats(t, "vllm", vllmCap.APIFormats, []airunwayv1alpha1.APIFormat{
 		airunwayv1alpha1.APIFormatOpenAIChat,
 		airunwayv1alpha1.APIFormatOpenAIResponses,
 		airunwayv1alpha1.APIFormatAnthropicMessages,
-	}
-	if len(vllmCap.APIFormats) != len(expectedVLLMFormats) {
-		t.Fatalf("expected vllm to support %d API formats, got %d", len(expectedVLLMFormats), len(vllmCap.APIFormats))
-	}
-	for _, expected := range expectedVLLMFormats {
-		found := false
-		for _, actual := range vllmCap.APIFormats {
-			if actual == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected vllm to support API format %s", expected)
-		}
-	}
+	})
 
 	sglangCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeSGLang)
 	if sglangCap == nil {
@@ -75,25 +60,10 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(sglangCap.ServingModes) != 2 {
 		t.Fatalf("expected sglang to support 2 serving modes, got %d", len(sglangCap.ServingModes))
 	}
-	expectedSGLangFormats := []airunwayv1alpha1.APIFormat{
+	assertAPIFormats(t, "sglang", sglangCap.APIFormats, []airunwayv1alpha1.APIFormat{
 		airunwayv1alpha1.APIFormatOpenAIChat,
 		airunwayv1alpha1.APIFormatAnthropicMessages,
-	}
-	if len(sglangCap.APIFormats) != len(expectedSGLangFormats) {
-		t.Fatalf("expected sglang to support %d API formats, got %d", len(expectedSGLangFormats), len(sglangCap.APIFormats))
-	}
-	for _, expected := range expectedSGLangFormats {
-		found := false
-		for _, actual := range sglangCap.APIFormats {
-			if actual == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected sglang to support API format %s", expected)
-		}
-	}
+	})
 
 	trtllmCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeTRTLLM)
 	if trtllmCap == nil {
@@ -105,25 +75,10 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(trtllmCap.ServingModes) != 1 || trtllmCap.ServingModes[0] != airunwayv1alpha1.ServingModeAggregated {
 		t.Errorf("expected trtllm to support only aggregated serving mode")
 	}
-	expectedTRTLLMFormats := []airunwayv1alpha1.APIFormat{
+	assertAPIFormats(t, "trtllm", trtllmCap.APIFormats, []airunwayv1alpha1.APIFormat{
 		airunwayv1alpha1.APIFormatOpenAIChat,
 		airunwayv1alpha1.APIFormatOpenAIResponses,
-	}
-	if len(trtllmCap.APIFormats) != len(expectedTRTLLMFormats) {
-		t.Fatalf("expected trtllm to support %d API formats, got %d", len(expectedTRTLLMFormats), len(trtllmCap.APIFormats))
-	}
-	for _, expected := range expectedTRTLLMFormats {
-		found := false
-		for _, actual := range trtllmCap.APIFormats {
-			if actual == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected trtllm to support API format %s", expected)
-		}
-	}
+	})
 
 	if len(spec.SelectionRules) != 4 {
 		t.Fatalf("expected 4 selection rules, got %d", len(spec.SelectionRules))
@@ -370,5 +325,24 @@ func TestUpdateStatusNotFound(t *testing.T) {
 	err := mgr.UpdateStatus(context.Background(), true)
 	if err == nil {
 		t.Fatal("expected error when config not found")
+	}
+}
+
+func assertAPIFormats(t *testing.T, engine string, got, expected []airunwayv1alpha1.APIFormat) {
+	t.Helper()
+	if len(got) != len(expected) {
+		t.Fatalf("expected %s to support %d API formats, got %d: %v", engine, len(expected), len(got), got)
+	}
+	for _, e := range expected {
+		found := false
+		for _, a := range got {
+			if a == e {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %s to support API format %s", engine, e)
+		}
 	}
 }

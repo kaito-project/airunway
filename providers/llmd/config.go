@@ -64,20 +64,20 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 	return airunwayv1alpha1.InferenceProviderConfigSpec{
 		Capabilities: &airunwayv1alpha1.ProviderCapabilities{
 			Engines: []airunwayv1alpha1.EngineCapability{
-			{
-				Name: airunwayv1alpha1.EngineTypeVLLM,
-				ServingModes: []airunwayv1alpha1.ServingMode{
-					airunwayv1alpha1.ServingModeAggregated,
-					airunwayv1alpha1.ServingModeDisaggregated,
+				{
+					Name: airunwayv1alpha1.EngineTypeVLLM,
+					ServingModes: []airunwayv1alpha1.ServingMode{
+						airunwayv1alpha1.ServingModeAggregated,
+						airunwayv1alpha1.ServingModeDisaggregated,
+					},
+					APIFormats: []airunwayv1alpha1.APIFormat{
+						airunwayv1alpha1.APIFormatOpenAIChat,
+						airunwayv1alpha1.APIFormatOpenAIResponses,
+						airunwayv1alpha1.APIFormatAnthropicMessages,
+					},
+					GPUSupport:  true,
+					RequiresCRD: &requiresCRD,
 				},
-			APIFormats: []airunwayv1alpha1.APIFormat{
-				airunwayv1alpha1.APIFormatOpenAIChat,
-				airunwayv1alpha1.APIFormatOpenAIResponses,
-				airunwayv1alpha1.APIFormatAnthropicMessages,
-			},
-				GPUSupport:  true,
-				RequiresCRD: &requiresCRD,
-			},
 			},
 		},
 		SelectionRules: []airunwayv1alpha1.SelectionRule{},
