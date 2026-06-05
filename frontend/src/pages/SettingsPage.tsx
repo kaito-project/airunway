@@ -46,7 +46,7 @@ import {
   Trash2,
   Globe,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { useSearchParams } from 'react-router-dom'
 
 type SettingsTab = 'general' | 'runtimes' | 'integrations'
@@ -141,12 +141,11 @@ const formatHeartbeatAge = (heartbeat?: string): string | null => {
   if (!heartbeat) return null
   const ts = Date.parse(heartbeat)
   if (Number.isNaN(ts)) return null
-  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  return `${hours}h ago`
+  // Clamp future heartbeats (clock skew between cluster and browser) to "now"
+  // so the UI never shows a negative age. formatRelativeTime then handles the
+  // human-readable formatting, keeping it consistent with the rest of the app.
+  const safe = Math.min(Date.now(), ts)
+  return formatRelativeTime(new Date(safe).toISOString())
 }
 
 const describeIntegrationStatus = (source: ShimStatusSource | undefined | null): IntegrationStatus => {
@@ -791,6 +790,9 @@ export function SettingsPage() {
                         </div>
                       </div>
                       {(() => {
+                        if (installationStatus?.shimRegistered === undefined) {
+                          return null
+                        }
                         const integration = describeIntegrationStatus(installationStatus)
                         return (
                           <div
