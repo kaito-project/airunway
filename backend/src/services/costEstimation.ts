@@ -93,14 +93,17 @@ const GPU_MODELS: Record<string, GpuModelInfo> = {
 const DEFAULT_GPU = 'A10';
 
 /**
- * Normalize GPU model name from Kubernetes node label to our GPU key
+ * Match a raw GPU label to a known GPU_MODELS key, or `undefined` when no entry
+ * matches. This is the strict core shared by both the lenient and strict public
+ * helpers — it never substitutes a default, so callers that must distinguish
+ * "unknown GPU" from "real match" (e.g. the throughput estimator) can do so.
  *
  * @param gpuLabel - The raw GPU label from nvidia.com/gpu.product
- * @returns Normalized GPU model name
+ * @returns The matched GPU_MODELS key, or undefined if unrecognized
  */
-export function normalizeGpuModel(gpuLabel: string): string {
+export function normalizeKnownGpuModel(gpuLabel: string): string | undefined {
   if (!gpuLabel) {
-    return DEFAULT_GPU;
+    return undefined;
   }
 
   const normalizedLabel = gpuLabel.trim();
@@ -149,12 +152,37 @@ export function normalizeGpuModel(gpuLabel: string): string {
     }
   }
 
+  return undefined;
+}
+
+/**
+ * Normalize GPU model name from Kubernetes node label to our GPU key.
+ *
+ * Lenient: unrecognized labels fall back to {@link DEFAULT_GPU} (A10). This is
+ * acceptable for the legacy cost-estimation paths (which only label the result
+ * and never silently report wrong specs), but NOT for the throughput estimator —
+ * an A10 substitution there yields confidently-wrong speed and FP8 numbers. Use
+ * {@link normalizeKnownGpuModel} when an unknown GPU must be treated as unknown.
+ *
+ * @param gpuLabel - The raw GPU label from nvidia.com/gpu.product
+ * @returns Normalized GPU model name (defaults to A10 when unrecognized)
+ */
+export function normalizeGpuModel(gpuLabel: string): string {
+  const matched = normalizeKnownGpuModel(gpuLabel);
+  if (matched) {
+    return matched;
+  }
   logger.warn({ gpuLabel }, 'Could not normalize GPU model, using default');
   return DEFAULT_GPU;
 }
 
 /**
- * Get GPU model info (memory, generation) for a GPU model
+ * Get GPU model info (memory, generation) for a GPU model.
+ *
+ * Lenient: an unrecognized label resolves through the A10 default, so this
+ * returns A10's info rather than `undefined` for unknown GPUs. For estimation
+ * paths that must skip unknown hardware, use {@link getKnownGpuInfo}.
+ *
  * Note: For actual pricing, use cloudPricing.ts
  */
 export function getGpuInfo(gpuModel: string): GpuModelInfo | undefined {
@@ -163,13 +191,28 @@ export function getGpuInfo(gpuModel: string): GpuModelInfo | undefined {
 }
 
 /**
+ * Strict variant of {@link getGpuInfo}: returns the GPU's specs only when the
+ * label maps to a known GPU_MODELS entry, and `undefined` otherwise (no A10
+ * fallback). The throughput estimator uses this so a new/unsupported GPU label
+ * is skipped or surfaced as "unknown" instead of silently estimated as an A10.
+ */
+export function getKnownGpuInfo(gpuModel: string): GpuModelInfo | undefined {
+  const normalizedModel = normalizeKnownGpuModel(gpuModel);
+  return normalizedModel ? GPU_MODELS[normalizedModel] : undefined;
+}
+
+/**
  * Whether a GPU model has a native FP8 datapath. Used to gate FP8 KV-cache
  * sizing in the throughput estimator: only Hopper (H100, H200) has hardware FP8
  * support, so requesting an FP8 KV cache on older generations should fall back
  * to 2-byte (fp16/bf16) for a realistic estimate.
+ *
+ * Uses the strict lookup so an unknown GPU label reports `false` because we
+ * genuinely don't know it supports FP8 — not because it was coerced to a
+ * (non-Hopper) A10 default.
  */
 export function gpuSupportsFp8(gpuModel: string): boolean {
-  return getGpuInfo(gpuModel)?.generation === 'Hopper';
+  return getKnownGpuInfo(gpuModel)?.generation === 'Hopper';
 }
 
 /**
@@ -251,7 +294,9 @@ export function getSupportedGpuModels(): Array<{
  */
 export const costEstimationService = {
   normalizeGpuModel,
+  normalizeKnownGpuModel,
   getGpuInfo,
+  getKnownGpuInfo,
   estimateCost,
   estimateNodePoolCosts,
   getSupportedGpuModels,

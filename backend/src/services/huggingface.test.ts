@@ -263,6 +263,85 @@ describe('HuggingFaceService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
+    test('reads transformer dimensions from a nested text_config (multimodal)', async () => {
+      // Many image-text-to-text / multimodal configs describe the composite
+      // model at the top level and nest the language-model dimensions under
+      // text_config. Those fields must be read from the nested object so the
+      // estimate stays high-confidence instead of degrading to per-chat-only.
+      const multimodalConfig = JSON.stringify({
+        model_type: 'llava',
+        torch_dtype: 'float16',
+        vision_config: { hidden_size: 1024 },
+        text_config: {
+          num_hidden_layers: 32,
+          num_attention_heads: 32,
+          num_key_value_heads: 8,
+          hidden_size: 4096,
+          max_position_embeddings: 4096,
+          torch_dtype: 'bfloat16',
+        },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(multimodalConfig, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/multimodal-text');
+
+      expect(arch).toEqual({
+        numLayers: 32,
+        numKvHeads: 8,
+        // head_dim derived from nested hidden_size / num_attention_heads.
+        headDim: 128,
+        maxPositionEmbeddings: 4096,
+        // Nested torch_dtype wins over the top-level one.
+        torchDtype: 'bfloat16',
+      });
+    });
+
+    test('prefers top-level transformer fields over a nested text_config', async () => {
+      // A plain decoder LLM that also happens to carry a nested sub-config must
+      // still read its dimensions from the top level (it's the real model).
+      const config = JSON.stringify({
+        num_hidden_layers: 80,
+        num_attention_heads: 64,
+        num_key_value_heads: 8,
+        head_dim: 128,
+        max_position_embeddings: 8192,
+        torch_dtype: 'bfloat16',
+        text_config: { num_hidden_layers: 4, num_attention_heads: 4 },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(config, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/decoder-with-subconfig');
+
+      expect(arch?.numLayers).toBe(80);
+      expect(arch?.numKvHeads).toBe(8);
+    });
+
+    test('reads from llm_config when text_config is absent', async () => {
+      const config = JSON.stringify({
+        model_type: 'internvl',
+        llm_config: {
+          num_hidden_layers: 48,
+          num_attention_heads: 32,
+          num_key_value_heads: 4,
+          head_dim: 128,
+          max_position_embeddings: 16384,
+        },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(config, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/internvl');
+
+      expect(arch?.numLayers).toBe(48);
+      expect(arch?.numKvHeads).toBe(4);
+      expect(arch?.maxPositionEmbeddings).toBe(16384);
+    });
+
     test('serves a cached result without re-fetching while fresh', async () => {
       mockFetch.mockImplementation(() =>
         Promise.resolve(new Response(configJson, { status: 200 }))

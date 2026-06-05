@@ -83,7 +83,12 @@ function architectureCacheKey(modelId: string, hfToken?: string): string {
 }
 
 /** Shape of the subset of HuggingFace config.json fields we read. */
-interface HfConfigJson {
+/**
+ * The transformer dimensions we read from a HuggingFace `config.json`. For a
+ * plain decoder LLM these live at the top level; for many multimodal /
+ * image-text-to-text models they live in a nested sub-config (see below).
+ */
+interface HfTransformerConfig {
   num_hidden_layers?: number;
   num_attention_heads?: number;
   num_key_value_heads?: number;
@@ -91,6 +96,45 @@ interface HfConfigJson {
   hidden_size?: number;
   max_position_embeddings?: number;
   torch_dtype?: string;
+}
+
+interface HfConfigJson extends HfTransformerConfig {
+  // Composite/multimodal configs (LLaVA, InternVL, Llama-4, Gemma-3, Mllama, …)
+  // nest the language-model dimensions under a sub-config rather than at the top
+  // level. Checked in priority order by resolveTransformerConfig().
+  text_config?: HfTransformerConfig;
+  llm_config?: HfTransformerConfig;
+  language_config?: HfTransformerConfig;
+}
+
+/**
+ * Nested config keys that hold the language-model transformer dimensions on
+ * composite/multimodal models, in priority order.
+ */
+const NESTED_TEXT_CONFIG_KEYS = ['text_config', 'llm_config', 'language_config'] as const;
+
+/**
+ * Resolve the sub-config carrying the language-model transformer dimensions.
+ *
+ * Plain decoder LLMs keep `num_hidden_layers` & friends at the top level; many
+ * multimodal / image-text-to-text configs nest them under `text_config`,
+ * `llm_config`, or `language_config` while the top level only describes the
+ * composite model. Prefer the top-level fields when present (normal decoder),
+ * else the first nested sub-config that looks like a transformer (has
+ * `num_hidden_layers`). Falls back to the top-level object when nothing
+ * qualifies, preserving the prior degrade-to-low-confidence behavior.
+ */
+function resolveTransformerConfig(config: HfConfigJson): HfTransformerConfig {
+  if (config.num_hidden_layers != null) {
+    return config;
+  }
+  for (const key of NESTED_TEXT_CONFIG_KEYS) {
+    const nested = config[key];
+    if (nested && typeof nested === 'object' && nested.num_hidden_layers != null) {
+      return nested;
+    }
+  }
+  return config;
 }
 
 /**
@@ -400,21 +444,26 @@ class HuggingFaceService {
       return undefined;
     }
 
+    // For multimodal/composite models the transformer dimensions live in a
+    // nested sub-config (text_config / llm_config / language_config) rather than
+    // at the top level; resolve to whichever object actually holds them.
+    const tf = resolveTransformerConfig(config);
+
     // num_key_value_heads is absent on MHA models; fall back to attention heads.
-    const numKvHeads = config.num_key_value_heads ?? config.num_attention_heads;
+    const numKvHeads = tf.num_key_value_heads ?? tf.num_attention_heads;
     // head_dim is often omitted; derive from hidden_size / num_attention_heads.
     const headDim =
-      config.head_dim ??
-      (config.hidden_size && config.num_attention_heads
-        ? config.hidden_size / config.num_attention_heads
+      tf.head_dim ??
+      (tf.hidden_size && tf.num_attention_heads
+        ? tf.hidden_size / tf.num_attention_heads
         : undefined);
 
     const arch: ModelArchitecture = {
-      numLayers: config.num_hidden_layers,
+      numLayers: tf.num_hidden_layers,
       numKvHeads,
       headDim,
-      maxPositionEmbeddings: config.max_position_embeddings,
-      torchDtype: config.torch_dtype,
+      maxPositionEmbeddings: tf.max_position_embeddings,
+      torchDtype: tf.torch_dtype ?? config.torch_dtype,
     };
 
     // Cache successful lookups only.

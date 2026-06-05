@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import { getProviderHealth } from '../services/providerHealth';
-import { getGpuInfo, normalizeGpuModel, gpuSupportsFp8 } from '../services/costEstimation';
+import { getKnownGpuInfo, normalizeKnownGpuModel, gpuSupportsFp8 } from '../services/costEstimation';
 import { huggingFaceService, isValidHfRepoId } from '../services/huggingface';
 import {
   bytesPerWeightFor,
@@ -43,12 +43,13 @@ const MAX_CONTEXT_LEN = 32768;
 
 /** Query schema for GET /gpu-throughput. */
 const gpuThroughputQuerySchema = z.object({
-  modelId: z
-    .string()
-    .min(1)
-    .max(200)
-    .refine(isValidHfRepoId, 'Invalid Hugging Face model id')
-    .optional(),
+  // Accept any reasonably-bounded string here rather than enforcing a valid HF
+  // repo id at the schema level. The estimate can be produced from `paramCount`
+  // alone (low-confidence, bandwidth-only), so a curated/custom model id that is
+  // valid for Airunway but not a HuggingFace repo must NOT hard-400. The handler
+  // gates the token-bearing HF architecture fetch on `isValidHfRepoId(modelId)`,
+  // so an invalid/non-HF id simply skips that lookup and degrades gracefully.
+  modelId: z.string().min(1).max(200).optional(),
   paramCount: z.coerce.number().positive().max(9_000_000_000_000).optional(),
   contextLen: z.coerce.number().int().positive().max(1_048_576).optional(),
   quantization: z.enum(['fp8', 'int8', 'fp16', 'bf16']).optional(),
@@ -92,12 +93,17 @@ function selectGpuForEstimate(
 
   // 1. Explicit request: only honor it if a cluster pool actually runs that GPU
   //    model. Otherwise fall through so we never estimate for absent hardware.
-  if (requestedGpuModel) {
-    const requestedNormalized = normalizeGpuModel(requestedGpuModel);
+  //    Strict normalization: an unrecognized requested label yields `undefined`
+  //    here, so we never match it against a pool and instead fall through to the
+  //    highest-VRAM known pool (rather than coercing it to an A10).
+  const requestedNormalized = requestedGpuModel
+    ? normalizeKnownGpuModel(requestedGpuModel)
+    : undefined;
+  if (requestedNormalized) {
     const matchedPool = pools.find(
-      (p) => normalizeGpuModel(p.gpuModel as string) === requestedNormalized
+      (p) => normalizeKnownGpuModel(p.gpuModel as string) === requestedNormalized
     );
-    const info = matchedPool ? getGpuInfo(matchedPool.gpuModel as string) : undefined;
+    const info = matchedPool ? getKnownGpuInfo(matchedPool.gpuModel as string) : undefined;
     if (matchedPool && info) {
       const perNode = perNodeGpuCount(matchedPool);
       return {
@@ -110,15 +116,17 @@ function selectGpuForEstimate(
     }
   }
 
-  // 2. Otherwise choose the pool with the most per-GPU VRAM.
+  // 2. Otherwise choose the pool with the most per-GPU VRAM. Pools whose GPU
+  //    label isn't in our static spec table are skipped (getKnownGpuInfo →
+  //    undefined) so an unknown GPU is never silently estimated as an A10.
   let best: GpuEstimateSelection | undefined;
   for (const pool of pools) {
-    const info = getGpuInfo(pool.gpuModel as string);
+    const info = getKnownGpuInfo(pool.gpuModel as string);
     if (!info) continue;
     if (!best || info.memoryGb > best.perGpuMemoryGb) {
       const perNode = perNodeGpuCount(pool);
       best = {
-        resolvedGpuModel: normalizeGpuModel(pool.gpuModel as string),
+        resolvedGpuModel: normalizeKnownGpuModel(pool.gpuModel as string) as string,
         perGpuMemoryGb: info.memoryGb,
         memBandwidthGBs: info.memBandwidthGBs,
         capacityLabel: `${perNode}x${info.memoryGb} GB`,
@@ -354,8 +362,14 @@ const installation = new Hono()
     });
 
     // Architecture details (config.json) are needed for the concurrency number;
-    // degrade gracefully to per-chat-only when unavailable.
-    const arch = modelId ? await huggingFaceService.getModelArchitecture(modelId, hfToken) : undefined;
+    // degrade gracefully to per-chat-only when unavailable. Only a valid HF repo
+    // id triggers the token-bearing fetch — a curated/custom id (valid for
+    // Airunway but not a HuggingFace repo) skips the lookup and still produces
+    // the bandwidth-only estimate from `paramCount` instead of erroring.
+    const arch =
+      modelId && isValidHfRepoId(modelId)
+        ? await huggingFaceService.getModelArchitecture(modelId, hfToken)
+        : undefined;
 
     // Resolve the context length used for KV sizing *after* fetching arch, so
     // HuggingFace models (which carry no explicit contextLen) use their real

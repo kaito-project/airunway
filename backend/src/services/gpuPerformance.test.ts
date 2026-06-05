@@ -193,6 +193,14 @@ describe('gpuSupportsFp8 (KV-cache FP8 gating)', () => {
     expect(gpuSupportsFp8('T4')).toBe(false);
     expect(gpuSupportsFp8('V100')).toBe(false);
   });
+
+  test('false for an unknown GPU (strict lookup — not coerced to a default)', () => {
+    // An unrecognized label resolves to undefined under the strict lookup, so
+    // FP8 is reported unsupported because we genuinely don't know it — never
+    // because it was coerced to an A10 (or, worse, mistaken for Hopper).
+    expect(gpuSupportsFp8('NVIDIA-B200-192GB')).toBe(false);
+    expect(gpuSupportsFp8('Some-Future-GPU')).toBe(false);
+  });
 });
 
 describe('estimatePerChatTokensPerSec', () => {
