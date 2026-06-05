@@ -35,7 +35,8 @@ export interface ThroughputParams {
  *
  * Pass `enabled: false` to defer the fetch (e.g. until a catalog card scrolls
  * into view) — this avoids firing an HF config.json lookup for every rendered
- * card. The query is also disabled until a GPU model and param count are known.
+ * card. The query is also disabled until `paramCount` is known; the GPU model
+ * is chosen server-side, so callers no longer need to supply one.
  */
 export function useGpuThroughput(params: ThroughputParams, options?: { enabled?: boolean }) {
   const hfToken = getHfAccessToken()

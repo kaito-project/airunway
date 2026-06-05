@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 
 /**
  * Returns a ref to attach to an element and a boolean that flips to true the
@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
  */
 export function useInView<T extends Element = HTMLDivElement>(
   options?: IntersectionObserverInit
-): { ref: React.RefObject<T | null>; inView: boolean } {
+): { ref: RefObject<T | null>; inView: boolean } {
   const ref = useRef<T>(null)
   const [inView, setInView] = useState(false)
 
