@@ -46,6 +46,7 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	}
 	expectedVLLMFormats := []airunwayv1alpha1.APIFormat{
 		airunwayv1alpha1.APIFormatOpenAIChat,
+		airunwayv1alpha1.APIFormatOpenAIResponses,
 		airunwayv1alpha1.APIFormatAnthropicMessages,
 	}
 	if len(vllmCap.APIFormats) != len(expectedVLLMFormats) {
@@ -104,8 +105,24 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if len(trtllmCap.ServingModes) != 1 || trtllmCap.ServingModes[0] != airunwayv1alpha1.ServingModeAggregated {
 		t.Errorf("expected trtllm to support only aggregated serving mode")
 	}
-	if len(trtllmCap.APIFormats) != 1 || trtllmCap.APIFormats[0] != airunwayv1alpha1.APIFormatOpenAIChat {
-		t.Errorf("expected trtllm to support only openai-chat API format")
+	expectedTRTLLMFormats := []airunwayv1alpha1.APIFormat{
+		airunwayv1alpha1.APIFormatOpenAIChat,
+		airunwayv1alpha1.APIFormatOpenAIResponses,
+	}
+	if len(trtllmCap.APIFormats) != len(expectedTRTLLMFormats) {
+		t.Fatalf("expected trtllm to support %d API formats, got %d", len(expectedTRTLLMFormats), len(trtllmCap.APIFormats))
+	}
+	for _, expected := range expectedTRTLLMFormats {
+		found := false
+		for _, actual := range trtllmCap.APIFormats {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected trtllm to support API format %s", expected)
+		}
 	}
 
 	if len(spec.SelectionRules) != 4 {

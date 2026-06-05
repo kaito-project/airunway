@@ -203,7 +203,7 @@ export const mockInferenceProviderConfig = {
   spec: {
     capabilities: {
       engines: [
-        { name: 'vllm', servingModes: ['aggregated'], apiFormats: ['openai-chat'], gpuSupport: true, cpuSupport: false },
+        { name: 'vllm', servingModes: ['aggregated'], apiFormats: ['openai-chat', 'openai-responses', 'anthropic-messages'], gpuSupport: true, cpuSupport: false },
         { name: 'llamacpp', servingModes: ['aggregated'], apiFormats: ['openai-chat'], gpuSupport: true, cpuSupport: true },
       ],
     },

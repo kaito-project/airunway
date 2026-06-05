@@ -39,7 +39,7 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Fatalf("expected vllm to support 2 serving modes, got %d", len(vllmCap.ServingModes))
 	}
 	if len(vllmCap.APIFormats) != 1 || vllmCap.APIFormats[0] != airunwayv1alpha1.APIFormatOpenAIChat {
-		t.Errorf("expected vllm to support openai-chat API format")
+		t.Errorf("expected vllm to support only openai-chat API format, got %v", vllmCap.APIFormats)
 	}
 
 	if len(spec.SelectionRules) != 1 {
