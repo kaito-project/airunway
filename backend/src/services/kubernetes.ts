@@ -3,7 +3,7 @@ import { configService } from './config';
 import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus } from '@airunway/shared';
 import { toModelDeploymentManifest, toDeploymentStatus, INFERENCE_GATEWAY_LABEL } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
 
@@ -221,9 +221,9 @@ class KubernetesService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.apiExtensionsApi = this.kc.makeApiClient(k8s.ApiextensionsV1Api);
+    this.customObjectsApi = makeApiClient(this.kc, k8s.CustomObjectsApi);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
+    this.apiExtensionsApi = makeApiClient(this.kc, k8s.ApiextensionsV1Api);
     this.defaultNamespace = process.env.DEFAULT_NAMESPACE || 'airunway-system';
   }
 
@@ -242,7 +242,7 @@ class KubernetesService {
     if (!userToken) {
       return this.customObjectsApi;
     }
-    return this.createUserKubeConfig(userToken).makeApiClient(k8s.CustomObjectsApi);
+    return makeApiClient(this.createUserKubeConfig(userToken), k8s.CustomObjectsApi);
   }
 
   /**
@@ -252,7 +252,7 @@ class KubernetesService {
     if (!userToken) {
       return this.coreV1Api;
     }
-    return this.createUserKubeConfig(userToken).makeApiClient(k8s.CoreV1Api);
+    return makeApiClient(this.createUserKubeConfig(userToken), k8s.CoreV1Api);
   }
 
   /**
@@ -261,7 +261,7 @@ class KubernetesService {
   private createUserClients(userToken: string) {
     const userKc = this.createUserKubeConfig(userToken);
     return {
-      authorizationV1Api: userKc.makeApiClient(k8s.AuthorizationV1Api),
+      authorizationV1Api: makeApiClient(userKc, k8s.AuthorizationV1Api),
     };
   }
 

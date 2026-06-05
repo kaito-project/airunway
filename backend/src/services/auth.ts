@@ -2,7 +2,7 @@ import * as k8s from '@kubernetes/client-node';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 
 /**
@@ -46,7 +46,7 @@ class AuthService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.authApi = this.kc.makeApiClient(k8s.AuthenticationV1Api);
+    this.authApi = makeApiClient(this.kc, k8s.AuthenticationV1Api);
   }
 
   /**

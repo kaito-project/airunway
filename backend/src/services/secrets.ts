@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import { withRetry } from '../lib/retry';
 import type { HfSecretStatus, HfUserInfo } from '@airunway/shared';
@@ -31,7 +31,7 @@ class SecretsService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
   }
 
   /**

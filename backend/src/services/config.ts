@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 
 // Default namespace for AI Runway deployments
@@ -28,7 +28,7 @@ class ConfigService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
   }
 
   /**
