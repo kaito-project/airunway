@@ -3,7 +3,7 @@ import { configService } from './config';
 import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus } from '@airunway/shared';
 import { toModelDeploymentManifest, toDeploymentStatus, INFERENCE_GATEWAY_LABEL } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
-import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient, kubeConfigToBunTls } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
 
@@ -2167,17 +2167,10 @@ class KubernetesService {
     // Extract auth headers from KubeConfig
     const authOpts = await kubeConfig.applyToFetchOptions({ headers: {} } as any);
 
-    // Extract TLS options (CA cert, client cert/key) from KubeConfig
-    const httpsOpts: { ca?: Buffer; cert?: Buffer; key?: Buffer; rejectUnauthorized?: boolean } = {};
-    await kubeConfig.applyToHTTPSOptions(httpsOpts as any);
-
-    const tlsOpts: Record<string, any> = {};
-    if (httpsOpts.ca) tlsOpts.ca = httpsOpts.ca;
-    if (httpsOpts.cert) tlsOpts.cert = httpsOpts.cert;
-    if (httpsOpts.key) tlsOpts.key = httpsOpts.key;
-    if (cluster.skipTLSVerify || httpsOpts.rejectUnauthorized === false) {
-      tlsOpts.rejectUnauthorized = false;
-    }
+    // Extract TLS material (CA, client cert/key, SNI, verification mode) via the
+    // shared kubeconfig→Bun mapping, so this raw-`fetch` path and the typed-API
+    // path (`BunTlsHttpLibrary`) stay in lockstep and cannot drift.
+    const tlsOpts = await kubeConfigToBunTls(kubeConfig);
 
     const headers = new Headers((authOpts.headers as HeadersInit) || {});
     if (requestInit.headers) {
@@ -2189,7 +2182,7 @@ class KubernetesService {
       headers,
     };
 
-    if (Object.keys(tlsOpts).length > 0) {
+    if (tlsOpts) {
       fetchOpts.tls = tlsOpts;
     }
 
