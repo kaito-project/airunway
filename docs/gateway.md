@@ -1,6 +1,6 @@
 # Gateway API Inference Extension Integration
 
-> **Pinned versions:** the `GAIE_VERSION` referenced in this document is sourced from [`/versions.env`](../versions.env) at the repo root. Substitute that value (currently `v1.5.0`) when running the commands below, or `source` the file in your shell: `set -a; source versions.env; set +a`.
+> **Pinned versions:** the `GAIE_VERSION` referenced in this document is sourced from [`/versions.env`](https://github.com/kaito-project/airunway/blob/main/versions.env) at the repo root. Substitute that value (currently `v1.5.0`) when running the commands below, or `source` the file in your shell: `set -a; source versions.env; set +a`.
 
 ## Overview
 
@@ -73,6 +73,16 @@ AI Runway works with any Gateway API implementation that supports the [Inference
 > **Note:** The only difference between implementations is the `gatewayClassName` in your Gateway resource. All AIRunway-managed resources (InferencePool, HTTPRoute) are identical regardless of which gateway you use.
 
 ## Setup
+
+> [!TIP]
+> **Istio shortcut:** `make setup-gateway` (from the repo root) performs the entire manual
+> **Istio** setup below in one shot — it installs the Gateway API CRDs (Step 1), the Gateway
+> API Inference Extension (GAIE) CRDs (Step 2), Istio with the inference extension enabled
+> (Step 3), the `inference-gateway` Gateway resource (Step 4), and the Body-Based Router (see
+> [Body-Based Routing](#body-based-routing-bbr)). The
+> `GATEWAY_API_VERSION`, `ISTIO_VERSION`, and `GAIE_VERSION` it uses are pinned in
+> [`/versions.env`](https://github.com/kaito-project/airunway/blob/main/versions.env), and `istioctl` must be on your PATH. For other gateway
+> implementations, follow the manual steps below.
 
 ### Step 1: Install Gateway API CRDs
 
@@ -196,7 +206,7 @@ helm install body-based-router \
 ```
 
 > [!NOTE]
-> The BBR chart version should match the GAIE version used by AI Runway. The pinned value lives in [`/versions.env`](../versions.env); update both at the same time when bumping.
+> The BBR chart version should match the GAIE version used by AI Runway. The pinned value lives in [`/versions.env`](https://github.com/kaito-project/airunway/blob/main/versions.env); update both at the same time when bumping.
 
 Replace `provider.name` with your gateway implementation (`istio`, `gke`, or omit for others). The chart deploys the BBR container and any provider-specific resources (e.g. EnvoyFilter for Istio).
 
@@ -267,10 +277,22 @@ metadata:
   name: dynamo
 spec:
   capabilities:
-    engines: [vllm, sglang, trtllm]
-    gateway:
-      inferencePoolNamePattern: "{namespace}-{name}-pool"  # Pattern for the pool name
-      inferencePoolNamespace: "dynamo-system"        # Namespace where the pool is created
+    engines:
+      - name: vllm
+        gateway:
+          managesInferencePool: true                # Provider creates and owns the InferencePool/EPP
+          inferencePoolNamePattern: "{name}-pool"   # Pattern for the pool name
+          inferencePoolNamespace: "{namespace}"     # Namespace where the pool is created
+      - name: sglang
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
+      - name: trtllm
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
 ```
 
 The controller adapts its reconciliation based on these flags:

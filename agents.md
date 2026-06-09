@@ -20,7 +20,8 @@
 - `backend/src/` - Hono app, providers, services
 - `shared/types/` - Shared TypeScript definitions
 - `plugins/headlamp/` - Headlamp dashboard plugin
-- `docs/` - Detailed documentation (read as needed)
+- `docs/` - Detailed documentation (read as needed; also the source rendered on the website)
+- `website/` - Docusaurus site published to https://kaito-project.github.io/airunway/. Reads from `docs/` via `docs.path: '../docs'` — write docs as plain GitHub-Flavored Markdown and they render in both places.
 
 **Core pattern**: Provider abstraction via CRDs:
 - `ModelDeployment` - Unified API for deploying ML models
@@ -70,6 +71,22 @@ bun run test             # Run plugin tests
 make setup               # Install deps, build, and deploy to Headlamp
 make dev                 # Build and deploy for development
 ```
+
+### Website (Docusaurus)
+
+```bash
+cd website
+bun install              # Install website dependencies
+bun run start            # Local dev server with hot reload
+bun run build            # Production build (must pass before merge)
+bun run serve            # Serve the production build locally
+```
+
+Docs sources stay in `/docs/*.md` (single source of truth). When the build
+warns about a broken link or MDX issue, fix the source markdown — the site is
+configured with `markdown.format: 'detect'` so `.md` files are treated as
+plain GFM, not MDX. Anything in `{curly braces}` or bare `<angle-tags>` in a
+`.md` file will only be parsed as JSX if the file is renamed to `.mdx`.
 
 **Always run `bun run test` after implementing functionality to verify both frontend and backend changes.**
 

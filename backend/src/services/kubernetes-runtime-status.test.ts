@@ -17,7 +17,7 @@ describe('KubernetesService - Runtime Status', () => {
   function mockProviderConfigs(items: any[]) {
     const service = kubernetesService as any;
     const original = service.customObjectsApi.listClusterCustomObject;
-    service.customObjectsApi.listClusterCustomObject = async () => ({ body: { items } });
+    service.customObjectsApi.listClusterCustomObject = async () => ({ items });
     restores.push(() => {
       service.customObjectsApi.listClusterCustomObject = original;
     });
@@ -36,14 +36,14 @@ describe('KubernetesService - Runtime Status', () => {
     const service = kubernetesService as any;
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
-    service.coreV1Api.listNamespacedPod = async (...args: any[]) => {
-      expect(args[0]).toBe(namespace);
-      const requestedSelector = args[5];
-      return { body: { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
+    service.coreV1Api.listNamespacedPod = async (arg: any) => {
+      expect(arg.namespace).toBe(namespace);
+      const requestedSelector = arg.labelSelector;
+      return { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
-    service.coreV1Api.listPodForAllNamespaces = async (...args: any[]) => {
-      const requestedSelector = args[3];
-      return { body: { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
+    service.coreV1Api.listPodForAllNamespaces = async (arg: any) => {
+      const requestedSelector = arg?.labelSelector;
+      return { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
     restores.push(() => {
       service.coreV1Api.listNamespacedPod = originalNamespaced;
@@ -184,8 +184,9 @@ describe('KubernetesService - Runtime Status', () => {
       spec: {
         ...mockInferenceProviderConfig.spec,
         capabilities: {
-          ...mockInferenceProviderConfig.spec.capabilities,
-          requiresCRD: true,
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: true },
+          ],
         },
       },
       status: {
@@ -211,6 +212,52 @@ describe('KubernetesService - Runtime Status', () => {
     expect(vllm?.requiresCRD).toBe(true);
     expect(vllm?.version).toBe('0.8.0');
     expect(vllm?.message).toBe('vLLM is installed and running');
+  });
+
+  test('honors per-engine requiresCRD: false on the migrated schema for custom-named runtime entries', async () => {
+    // Post-migration: legacy top-level capabilities.requiresCRD has been
+    // stripped, and the verdict lives on each engine. The provider id/display
+    // name are non-canonical, so the canonical-id fallback cannot mask a
+    // buggy aggregation.
+    const customConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'mycustom-runtime',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/provider-name': 'My Custom Runtime',
+        },
+      },
+      spec: {
+        capabilities: {
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+            { name: 'sglang', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+          ],
+        },
+      },
+      status: {
+        ready: true,
+        version: '0.1.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([customConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const custom = runtimes.find((runtime) => runtime.id === 'mycustom-runtime');
+
+    expect(custom).toBeDefined();
+    expect(custom?.name).toBe('My Custom Runtime');
+    expect(custom?.installed).toBe(true);
+    expect(custom?.requiresCRD).toBe(false);
+    expect(custom?.crdFound).toBe(true);
+    expect(custom?.operatorRunning).toBe(true);
+    expect(custom?.message).toBe('Runtime is ready to use.');
   });
 
   test('reports ready providers that do not require runtime CRDs as installed without probing an operator', async () => {
