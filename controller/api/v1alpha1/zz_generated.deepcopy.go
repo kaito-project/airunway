@@ -119,7 +119,13 @@ func (in *AgentDeploymentList) DeepCopyObject() runtime.Object {
 func (in *AgentDeploymentSpec) DeepCopyInto(out *AgentDeploymentSpec) {
 	*out = *in
 	out.Framework = in.Framework
-	in.Model.DeepCopyInto(&out.Model)
+	if in.Models != nil {
+		in, out := &in.Models, &out.Models
+		*out = make([]ModelBinding, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Config != nil {
 		in, out := &in.Config, &out.Config
 		*out = new(runtime.RawExtension)
@@ -160,10 +166,12 @@ func (in *AgentDeploymentStatus) DeepCopyInto(out *AgentDeploymentStatus) {
 		*out = new(AgentFrameworkStatus)
 		**out = **in
 	}
-	if in.ModelBinding != nil {
-		in, out := &in.ModelBinding, &out.ModelBinding
-		*out = new(ModelBindingStatus)
-		(*in).DeepCopyInto(*out)
+	if in.ModelBindings != nil {
+		in, out := &in.ModelBindings, &out.ModelBindings
+		*out = make([]ModelBindingStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	if in.Runtime != nil {
 		in, out := &in.Runtime, &out.Runtime

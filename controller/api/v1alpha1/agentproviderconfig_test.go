@@ -19,6 +19,10 @@ package v1alpha1
 import (
 	"reflect"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func TestAgentProviderCapabilities_HasBindingMode(t *testing.T) {
@@ -141,8 +145,9 @@ func TestAgentProviderConfigSpec_GetCatalogItem(t *testing.T) {
 		if got.Title != "Personal Assistant" {
 			t.Errorf("unexpected title: %q", got.Title)
 		}
-		// Confirm it's a pointer into the underlying slice so callers can
-		// mutate or compare by identity.
+		// Confirm it's a pointer into the underlying slice so callers
+		// can compare by identity. (See GetCatalogItem godoc: callers
+		// must not mutate through this pointer.)
 		if got != &spec.Catalog[1] {
 			t.Error("GetCatalogItem should return a pointer into the underlying slice")
 		}
@@ -185,4 +190,92 @@ func TestAgentProviderConfigSpec_CatalogItemNames(t *testing.T) {
 			t.Errorf("CatalogItemNames() = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestAgentProviderConfig_DeepCopy is a smoke test that the generated
+// DeepCopy methods produce an independent object. Catches accidental
+// shallow copies introduced by hand-edited zz_generated files (mirrors
+// TestAgentDeployment_DeepCopy for the AgentProviderConfig type).
+func TestAgentProviderConfig_DeepCopy(t *testing.T) {
+	ready := true
+	requiresOp := true
+	readOnlyRootFS := false
+	now := metav1.Now()
+	orig := &AgentProviderConfig{
+		Spec: AgentProviderConfigSpec{
+			Capabilities: &AgentProviderCapabilities{
+				Backend:           AgentProviderBackendContainer,
+				RequiresOperator:  &requiresOp,
+				ModelBindingModes: []ModelBindingMode{ModelBindingModeDeploymentRef, ModelBindingModeExternalAPI},
+				Protocols:         []AgentToolProtocol{AgentToolProtocolMCP, AgentToolProtocolOpenAITools},
+			},
+			Catalog: []AgentCatalogItem{
+				{
+					Name:        "openclaw-personal-assistant",
+					Title:       "Personal Assistant",
+					Description: "OpenClaw-powered personal automation",
+					Tags:        []string{"personal", "automation"},
+					Image:       "ghcr.io/openclaw/openclaw:latest",
+					RecommendedSecurity: &AgentSecuritySpec{
+						PodSecurityStandard: PodSecurityStandardRestricted,
+						ContainerSecurityContext: &corev1.SecurityContext{
+							ReadOnlyRootFilesystem: &readOnlyRootFS,
+						},
+					},
+					Template: &runtime.RawExtension{Raw: []byte(`{"systemPrompt":"hi"}`)},
+				},
+			},
+		},
+		Status: AgentProviderConfigStatus{
+			Ready:         &ready,
+			Version:       "v0.1.0",
+			LastHeartbeat: &now,
+		},
+	}
+
+	cp := orig.DeepCopy()
+	if cp == orig {
+		t.Fatal("DeepCopy returned the same pointer")
+	}
+	if cp.Spec.Capabilities == orig.Spec.Capabilities {
+		t.Error("Capabilities should be a fresh allocation, not shared")
+	}
+	if cp.Spec.Capabilities.RequiresOperator == orig.Spec.Capabilities.RequiresOperator {
+		t.Error("Capabilities.RequiresOperator *bool should be a fresh allocation, not shared")
+	}
+	if &cp.Spec.Capabilities.ModelBindingModes[0] == &orig.Spec.Capabilities.ModelBindingModes[0] {
+		t.Error("Capabilities.ModelBindingModes slice should be a fresh allocation, not shared")
+	}
+	if &cp.Spec.Catalog[0] == &orig.Spec.Catalog[0] {
+		t.Error("Catalog slice should be a fresh allocation, not shared")
+	}
+	if cp.Spec.Catalog[0].RecommendedSecurity == orig.Spec.Catalog[0].RecommendedSecurity {
+		t.Error("Catalog[0].RecommendedSecurity should be a fresh allocation, not shared")
+	}
+	if cp.Spec.Catalog[0].Template == orig.Spec.Catalog[0].Template {
+		t.Error("Catalog[0].Template RawExtension should be a fresh allocation, not shared")
+	}
+	if cp.Status.Ready == orig.Status.Ready {
+		t.Error("Status.Ready *bool should be a fresh allocation, not shared")
+	}
+	if cp.Status.LastHeartbeat == orig.Status.LastHeartbeat {
+		t.Error("Status.LastHeartbeat *Time should be a fresh allocation, not shared")
+	}
+
+	// Mutating the copy must not affect the original.
+	*cp.Status.Ready = false
+	if *orig.Status.Ready != true {
+		t.Error("mutating copy Ready leaked into original")
+	}
+	cp.Spec.Catalog[0].Title = "Changed"
+	if orig.Spec.Catalog[0].Title != "Personal Assistant" {
+		t.Errorf("mutating copy Catalog[0].Title leaked into original: %q", orig.Spec.Catalog[0].Title)
+	}
+}
+
+// TestAgentProviderConfig_DeepCopyObject confirms the runtime.Object
+// interface is satisfied (so the type can be registered with a scheme).
+func TestAgentProviderConfig_DeepCopyObject(t *testing.T) {
+	var _ runtime.Object = (*AgentProviderConfig)(nil)
+	var _ runtime.Object = (*AgentProviderConfigList)(nil)
 }

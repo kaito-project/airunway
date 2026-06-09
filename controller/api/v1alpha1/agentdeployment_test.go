@@ -33,8 +33,11 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 	orig := &AgentDeployment{
 		Spec: AgentDeploymentSpec{
 			Framework: AgentFrameworkRef{Name: "kagent"},
-			Model: ModelBinding{
-				DeploymentRef: &ModelDeploymentBinding{Name: "llama-3-8b"},
+			Models: []ModelBinding{
+				{
+					Name:          "default",
+					DeploymentRef: &ModelDeploymentBinding{Name: "llama-3-8b"},
+				},
 			},
 			Config: &runtime.RawExtension{Raw: []byte(`{"systemPrompt":"hi"}`)},
 			Security: &AgentSecuritySpec{
@@ -53,8 +56,11 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 	if cp == orig {
 		t.Fatal("DeepCopy returned the same pointer")
 	}
-	if cp.Spec.Model.DeploymentRef == orig.Spec.Model.DeploymentRef {
-		t.Error("DeploymentRef should be a fresh allocation, not shared")
+	if &cp.Spec.Models[0] == &orig.Spec.Models[0] {
+		t.Error("Models slice should be a fresh allocation, not shared")
+	}
+	if cp.Spec.Models[0].DeploymentRef == orig.Spec.Models[0].DeploymentRef {
+		t.Error("Models[0].DeploymentRef should be a fresh allocation, not shared")
 	}
 	if cp.Spec.Config == orig.Spec.Config {
 		t.Error("Config RawExtension should be a fresh allocation, not shared")
@@ -74,6 +80,10 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 	cp.Spec.Framework.Name = "openclaw"
 	if orig.Spec.Framework.Name != "kagent" {
 		t.Errorf("mutating copy leaked into original: %q", orig.Spec.Framework.Name)
+	}
+	cp.Spec.Models[0].Name = "changed"
+	if orig.Spec.Models[0].Name != "default" {
+		t.Errorf("mutating copy Models[0].Name leaked into original: %q", orig.Spec.Models[0].Name)
 	}
 }
 

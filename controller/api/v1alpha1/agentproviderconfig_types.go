@@ -247,6 +247,11 @@ func (c *AgentProviderCapabilities) HasProtocol(p AgentToolProtocol) bool {
 
 // GetCatalogItem returns the catalog item with the given name, or nil
 // when the spec has no matching entry.
+//
+// The returned pointer aliases s.Catalog[i], so callers MUST NOT
+// mutate the underlying item: this method is used during reconciliation
+// hot paths where the spec is shared, cache-backed memory. Treat the
+// result as read-only; copy first if you need to modify it.
 func (s *AgentProviderConfigSpec) GetCatalogItem(name string) *AgentCatalogItem {
 	if s == nil {
 		return nil

@@ -149,6 +149,14 @@ type ExternalAPIBinding struct {
 }
 
 // SecretKeyRef identifies a key within a Secret.
+//
+// Lookups are always scoped to the parent AgentDeployment's namespace.
+// The core controller resolves any spec-side SecretKeyRef during
+// reconciliation and surfaces the resolution result on
+// AgentDeploymentStatus.modelBindings[*].credentialsRef; framework
+// providers MUST consume the status field rather than re-resolve
+// secrets themselves. As a consequence, framework provider
+// controllers do not need cluster-wide Secret read RBAC.
 type SecretKeyRef struct {
 	// name of the Secret in the AgentDeployment's namespace.
 	// +kubebuilder:validation:Required
@@ -161,10 +169,24 @@ type SecretKeyRef struct {
 	Key string `json:"key"`
 }
 
-// ModelBinding describes how the agent connects to its model. Exactly one
-// of deploymentRef, gatewayEndpoint, or externalAPI must be set.
+// ModelBinding describes how the agent connects to one model. Exactly
+// one of deploymentRef, gatewayEndpoint, or externalAPI must be set.
+//
+// The name field is the stable list key within
+// AgentDeploymentSpec.models and is the identifier framework providers
+// reference from spec.config (e.g. {"defaultModel": "reasoning"}). A
+// single-model agent typically uses a name like "default".
 // +kubebuilder:validation:XValidation:rule="((has(self.deploymentRef)?1:0)+(has(self.gatewayEndpoint)?1:0)+(has(self.externalAPI)?1:0)) == 1",message="exactly one of deploymentRef, gatewayEndpoint, or externalAPI must be set"
 type ModelBinding struct {
+	// name is a stable identifier for this binding within the agent.
+	// Used as the list key in AgentDeploymentSpec.models and as the
+	// reference key from framework-specific spec.config blobs.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	Name string `json:"name"`
+
 	// deploymentRef binds to an in-cluster ModelDeployment.
 	// +optional
 	DeploymentRef *ModelDeploymentBinding `json:"deploymentRef,omitempty"`
@@ -179,6 +201,12 @@ type ModelBinding struct {
 }
 
 // AgentSecuritySpec captures security/isolation policy for the agent.
+//
+// Most users should leave this unset and rely on the catalog entry's
+// recommendedSecurity defaults shipped by the framework provider.
+// Setting fields here is an escape hatch for deployments that need to
+// diverge from the recipe defaults (e.g. flipping
+// readOnlyRootFilesystem off for a framework that writes to disk).
 //
 // The shape lives in the API contract from day one so that provider
 // implementations can converge on a consistent model. Individual
@@ -262,10 +290,17 @@ type AgentDeploymentSpec struct {
 	// +kubebuilder:validation:Required
 	Framework AgentFrameworkRef `json:"framework"`
 
-	// model describes how the agent resolves its model endpoint. Exactly
-	// one binding mode must be set.
+	// models lists the model endpoints the agent can talk to. At least
+	// one entry is required. Each binding is identified by its name,
+	// which framework-specific spec.config blobs reference (e.g.
+	// {"defaultModel": "reasoning"}). Most agents only need one
+	// binding; multi-binding support exists for agents that mix a
+	// reasoning model with cheaper utility models.
 	// +kubebuilder:validation:Required
-	Model ModelBinding `json:"model"`
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
+	Models []ModelBinding `json:"models"`
 
 	// config carries framework-specific configuration (e.g. system
 	// prompt, skills, crew definition, graph definition).
@@ -295,14 +330,20 @@ type AgentDeploymentSpec struct {
 	Observability *AgentObservabilitySpec `json:"observability,omitempty"`
 }
 
-// ModelBindingStatus is the resolved binding the provider should consume.
+// ModelBindingStatus is a resolved binding the provider should consume.
 //
 // Written exclusively by the core controller. Framework providers MUST
-// read from this rather than re-resolving spec.model themselves, so that
-// the resolution surface (cross-namespace grants, secret lookups,
+// read from this rather than re-resolving spec.models themselves, so
+// that the resolution surface (cross-namespace grants, secret lookups,
 // gateway endpoint discovery) lives in exactly one place.
 type ModelBindingStatus struct {
-	// bindingMode echoes which binding mode in spec.model was used.
+	// name mirrors the spec.models[*].name list key so providers can
+	// match each resolved binding back to its declared entry. This is
+	// also the list key on status.modelBindings.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// bindingMode echoes which binding mode in spec.models[name] was used.
 	// +optional
 	BindingMode ModelBindingMode `json:"bindingMode,omitempty"`
 
@@ -377,21 +418,29 @@ type RuntimeWorkloadRef struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// AgentReplicaStatus captures replica counts reported by the framework provider.
+// AgentReplicaStatus captures replica counts reported by the framework
+// provider. The shape mirrors ModelDeployment.ReplicaStatus so shared UI
+// and dashboard code can render agent and model workloads identically.
 type AgentReplicaStatus struct {
-	// total is the desired number of agent instances.
+	// desired is the desired number of agent instances.
 	// +optional
-	Total int32 `json:"total,omitempty"`
+	Desired int32 `json:"desired,omitempty"`
 
 	// ready is the count of instances reporting ready.
 	// +optional
 	Ready int32 `json:"ready,omitempty"`
+
+	// available is the count of instances that have been ready for at
+	// least minReadySeconds (per the underlying workload's definition
+	// of available, e.g. apps/v1.Deployment.status.availableReplicas).
+	// +optional
+	Available int32 `json:"available,omitempty"`
 }
 
 // AgentDeployment condition types.
 const (
 	// AgentConditionTypeModelBound is True once the core controller has
-	// resolved spec.model into status.modelBinding.
+	// resolved every spec.models entry into status.modelBindings.
 	AgentConditionTypeModelBound = "ModelBound"
 
 	// AgentConditionTypeFrameworkReady is True once the core controller
@@ -413,7 +462,7 @@ const (
 // Status ownership is split between the core controller and the
 // framework provider controller; the field-owner is shown in parens.
 //
-//   - framework, modelBinding                                     (core)
+//   - framework, modelBindings                                    (core)
 //   - conditions[ModelBound], conditions[FrameworkReady]          (core)
 //   - conditions[Ready]                                           (core)
 //   - phase, runtime, replicas, conditions[ProviderReady]         (provider)
@@ -429,10 +478,13 @@ type AgentDeploymentStatus struct {
 	// +optional
 	Framework *AgentFrameworkStatus `json:"framework,omitempty"`
 
-	// modelBinding is the resolved model binding contract for the
-	// framework provider to consume. Owned by core.
+	// modelBindings is the per-entry resolved binding contract for the
+	// framework provider to consume, one element per spec.models entry.
+	// Owned by core.
 	// +optional
-	ModelBinding *ModelBindingStatus `json:"modelBinding,omitempty"`
+	// +listType=map
+	// +listMapKey=name
+	ModelBindings []ModelBindingStatus `json:"modelBindings,omitempty"`
 
 	// runtime describes the rendered workload. Owned by the framework provider.
 	// +optional
@@ -466,7 +518,7 @@ type AgentDeploymentStatus struct {
 // AgentDeployment is the Schema for the agentdeployments API.
 //
 // An AgentDeployment describes one agent instance: which framework
-// reconciles it, which model it talks to, and the framework-specific
+// reconciles it, which model(s) it talks to, and the framework-specific
 // configuration that defines its behaviour.
 type AgentDeployment struct {
 	metav1.TypeMeta   `json:",inline"`

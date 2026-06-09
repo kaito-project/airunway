@@ -9,9 +9,10 @@ metadata:
 spec:
   framework:
     name: kagent
-  model:
-    deploymentRef:
-      name: llama-3-8b
+  models:
+    - name: default
+      deploymentRef:
+        name: llama-3-8b
   config:
     systemPrompt: |
       You are a Kubernetes SRE assistant. Diagnose pod, deployment, and
@@ -43,14 +44,15 @@ metadata:
 spec:
   framework:
     name: openclaw
-  model:
-    externalAPI:
-      type: openai
-      baseURL: https://api.openai.com/v1
-      modelName: gpt-4o-mini
-      credentialsRef:
-        name: openai-api-key
-        key: api-key
+  models:
+    - name: default
+      externalAPI:
+        type: openai
+        baseURL: https://api.openai.com/v1
+        modelName: gpt-4o-mini
+        credentialsRef:
+          name: openai-api-key
+          key: api-key
   resources:
     requests:
       cpu: "200m"

@@ -45,7 +45,7 @@ spec:
           AgentDeployment is the Schema for the agentdeployments API.
 
           An AgentDeployment describes one agent instance: which framework
-          reconciles it, which model it talks to, and the framework-specific
+          reconciles it, which model(s) it talks to, and the framework-specific
           configuration that defines its behaviour.
         properties:
           apiVersion:
@@ -102,105 +102,134 @@ spec:
                 required:
                 - name
                 type: object
-              model:
+              models:
                 description: |-
-                  model describes how the agent resolves its model endpoint. Exactly
-                  one binding mode must be set.
-                properties:
-                  deploymentRef:
-                    description: deploymentRef binds to an in-cluster ModelDeployment.
-                    properties:
-                      name:
-                        description: name is the ModelDeployment name to bind to.
-                        minLength: 1
-                        type: string
-                      namespace:
-                        description: |-
-                          namespace defaults to the AgentDeployment's namespace when empty.
-                          Cross-namespace references require an AgentReferenceGrant (Phase 3).
-                        type: string
-                    required:
-                    - name
-                    type: object
-                  externalAPI:
-                    description: externalAPI binds to an external OpenAI-compatible
-                      endpoint.
-                    properties:
-                      baseURL:
-                        description: baseURL is the OpenAI-compatible base URL, e.g.
-                          "https://api.openai.com/v1".
-                        minLength: 1
-                        type: string
-                      credentialsRef:
-                        description: credentialsRef points at a Secret holding the
-                          API credentials.
-                        properties:
-                          key:
-                            description: key inside the Secret to read.
-                            minLength: 1
-                            type: string
-                          name:
-                            description: name of the Secret in the AgentDeployment's
-                              namespace.
-                            minLength: 1
-                            type: string
-                        required:
-                        - key
-                        - name
-                        type: object
-                      modelName:
-                        description: modelName is the model identifier the agent will
-                          request.
-                        minLength: 1
-                        type: string
-                      type:
-                        description: |-
-                          type identifies the well-known API shape. Use "custom" for any
-                          OpenAI-compatible endpoint not covered by the named types.
-                        enum:
-                        - openai
-                        - anthropic
-                        - azureOpenAI
-                        - custom
-                        type: string
-                    required:
-                    - baseURL
-                    - modelName
-                    - type
-                    type: object
-                  gatewayEndpoint:
-                    description: gatewayEndpoint binds to a model exposed through
-                      Gateway API (GAIE).
-                    properties:
-                      gatewayRef:
-                        description: gatewayRef points at the Gateway resource that
-                          serves the model.
-                        properties:
-                          name:
-                            description: name of the Gateway resource.
-                            minLength: 1
-                            type: string
-                          namespace:
-                            description: namespace of the Gateway resource.
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      modelName:
-                        description: modelName is the served model name advertised
-                          through the gateway.
-                        minLength: 1
-                        type: string
-                    required:
-                    - gatewayRef
-                    - modelName
-                    type: object
-                type: object
-                x-kubernetes-validations:
-                - message: exactly one of deploymentRef, gatewayEndpoint, or externalAPI
-                    must be set
-                  rule: ((has(self.deploymentRef)?1:0)+(has(self.gatewayEndpoint)?1:0)+(has(self.externalAPI)?1:0))
-                    == 1
+                  models lists the model endpoints the agent can talk to. At least
+                  one entry is required. Each binding is identified by its name,
+                  which framework-specific spec.config blobs reference (e.g.
+                  {"defaultModel": "reasoning"}). Most agents only need one
+                  binding; multi-binding support exists for agents that mix a
+                  reasoning model with cheaper utility models.
+                items:
+                  description: |-
+                    ModelBinding describes how the agent connects to one model. Exactly
+                    one of deploymentRef, gatewayEndpoint, or externalAPI must be set.
+
+                    The name field is the stable list key within
+                    AgentDeploymentSpec.models and is the identifier framework providers
+                    reference from spec.config (e.g. {"defaultModel": "reasoning"}). A
+                    single-model agent typically uses a name like "default".
+                  properties:
+                    deploymentRef:
+                      description: deploymentRef binds to an in-cluster ModelDeployment.
+                      properties:
+                        name:
+                          description: name is the ModelDeployment name to bind to.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: |-
+                            namespace defaults to the AgentDeployment's namespace when empty.
+                            Cross-namespace references require an AgentReferenceGrant (Phase 3).
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    externalAPI:
+                      description: externalAPI binds to an external OpenAI-compatible
+                        endpoint.
+                      properties:
+                        baseURL:
+                          description: baseURL is the OpenAI-compatible base URL,
+                            e.g. "https://api.openai.com/v1".
+                          minLength: 1
+                          type: string
+                        credentialsRef:
+                          description: credentialsRef points at a Secret holding the
+                            API credentials.
+                          properties:
+                            key:
+                              description: key inside the Secret to read.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: name of the Secret in the AgentDeployment's
+                                namespace.
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        modelName:
+                          description: modelName is the model identifier the agent
+                            will request.
+                          minLength: 1
+                          type: string
+                        type:
+                          description: |-
+                            type identifies the well-known API shape. Use "custom" for any
+                            OpenAI-compatible endpoint not covered by the named types.
+                          enum:
+                          - openai
+                          - anthropic
+                          - azureOpenAI
+                          - custom
+                          type: string
+                      required:
+                      - baseURL
+                      - modelName
+                      - type
+                      type: object
+                    gatewayEndpoint:
+                      description: gatewayEndpoint binds to a model exposed through
+                        Gateway API (GAIE).
+                      properties:
+                        gatewayRef:
+                          description: gatewayRef points at the Gateway resource that
+                            serves the model.
+                          properties:
+                            name:
+                              description: name of the Gateway resource.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: namespace of the Gateway resource.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        modelName:
+                          description: modelName is the served model name advertised
+                            through the gateway.
+                          minLength: 1
+                          type: string
+                      required:
+                      - gatewayRef
+                      - modelName
+                      type: object
+                    name:
+                      description: |-
+                        name is a stable identifier for this binding within the agent.
+                        Used as the list key in AgentDeploymentSpec.models and as the
+                        reference key from framework-specific spec.config blobs.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of deploymentRef, gatewayEndpoint, or externalAPI
+                      must be set
+                    rule: ((has(self.deploymentRef)?1:0)+(has(self.gatewayEndpoint)?1:0)+(has(self.externalAPI)?1:0))
+                      == 1
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               observability:
                 description: observability configures observability emission (OTLP
                   export).
@@ -705,7 +734,7 @@ spec:
                 type: object
             required:
             - framework
-            - model
+            - models
             type: object
           status:
             description: |-
@@ -714,7 +743,7 @@ spec:
               Status ownership is split between the core controller and the
               framework provider controller; the field-owner is shown in parens.
 
-                - framework, modelBinding                                     (core)
+                - framework, modelBindings                                    (core)
                 - conditions[ModelBound], conditions[FrameworkReady]          (core)
                 - conditions[Ready]                                           (core)
                 - phase, runtime, replicas, conditions[ProviderReady]         (provider)
@@ -796,53 +825,75 @@ spec:
                       AgentDeployment and the framework provider.
                     type: string
                 type: object
-              modelBinding:
+              modelBindings:
                 description: |-
-                  modelBinding is the resolved model binding contract for the
-                  framework provider to consume. Owned by core.
-                properties:
-                  baseURL:
-                    description: |-
-                      baseURL is the resolved OpenAI-compatible base URL for the model
-                      endpoint (e.g. http://my-model.inference.svc.cluster.local/v1).
-                    type: string
-                  bindingMode:
-                    description: bindingMode echoes which binding mode in spec.model
-                      was used.
-                    enum:
-                    - deploymentRef
-                    - gatewayEndpoint
-                    - externalAPI
-                    type: string
-                  credentialsRef:
-                    description: |-
-                      credentialsRef points at a Secret with credentials the agent
-                      should mount. Empty when no credentials are required.
-                    properties:
-                      key:
-                        description: key inside the Secret to read.
-                        minLength: 1
-                        type: string
-                      name:
-                        description: name of the Secret in the AgentDeployment's namespace.
-                        minLength: 1
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  modelName:
-                    description: modelName is the model identifier the agent should
-                      request.
-                    type: string
-                  observedResourceUID:
-                    description: |-
-                      observedResourceUID is the UID of the underlying resource (e.g.
-                      the ModelDeployment for deploymentRef bindings). The core
-                      controller uses this to detect delete+recreate so providers
-                      re-render agents when the upstream resource changes identity.
-                    type: string
-                type: object
+                  modelBindings is the per-entry resolved binding contract for the
+                  framework provider to consume, one element per spec.models entry.
+                  Owned by core.
+                items:
+                  description: |-
+                    ModelBindingStatus is a resolved binding the provider should consume.
+
+                    Written exclusively by the core controller. Framework providers MUST
+                    read from this rather than re-resolving spec.models themselves, so
+                    that the resolution surface (cross-namespace grants, secret lookups,
+                    gateway endpoint discovery) lives in exactly one place.
+                  properties:
+                    baseURL:
+                      description: |-
+                        baseURL is the resolved OpenAI-compatible base URL for the model
+                        endpoint (e.g. http://my-model.inference.svc.cluster.local/v1).
+                      type: string
+                    bindingMode:
+                      description: bindingMode echoes which binding mode in spec.models[name]
+                        was used.
+                      enum:
+                      - deploymentRef
+                      - gatewayEndpoint
+                      - externalAPI
+                      type: string
+                    credentialsRef:
+                      description: |-
+                        credentialsRef points at a Secret with credentials the agent
+                        should mount. Empty when no credentials are required.
+                      properties:
+                        key:
+                          description: key inside the Secret to read.
+                          minLength: 1
+                          type: string
+                        name:
+                          description: name of the Secret in the AgentDeployment's
+                            namespace.
+                          minLength: 1
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    modelName:
+                      description: modelName is the model identifier the agent should
+                        request.
+                      type: string
+                    name:
+                      description: |-
+                        name mirrors the spec.models[*].name list key so providers can
+                        match each resolved binding back to its declared entry. This is
+                        also the list key on status.modelBindings.
+                      type: string
+                    observedResourceUID:
+                      description: |-
+                        observedResourceUID is the UID of the underlying resource (e.g.
+                        the ModelDeployment for deploymentRef bindings). The core
+                        controller uses this to detect delete+recreate so providers
+                        re-render agents when the upstream resource changes identity.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               observedGeneration:
                 description: |-
                   observedGeneration is the AgentDeployment.metadata.generation
@@ -864,12 +915,19 @@ spec:
                   replicas summarises desired/ready instance counts. Owned by the
                   framework provider.
                 properties:
-                  ready:
-                    description: ready is the count of instances reporting ready.
+                  available:
+                    description: |-
+                      available is the count of instances that have been ready for at
+                      least minReadySeconds (per the underlying workload's definition
+                      of available, e.g. apps/v1.Deployment.status.availableReplicas).
                     format: int32
                     type: integer
-                  total:
-                    description: total is the desired number of agent instances.
+                  desired:
+                    description: desired is the desired number of agent instances.
+                    format: int32
+                    type: integer
+                  ready:
+                    description: ready is the count of instances reporting ready.
                     format: int32
                     type: integer
                 type: object
