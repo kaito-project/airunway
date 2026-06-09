@@ -39,6 +39,12 @@ type EngineCapability struct {
 	// +optional
 	ServingModes []ServingMode `json:"servingModes,omitempty"`
 
+	// apiFormats is the list of API formats this engine supports
+	// (e.g., openai-chat, anthropic-messages). Consumers should treat
+	// an empty list as equivalent to [openai-chat] for backward compatibility.
+	// +optional
+	APIFormats []APIFormat `json:"apiFormats,omitempty"`
+
 	// gpuSupport indicates if this engine supports GPU inference
 	// +optional
 	GPUSupport bool `json:"gpuSupport,omitempty"`
