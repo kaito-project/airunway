@@ -63,6 +63,7 @@ providers/*/bin/
 /test-results/
 /playwright-report/
 /playwright/.cache/
+.playwright-mcp/
 frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
