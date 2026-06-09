@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import { withRetry } from '../lib/retry';
 
@@ -37,8 +37,8 @@ class RegistryService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.appsV1Api = this.kc.makeApiClient(k8s.AppsV1Api);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
+    this.appsV1Api = makeApiClient(this.kc, k8s.AppsV1Api);
   }
 
   /**

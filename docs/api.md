@@ -1474,7 +1474,7 @@ Check if AI Configurator CLI is available on the system.
 **Notes:**
 
 - Status is cached for 5 minutes to avoid repeated CLI calls
-- AI Configurator must be installed locally: <https://github.com/ai-dynamo/aiconfigurator>
+- AI Configurator must be installed locally: [github.com/ai-dynamo/aiconfigurator](https://github.com/ai-dynamo/aiconfigurator)
 - When running inside Kubernetes, returns `runningInCluster: true` (AI Configurator is local-only)
 
 ### POST /aiconfigurator/analyze

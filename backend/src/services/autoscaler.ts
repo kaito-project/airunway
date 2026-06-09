@@ -1,7 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import type { AutoscalerDetectionResult, AutoscalerStatusInfo } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import * as yaml from 'js-yaml';
 
@@ -13,9 +13,9 @@ class AutoscalerService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.appsV1Api = this.kc.makeApiClient(k8s.AppsV1Api);
-    this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
+    this.appsV1Api = makeApiClient(this.kc, k8s.AppsV1Api);
+    this.customObjectsApi = makeApiClient(this.kc, k8s.CustomObjectsApi);
   }
 
   /**
