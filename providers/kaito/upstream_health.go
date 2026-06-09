@@ -48,11 +48,20 @@ const (
 	kaitoDeploymentSelectorKey   = "app.kubernetes.io/name"
 	kaitoDeploymentSelectorValue = "workspace"
 	// aksAddonSelectorValue matches the KAITO controller Deployment installed by
-	// the AKS AI-toolchain-operator add-on, which carries
-	// app.kubernetes.io/name=ai-toolchain-operator (in kube-system) instead of
-	// the upstream Helm chart's app.kubernetes.io/name=workspace.
-	aksAddonSelectorValue         = "ai-toolchain-operator"
-	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install KAITO with `helm install kaito-workspace kaito/workspace`, or enable the AKS AI toolchain operator add-on (`az aks update --enable-ai-toolchain-operator ...`)."
+	// the AKS AI-toolchain-operator add-on. Verified against a live
+	// `--enable-ai-toolchain-operator` cluster, the add-on Deployment carries
+	// BOTH app.kubernetes.io/name=ai-toolchain-operator AND app=ai-toolchain-operator
+	// (in kube-system), so probing the dotted key here is correct.
+	// NOTE: the add-on POD only carries the bare `app` label, so the TypeScript
+	// pod probe in backend/src/services/kubernetes.ts intentionally matches
+	// `app=ai-toolchain-operator` instead. The two paths use different label
+	// keys on purpose because they inspect different objects (Deployment here,
+	// Pod there).
+	aksAddonSelectorValue = "ai-toolchain-operator"
+	// controllerMissingUserMessage covers both the "never installed" case and the
+	// "add-on enabled but unhealthy" case, pointing at the namespace to inspect
+	// for each install path.
+	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install it with `helm install kaito-workspace kaito/workspace` (check the kaito-workspace namespace), or via the AKS AI toolchain operator add-on `az aks update --enable-ai-toolchain-operator ...` (check the kube-system namespace)."
 	controllerNotReadyUserMessage = "The KAITO workspace controller Deployment %s/%s exists but has no ready replicas."
 	crdMissingUserMessage         = "KAITO Workspace CRD not found. Install KAITO."
 )
@@ -164,7 +173,10 @@ func listWorkspaceController(ctx context.Context, direct client.Client) (*appsv1
 		return nil, false, nil
 	}
 	// Prefer a ready one; otherwise return the first item so the caller can
-	// reference the namespace/name in the message.
+	// reference the namespace/name in the message. When both the Helm chart and
+	// the AKS add-on are present, the In selector returns both Deployments and
+	// this loop reports the first ready one — installed/healthy is what matters,
+	// not which install path wins the tiebreak.
 	for i := range list.Items {
 		d := &list.Items[i]
 		if d.Status.ReadyReplicas > 0 {
