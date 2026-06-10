@@ -89,9 +89,8 @@ interface DeploymentFormProps {
   /** KV-cache precision chosen on the Deploy page (FP8 emits an engine arg). */
   kvCacheDtype?: 'fp16' | 'fp8'
   /**
-   * True when FP8 was selected but the target GPU has no FP8 datapath
-   * (non-Hopper). Disables the Deploy button so we never submit a flag the
-   * engine can't honor.
+   * True when FP8 was selected but the target GPU has no FP8 datapath. Disables
+   * the Deploy button so we never submit a flag the engine can't honor.
    */
   fp8Blocked?: boolean
   /** Human-readable reason shown when fp8Blocked is true. */
@@ -538,7 +537,8 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // Apply (or strip) FP8 precision engine args based on the Deploy page's
   // precision dropdowns. Only emitted for engines that accept the generic flags
-  // (vLLM / SGLang) and never when FP8 is blocked on non-Hopper hardware.
+  // (vLLM / SGLang) and never when FP8 is blocked on hardware without an FP8
+  // datapath.
   useEffect(() => {
     const engineSupportsFp8Args = FP8_ARG_ENGINES.includes(config.engine as TraditionalEngine)
     const weightFp8 = weightQuant === 'fp8' && engineSupportsFp8Args && !fp8Blocked

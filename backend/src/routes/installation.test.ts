@@ -1301,7 +1301,7 @@ describe('Gateway Installation Routes', () => {
       expect(data.contextLen).toBe(32768);
     });
 
-    test('reports fp8Supported=true for a Hopper GPU', async () => {
+    test('reports fp8Supported=true for an FP8-capable GPU', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
         mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
@@ -1325,7 +1325,7 @@ describe('Gateway Installation Routes', () => {
       ).toBeLessThanOrEqual(data.concurrentSequences);
     });
 
-    test('reports fp8Supported=false for a non-Hopper GPU', async () => {
+    test('reports fp8Supported=false for a GPU without an FP8 datapath', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
         mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({

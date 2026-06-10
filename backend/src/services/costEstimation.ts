@@ -202,17 +202,27 @@ export function getKnownGpuInfo(gpuModel: string): GpuModelInfo | undefined {
 }
 
 /**
+ * GPU generations with a native FP8 datapath (W8A8 / FP8 KV cache). vLLM gates
+ * full FP8 on compute capability >= 8.9, i.e. Ada Lovelace (L40S, L4) and Hopper
+ * (H100, H200). Ampere and older (A100, A10, T4, V100) lack the FP8 Tensor-Core
+ * path — A100 only does weight-only W8A16 via Marlin, which is not what the KV
+ * cache models — so they are excluded.
+ */
+const FP8_CAPABLE_GENERATIONS = new Set(['Ada Lovelace', 'Hopper']);
+
+/**
  * Whether a GPU model has a native FP8 datapath. Used to gate FP8 KV-cache
- * sizing in the throughput estimator: only Hopper (H100, H200) has hardware FP8
- * support, so requesting an FP8 KV cache on older generations should fall back
- * to 2-byte (fp16/bf16) for a realistic estimate.
+ * sizing in the throughput estimator: only Ada Lovelace (L40S, L4) and Hopper
+ * (H100, H200) have hardware FP8 support, so requesting an FP8 KV cache on older
+ * generations should fall back to 2-byte (fp16/bf16) for a realistic estimate.
  *
  * Uses the strict lookup so an unknown GPU label reports `false` because we
  * genuinely don't know it supports FP8 — not because it was coerced to a
- * (non-Hopper) A10 default.
+ * (non-FP8) A10 default.
  */
 export function gpuSupportsFp8(gpuModel: string): boolean {
-  return getKnownGpuInfo(gpuModel)?.generation === 'Hopper';
+  const generation = getKnownGpuInfo(gpuModel)?.generation;
+  return generation !== undefined && FP8_CAPABLE_GENERATIONS.has(generation);
 }
 
 /**

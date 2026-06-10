@@ -322,18 +322,19 @@ const installation = new Hono()
     const effectiveTpSize = Math.max(1, Math.min(requestedTpSize, maxContiguous || requestedTpSize || 1));
 
     // KV-cache precision is independent of weight quantization. Default to
-    // fp16/bf16 (2 bytes); an explicit fp8 KV cache is only realistic on Hopper,
-    // so downgrade fp8 → fp16 on older generations for the estimate. (int8 KV is
-    // not an FP8-datapath concern, so it is honored on any GPU.)
+    // fp16/bf16 (2 bytes); an explicit fp8 KV cache is only realistic on GPUs
+    // with a native FP8 datapath (Ada Lovelace and Hopper), so downgrade
+    // fp8 → fp16 on older generations for the estimate. (int8 KV is not an
+    // FP8-datapath concern, so it is honored on any GPU.)
     let effectiveKvDtype: 'fp8' | 'int8' | 'fp16' | 'bf16' = kvCacheDtype ?? 'fp16';
     if (effectiveKvDtype === 'fp8' && !gpuSupportsFp8(resolvedGpuModel)) {
       effectiveKvDtype = 'fp16';
     }
     const bytesPerKv = bytesPerKvFor(effectiveKvDtype);
 
-    // Whether the resolved GPU has a native FP8 datapath (Hopper). Surfaced so
-    // the UI can block FP8 deployments on non-Hopper hardware without
-    // re-implementing the GPU→generation mapping client-side.
+    // Whether the resolved GPU has a native FP8 datapath (Ada Lovelace or
+    // Hopper). Surfaced so the UI can block FP8 deployments on non-FP8 hardware
+    // without re-implementing the GPU→generation mapping client-side.
     const fp8Supported = gpuSupportsFp8(resolvedGpuModel);
 
     // paramCount is required to compute anything; without it return a shaped

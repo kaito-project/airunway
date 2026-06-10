@@ -131,12 +131,13 @@ export interface GpuThroughputEstimate {
   /**
    * Effective KV-cache dtype used for the concurrency estimate, after hardware
    * gating. May differ from the requested dtype (e.g. fp8 downgraded to fp16 on
-   * non-Hopper GPUs). Independent of weight quantization.
+   * GPUs without a native FP8 datapath). Independent of weight quantization.
    */
   kvCacheDtype?: 'fp16' | 'bf16' | 'fp8' | 'int8';
   /**
-   * Whether the resolved GPU has a native FP8 datapath (Hopper, e.g. H100/H200).
-   * The UI uses this to block FP8 deployments on non-Hopper hardware.
+   * Whether the resolved GPU has a native FP8 datapath (Ada Lovelace and Hopper,
+   * e.g. L40S/L4/H100/H200). The UI uses this to block FP8 deployments on
+   * hardware without an FP8 datapath.
    */
   fp8Supported?: boolean;
   /** Topology / capacity label, e.g. "4x80 GB". */

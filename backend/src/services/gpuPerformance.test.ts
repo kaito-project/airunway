@@ -183,15 +183,18 @@ describe('deriveTpSizeToFitWeights', () => {
 });
 
 describe('gpuSupportsFp8 (KV-cache FP8 gating)', () => {
-  test('true only for Hopper GPUs', () => {
+  test('true for Ada Lovelace and Hopper GPUs', () => {
     expect(gpuSupportsFp8('H100')).toBe(true);
     expect(gpuSupportsFp8('NVIDIA-H200')).toBe(true);
+    expect(gpuSupportsFp8('L4')).toBe(true);
+    expect(gpuSupportsFp8('L40S')).toBe(true);
   });
 
-  test('false for non-Hopper generations', () => {
-    expect(gpuSupportsFp8('L4')).toBe(false);
-    expect(gpuSupportsFp8('L40S')).toBe(false);
+  test('false for pre-Ada generations (no native FP8 datapath)', () => {
+    // Ampere (A100) only does weight-only W8A16 via Marlin, not the W8A8/FP8-KV
+    // path modeled here; Turing/Volta have no FP8 support at all.
     expect(gpuSupportsFp8('A100-80GB')).toBe(false);
+    expect(gpuSupportsFp8('A10')).toBe(false);
     expect(gpuSupportsFp8('T4')).toBe(false);
     expect(gpuSupportsFp8('V100')).toBe(false);
   });
@@ -199,7 +202,7 @@ describe('gpuSupportsFp8 (KV-cache FP8 gating)', () => {
   test('false for an unknown GPU (strict lookup — not coerced to a default)', () => {
     // An unrecognized label resolves to undefined under the strict lookup, so
     // FP8 is reported unsupported because we genuinely don't know it — never
-    // because it was coerced to an A10 (or, worse, mistaken for Hopper).
+    // because it was coerced to an A10 (or, worse, mistaken for an FP8 GPU).
     expect(gpuSupportsFp8('NVIDIA-B200-192GB')).toBe(false);
     expect(gpuSupportsFp8('Some-Future-GPU')).toBe(false);
   });
@@ -303,7 +306,7 @@ describe('estimateConcurrentCapacity', () => {
       tpSize: 4,
       contextLen: 4096,
       bytesPerWeight: 1,
-      bytesPerKv: 1, // explicit FP8 KV cache (Hopper)
+      bytesPerKv: 1, // explicit FP8 KV cache (Ada Lovelace / Hopper)
       perChatTokensPerSec: perChat,
     });
     expect(result).toBeDefined();

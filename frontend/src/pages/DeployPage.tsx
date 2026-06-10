@@ -85,15 +85,16 @@ export function DeployPage() {
   )
 
   // The backend downgrades an FP8 KV cache to FP16 on GPUs without a native FP8
-  // datapath (only Hopper / H100 / H200 support it). Surface that to the user.
+  // datapath (only Ada Lovelace and Hopper — L40S/L4/H100/H200 — support it).
+  // Surface that to the user.
   const kvDowngraded =
     kvCacheDtype === 'fp8' &&
     !!throughput?.kvCacheDtype &&
     throughput.kvCacheDtype !== 'fp8'
 
-  // Block deploying with FP8 on hardware that has no FP8 datapath (non-Hopper).
-  // The estimate response carries the resolved GPU's FP8 capability so we don't
-  // re-implement the GPU→generation mapping client-side.
+  // Block deploying with FP8 on hardware that has no FP8 datapath. The estimate
+  // response carries the resolved GPU's FP8 capability so we don't re-implement
+  // the GPU→generation mapping client-side.
   const fp8Selected = weightQuant === 'fp8' || kvCacheDtype === 'fp8'
   const fp8Blocked = fp8Selected && throughput?.fp8Supported === false
   const fp8BlockReason = fp8Blocked
