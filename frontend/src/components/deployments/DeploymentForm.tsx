@@ -2009,7 +2009,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       </div>
       {fp8Blocked && (
         <p className="text-sm text-destructive text-center">
-          {fp8BlockReason || 'FP8 is only supported on H100/H200 GPUs. Choose FP16/BF16 to deploy.'}
+          {fp8BlockReason || 'FP8 is only supported on L40S/L4 and H100/H200 GPUs. Choose FP16/BF16 to deploy.'}
         </p>
       )}
       {/* Non-blocking "does not fit" warning. Deploy stays enabled: the estimate

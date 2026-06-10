@@ -98,7 +98,7 @@ export function DeployPage() {
   const fp8Selected = weightQuant === 'fp8' || kvCacheDtype === 'fp8'
   const fp8Blocked = fp8Selected && throughput?.fp8Supported === false
   const fp8BlockReason = fp8Blocked
-    ? `FP8 is only supported on H100/H200 GPUs. This cluster's GPU${throughput?.gpuModel ? ` (${throughput.gpuModel})` : ''} can't run FP8 — choose FP16 / BF16 to deploy.`
+    ? `FP8 is only supported on L40S/L4 and H100/H200 GPUs. This cluster's GPU${throughput?.gpuModel ? ` (${throughput.gpuModel})` : ''} can't run FP8 — choose FP16 / BF16 to deploy.`
     : undefined
 
   // FP8 selected but we couldn't confirm GPU support: the estimate has settled
@@ -245,7 +245,7 @@ export function DeployPage() {
                 <Label htmlFor="weight-quant">
                   Model Weights Precision
                 </Label>
-                <InfoHint text="How compactly the model's weights are stored. Lower precision (FP8) uses less GPU memory and runs faster, but can slightly reduce answer quality. FP8 needs a recent GPU (H100/H200)." />
+                <InfoHint text="How compactly the model's weights are stored. Lower precision (FP8) uses less GPU memory and runs faster, but can slightly reduce answer quality. FP8 needs a recent GPU (L40S/L4 or H100/H200)." />
               </div>
               <Select value={weightQuant} onValueChange={(v) => setWeightQuant(v as WeightQuant)}>
                 <SelectTrigger id="weight-quant" className="h-8 w-44 text-sm">
@@ -266,7 +266,7 @@ export function DeployPage() {
                 <Label htmlFor="kv-quant">
                   KV Cache Precision
                 </Label>
-                <InfoHint text="Precision of the running conversation memory the model keeps while generating. Lower precision lets the GPU handle more simultaneous chats. FP8 needs a recent GPU (H100/H200)." />
+                <InfoHint text="Precision of the running conversation memory the model keeps while generating. Lower precision lets the GPU handle more simultaneous chats. FP8 needs a recent GPU (L40S/L4 or H100/H200)." />
               </div>
               <Select value={kvCacheDtype} onValueChange={(v) => setKvCacheDtype(v as KvQuant)}>
                 <SelectTrigger id="kv-quant" className="h-8 w-44 text-sm">
