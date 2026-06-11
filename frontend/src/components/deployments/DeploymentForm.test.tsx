@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DetailedClusterCapacity, Model, RuntimeStatus } from '@/lib/api'
-import { DeploymentForm } from './DeploymentForm'
+import { DeploymentForm, setFp8PrecisionEngineArgs } from './DeploymentForm'
 
 const mutateAsync = vi.fn()
 const toast = vi.fn()
@@ -147,6 +147,69 @@ describe('DeploymentForm', () => {
 
     expect(vllmCard).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('button', { name: /Deploy Model/i })).toBeEnabled()
+  })
+
+  it('warns but does not block deploying when the throughput estimate says the model does not fit', () => {
+    render(
+      <MemoryRouter>
+        <DeploymentForm
+          model={createModel({ supportedEngines: ['vllm'] })}
+          detailedCapacity={createCapacity()}
+          runtimes={[
+            createRuntime({
+              id: 'vllm',
+              name: 'vLLM',
+              installed: true,
+              healthy: true,
+              requiresCRD: false,
+            }),
+          ]}
+          doesNotFit
+          doesNotFitReason="This model is estimated not to fit on this cluster's GPU (A10) at 1 GPU per replica."
+        />
+      </MemoryRouter>
+    )
+
+    const vllmCard = screen
+      .getByText('High-throughput inference with the native vLLM provider')
+      .closest('[role="radio"]') as HTMLElement
+    fireEvent.click(vllmCard)
+
+    // The warning is surfaced...
+    expect(
+      screen.getByText(/estimated not to fit on this cluster's GPU \(A10\)/i)
+    ).toBeInTheDocument()
+    // ...but Deploy stays enabled (the user may pick more GPUs per replica).
+    expect(screen.getByRole('button', { name: /Deploy Model/i })).toBeEnabled()
+  })
+
+  it('hides the does-not-fit warning when FP8 is already blocking deployment', () => {
+    render(
+      <MemoryRouter>
+        <DeploymentForm
+          model={createModel({ supportedEngines: ['vllm'] })}
+          detailedCapacity={createCapacity()}
+          runtimes={[
+            createRuntime({
+              id: 'vllm',
+              name: 'vLLM',
+              installed: true,
+              healthy: true,
+              requiresCRD: false,
+            }),
+          ]}
+          doesNotFit
+          doesNotFitReason="This model is estimated not to fit."
+          fp8Blocked
+          fp8BlockReason="FP8 is only supported on H100/H200 GPUs."
+        />
+      </MemoryRouter>
+    )
+
+    // The blocking FP8 message wins; the does-not-fit warning is suppressed to
+    // avoid stacking two conflicting messages.
+    expect(screen.getByText(/FP8 is only supported on H100\/H200 GPUs/i)).toBeInTheDocument()
+    expect(screen.queryByText(/estimated not to fit/i)).not.toBeInTheDocument()
   })
 
   it('treats a CRD-less vLLM provider that is not ready as registered but unavailable', async () => {
@@ -321,5 +384,65 @@ describe('DeploymentForm', () => {
       expect(toggle).toHaveAttribute('aria-checked', 'true')
       expect(latestManifestConfig()?.gatewayEnabled).toBe(true)
     })
+  })
+})
+
+describe('setFp8PrecisionEngineArgs', () => {
+  it('preserves a user-set non-fp8 quantization when weight precision is not FP8', () => {
+    // Regression: the precision dropdowns must not clobber an awq/gptq value the
+    // user typed into the advanced engine-args editor.
+    const result = setFp8PrecisionEngineArgs(
+      { quantization: 'awq' },
+      { weightFp8: false, kvFp8: false }
+    )
+    expect(result).toEqual({ quantization: 'awq' })
+  })
+
+  it('strips a quantization value it owns (fp8) when weight precision is not FP8', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { quantization: 'fp8' },
+      { weightFp8: false, kvFp8: false }
+    )
+    expect(result).toBeUndefined()
+  })
+
+  it('sets quantization to fp8 when weight precision is FP8, overriding a prior awq', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { quantization: 'awq' },
+      { weightFp8: true, kvFp8: false }
+    )
+    expect(result).toEqual({ quantization: 'fp8' })
+  })
+
+  it('preserves a user-set non-fp8 kv-cache-dtype when KV precision is not FP8', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { 'kv-cache-dtype': 'int8' },
+      { weightFp8: false, kvFp8: false }
+    )
+    expect(result).toEqual({ 'kv-cache-dtype': 'int8' })
+  })
+
+  it('strips a kv-cache-dtype value it owns (fp8) when KV precision is not FP8', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { 'kv-cache-dtype': 'fp8' },
+      { weightFp8: false, kvFp8: false }
+    )
+    expect(result).toBeUndefined()
+  })
+
+  it('sets kv-cache-dtype to fp8 when KV precision is FP8, overriding a prior int8', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { 'kv-cache-dtype': 'int8' },
+      { weightFp8: false, kvFp8: true }
+    )
+    expect(result).toEqual({ 'kv-cache-dtype': 'fp8' })
+  })
+
+  it('leaves unrelated engine args untouched', () => {
+    const result = setFp8PrecisionEngineArgs(
+      { 'max-model-len': '8192', quantization: 'gptq' },
+      { weightFp8: false, kvFp8: false }
+    )
+    expect(result).toEqual({ 'max-model-len': '8192', quantization: 'gptq' })
   })
 })

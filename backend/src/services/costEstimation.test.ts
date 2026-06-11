@@ -1,11 +1,13 @@
 import { describe, test, expect } from 'bun:test';
 import {
   normalizeGpuModel,
+  normalizeKnownGpuModel,
   estimateCost,
   estimateNodePoolCosts,
   getSupportedGpuModels,
   costEstimationService,
   getGpuInfo,
+  getKnownGpuInfo,
 } from './costEstimation';
 import type { NodePoolInfo } from '@airunway/shared';
 
@@ -26,6 +28,13 @@ describe('normalizeGpuModel', () => {
     expect(normalizeGpuModel('NVIDIA-H100-80GB-HBM3')).toBe('H100-80GB');
     expect(normalizeGpuModel('NVIDIA-H100-SXM5-80GB')).toBe('H100-80GB');
     expect(normalizeGpuModel('H100')).toBe('H100-80GB');
+  });
+
+  test('normalizes H200 variants', () => {
+    expect(normalizeGpuModel('NVIDIA-H200')).toBe('H200-141GB');
+    expect(normalizeGpuModel('NVIDIA-H200-141GB-HBM3e')).toBe('H200-141GB');
+    expect(normalizeGpuModel('H200')).toBe('H200-141GB');
+    expect(getGpuInfo('NVIDIA-H200')?.memBandwidthGBs).toBe(4800);
   });
 
   test('normalizes T4 variants', () => {
@@ -75,6 +84,42 @@ describe('getGpuInfo', () => {
     const info = getGpuInfo('Unknown-GPU');
     expect(info).toBeDefined();
     expect(info!.memoryGb).toBe(24);
+  });
+});
+
+describe('normalizeKnownGpuModel (strict — no A10 fallback)', () => {
+  test('returns the matched key for recognized labels', () => {
+    expect(normalizeKnownGpuModel('NVIDIA-A100-SXM4-80GB')).toBe('A100-80GB');
+    expect(normalizeKnownGpuModel('H100')).toBe('H100-80GB');
+    expect(normalizeKnownGpuModel('NVIDIA-H200-141GB-HBM3e')).toBe('H200-141GB');
+  });
+
+  test('returns undefined for unrecognized or empty labels', () => {
+    // Unlike normalizeGpuModel, an unknown GPU is NOT coerced to A10 — the
+    // throughput estimator relies on this to skip unknown hardware.
+    expect(normalizeKnownGpuModel('NVIDIA-B200-192GB')).toBeUndefined();
+    expect(normalizeKnownGpuModel('Unknown-GPU-Model')).toBeUndefined();
+    expect(normalizeKnownGpuModel('')).toBeUndefined();
+  });
+
+  test('diverges from the lenient normalizer on unknown input', () => {
+    expect(normalizeGpuModel('Totally-New-GPU')).toBe('A10');
+    expect(normalizeKnownGpuModel('Totally-New-GPU')).toBeUndefined();
+  });
+});
+
+describe('getKnownGpuInfo (strict — no A10 fallback)', () => {
+  test('returns specs for known models', () => {
+    const info = getKnownGpuInfo('NVIDIA-A100-SXM4-80GB');
+    expect(info).toBeDefined();
+    expect(info!.memoryGb).toBe(80);
+    expect(info!.generation).toBe('Ampere');
+  });
+
+  test('returns undefined for an unknown GPU instead of A10 specs', () => {
+    // getGpuInfo would return A10 (24 GB) here; the strict variant must not.
+    expect(getGpuInfo('NVIDIA-B200-192GB')!.memoryGb).toBe(24);
+    expect(getKnownGpuInfo('NVIDIA-B200-192GB')).toBeUndefined();
   });
 });
 

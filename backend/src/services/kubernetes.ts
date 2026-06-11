@@ -31,6 +31,17 @@ const INFERENCE_EXTENSION_VERSION_ANNOTATIONS = [
 const KAITO_WORKSPACE_CRD = 'workspaces.kaito.sh';
 const KAITO_NAMESPACE = 'kaito-workspace';
 const KAITO_OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace';
+// The AKS AI-toolchain-operator add-on installs KAITO in kube-system. Verified
+// against a live `--enable-ai-toolchain-operator` cluster, the add-on operator
+// POD carries ONLY the bare `app=ai-toolchain-operator` label — it does NOT
+// carry `app.kubernetes.io/name` (that key is present on the Deployment but not
+// propagated to the pod template). So this pod probe must match on `app`; using
+// `app.kubernetes.io/name=ai-toolchain-operator` here would match nothing.
+// NOTE: the Go provider shim probes the Deployment instead and intentionally
+// uses `app.kubernetes.io/name=ai-toolchain-operator` — see
+// providers/kaito/upstream_health.go (listWorkspaceController). The two paths
+// key off different labels on purpose because they inspect different objects.
+const KAITO_AKS_ADDON_POD_SELECTOR = 'app=ai-toolchain-operator';
 const DYNAMO_CRD = 'dynamographdeployments.nvidia.com';
 const DYNAMO_NAMESPACE = 'dynamo-system';
 const DYNAMO_OPERATOR_POD_SELECTOR = 'control-plane=controller-manager,app.kubernetes.io/name=dynamo-operator,app.kubernetes.io/instance=dynamo-platform';
@@ -156,6 +167,14 @@ const RUNTIME_INSTALLATION_PROBES: Record<string, RuntimeInstallationProbe> = {
     operatorNamespace: KAITO_NAMESPACE,
     operatorPodSelectors: [KAITO_OPERATOR_POD_SELECTOR],
     fallbackPodSelectors: ['app.kubernetes.io/name=workspace'],
+    // The AKS add-on pod only ever lives in kube-system, never in
+    // kaito-workspace, so it is matched exclusively in the cross-namespace
+    // pass. Listing it explicitly here (rather than relying on the implicit
+    // `crossNamespaceFallbackPodSelectors = fallbackPodSelectors` default)
+    // keeps add-on detection working even if KAITO later gains other
+    // same-namespace fallbacks, and avoids a guaranteed-empty query for
+    // `app=ai-toolchain-operator` against kaito-workspace on every probe.
+    crossNamespaceFallbackPodSelectors: ['app.kubernetes.io/name=workspace', KAITO_AKS_ADDON_POD_SELECTOR],
   },
   dynamo: {
     providerName: 'Dynamo',

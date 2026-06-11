@@ -1,5 +1,6 @@
 import logger from '../lib/logger';
-import type { HfUserInfo, HfTokenExchangeResponse, HfApiModelResult, HfModelSearchResult, HfSearchParams, HfModelSearchResponse } from '@airunway/shared';
+import { createHash } from 'node:crypto';
+import type { HfUserInfo, HfTokenExchangeResponse, HfApiModelResult, HfModelSearchResult, HfSearchParams, HfModelSearchResponse, ModelArchitecture } from '@airunway/shared';
 import { filterCompatibleModels } from './modelCompatibility';
 
 /**
@@ -15,6 +16,126 @@ const HF_TOKEN_URL = 'https://huggingface.co/oauth/token';
 const HF_WHOAMI_URL = 'https://huggingface.co/api/whoami-v2';
 const HF_MODELS_URL = 'https://huggingface.co/api/models';
 const HF_BASE_URL = 'https://huggingface.co';
+
+/** Max characters per repo-id segment (HF's own repo-name limit is 96). */
+const HF_REPO_SEGMENT_MAX = 96;
+
+/**
+ * Validate a HuggingFace repo id (`owner/name`, or a canonical single-segment id
+ * like `gpt2`) before it is interpolated into an outbound URL.
+ *
+ * Security: `modelId` arrives from untrusted query/path input and is sent to
+ * huggingface.co with the caller's `Authorization` token. Without this guard a
+ * crafted value (`../../other`, extra `/segments`, `name?x=1`, whitespace) could
+ * steer that authenticated request to an unintended path. We therefore allow
+ * only 1–2 non-empty segments of safe characters and reject `.`/`..` traversal.
+ */
+export function isValidHfRepoId(modelId: string): boolean {
+  if (typeof modelId !== 'string') return false;
+  const segments = modelId.split('/');
+  if (segments.length < 1 || segments.length > 2) return false;
+  return segments.every(
+    (seg) =>
+      seg.length > 0 &&
+      seg.length <= HF_REPO_SEGMENT_MAX &&
+      seg !== '.' &&
+      seg !== '..' &&
+      /^[A-Za-z0-9._-]+$/.test(seg)
+  );
+}
+
+/**
+ * Percent-encode each path segment of a repo id before interpolation. Mirrors
+ * the per-segment encoder in aikit.ts (`buildHuggingFaceUrl`). Callers should
+ * still validate with `isValidHfRepoId` first — this is defense in depth so even
+ * a validated id can never inject path/query syntax.
+ */
+export function encodeHfRepoPath(modelId: string): string {
+  return modelId.split('/').map(encodeURIComponent).join('/');
+}
+
+
+/**
+ * Cache for model architecture (config.json) lookups.
+ *
+ * Security: public (no-token) responses are keyed by modelId alone. Tokened
+ * responses are keyed by `modelId + ':' + sha256(token)` so one user's gated
+ * config can never be served to a caller with a different (or no) token.
+ * Only successful lookups are cached, with a short TTL since `main` can move.
+ *
+ * Bounding: entries are TTL-expired lazily on re-access, but a single fetch of
+ * many distinct modelId/token keys would otherwise keep them all resident for
+ * the full TTL. An LRU size cap (`ARCH_CACHE_MAX_ENTRIES`) bounds the map under
+ * wide-scan or adversarial traffic: the least-recently-used entry is evicted
+ * once the cap is exceeded. The Map's insertion order is the recency order —
+ * fresh hits re-insert to move themselves to the newest position.
+ */
+const ARCH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const ARCH_CACHE_MAX_ENTRIES = 500;
+const architectureCache = new Map<string, { value: ModelArchitecture; expiresAt: number }>();
+
+function architectureCacheKey(modelId: string, hfToken?: string): string {
+  if (!hfToken) {
+    return modelId;
+  }
+  const tokenHash = createHash('sha256').update(hfToken).digest('hex');
+  return `${modelId}:${tokenHash}`;
+}
+
+/** Shape of the subset of HuggingFace config.json fields we read. */
+/**
+ * The transformer dimensions we read from a HuggingFace `config.json`. For a
+ * plain decoder LLM these live at the top level; for many multimodal /
+ * image-text-to-text models they live in a nested sub-config (see below).
+ */
+interface HfTransformerConfig {
+  num_hidden_layers?: number;
+  num_attention_heads?: number;
+  num_key_value_heads?: number;
+  head_dim?: number;
+  hidden_size?: number;
+  max_position_embeddings?: number;
+  torch_dtype?: string;
+}
+
+interface HfConfigJson extends HfTransformerConfig {
+  // Composite/multimodal configs (LLaVA, InternVL, Llama-4, Gemma-3, Mllama, …)
+  // nest the language-model dimensions under a sub-config rather than at the top
+  // level. Checked in priority order by resolveTransformerConfig().
+  text_config?: HfTransformerConfig;
+  llm_config?: HfTransformerConfig;
+  language_config?: HfTransformerConfig;
+}
+
+/**
+ * Nested config keys that hold the language-model transformer dimensions on
+ * composite/multimodal models, in priority order.
+ */
+const NESTED_TEXT_CONFIG_KEYS = ['text_config', 'llm_config', 'language_config'] as const;
+
+/**
+ * Resolve the sub-config carrying the language-model transformer dimensions.
+ *
+ * Plain decoder LLMs keep `num_hidden_layers` & friends at the top level; many
+ * multimodal / image-text-to-text configs nest them under `text_config`,
+ * `llm_config`, or `language_config` while the top level only describes the
+ * composite model. Prefer the top-level fields when present (normal decoder),
+ * else the first nested sub-config that looks like a transformer (has
+ * `num_hidden_layers`). Falls back to the top-level object when nothing
+ * qualifies, preserving the prior degrade-to-low-confidence behavior.
+ */
+function resolveTransformerConfig(config: HfConfigJson): HfTransformerConfig {
+  if (config.num_hidden_layers != null) {
+    return config;
+  }
+  for (const key of NESTED_TEXT_CONFIG_KEYS) {
+    const nested = config[key];
+    if (nested && typeof nested === 'object' && nested.num_hidden_layers != null) {
+      return nested;
+    }
+  }
+  return config;
+}
 
 /**
  * HuggingFace OAuth Service
@@ -237,7 +358,14 @@ class HuggingFaceService {
   async getGgufFiles(modelId: string, accessToken?: string): Promise<string[]> {
     logger.debug({ modelId }, 'Fetching GGUF files from HuggingFace repo');
 
-    const url = `https://huggingface.co/api/models/${modelId}`;
+    // Reject malformed ids before issuing a token-bearing request (see
+    // isValidHfRepoId). Throwing keeps this method's existing throw-on-failure
+    // contract; callers already surface errors.
+    if (!isValidHfRepoId(modelId)) {
+      throw new Error('Invalid Hugging Face model id');
+    }
+
+    const url = `https://huggingface.co/api/models/${encodeHfRepoPath(modelId)}`;
     const headers: Record<string, string> = {};
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
@@ -261,6 +389,94 @@ class HuggingFaceService {
 
     logger.debug({ modelId, count: ggufFiles.length }, 'Found GGUF files');
     return ggufFiles;
+  }
+
+  /**
+   * Fetch transformer architecture details from a model's config.json.
+   *
+   * Used to size the KV cache when estimating concurrent serving capacity.
+   * Returns `undefined` on any failure (network, 404, gated without token,
+   * unparseable) so callers degrade gracefully to a bandwidth-only estimate.
+   *
+   * @param modelId - HuggingFace model ID (e.g. 'meta-llama/Meta-Llama-3-70B')
+   * @param hfToken - Optional HF access token for gated/private models
+   */
+  async getModelArchitecture(modelId: string, hfToken?: string): Promise<ModelArchitecture | undefined> {
+    // Reject malformed ids before any cache work or token-bearing fetch. The
+    // method's contract is graceful degradation (undefined → bandwidth-only
+    // estimate), so an invalid id is treated the same as a lookup miss.
+    if (!isValidHfRepoId(modelId)) {
+      logger.debug({ modelId }, 'Rejecting invalid HuggingFace model id');
+      return undefined;
+    }
+
+    const cacheKey = architectureCacheKey(modelId, hfToken);
+    const cached = architectureCache.get(cacheKey);
+    if (cached) {
+      if (cached.expiresAt > Date.now()) {
+        // Bump recency: delete + re-insert moves this key to the newest
+        // position so the LRU eviction below sheds genuinely cold entries.
+        architectureCache.delete(cacheKey);
+        architectureCache.set(cacheKey, cached);
+        return cached.value;
+      }
+      // Drop the stale entry so the cache stays bounded by "used within TTL"
+      // rather than growing unbounded across many distinct modelIds/tokens.
+      architectureCache.delete(cacheKey);
+    }
+
+    const url = `${HF_BASE_URL}/${encodeHfRepoPath(modelId)}/resolve/main/config.json`;
+    const headers: Record<string, string> = {};
+    if (hfToken) {
+      headers['Authorization'] = `Bearer ${hfToken}`;
+    }
+
+    let config: HfConfigJson;
+    try {
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        logger.debug({ status: response.status, modelId }, 'Failed to fetch model config.json');
+        return undefined;
+      }
+      config = (await response.json()) as HfConfigJson;
+    } catch (error) {
+      logger.debug({ error, modelId }, 'Error fetching model config.json');
+      return undefined;
+    }
+
+    // For multimodal/composite models the transformer dimensions live in a
+    // nested sub-config (text_config / llm_config / language_config) rather than
+    // at the top level; resolve to whichever object actually holds them.
+    const tf = resolveTransformerConfig(config);
+
+    // num_key_value_heads is absent on MHA models; fall back to attention heads.
+    const numKvHeads = tf.num_key_value_heads ?? tf.num_attention_heads;
+    // head_dim is often omitted; derive from hidden_size / num_attention_heads.
+    const headDim =
+      tf.head_dim ??
+      (tf.hidden_size && tf.num_attention_heads
+        ? tf.hidden_size / tf.num_attention_heads
+        : undefined);
+
+    const arch: ModelArchitecture = {
+      numLayers: tf.num_hidden_layers,
+      numKvHeads,
+      headDim,
+      maxPositionEmbeddings: tf.max_position_embeddings,
+      torchDtype: tf.torch_dtype ?? config.torch_dtype,
+    };
+
+    // Cache successful lookups only.
+    architectureCache.set(cacheKey, { value: arch, expiresAt: Date.now() + ARCH_CACHE_TTL_MS });
+    // Evict the least-recently-used entry (the Map's oldest insertion) when the
+    // size cap is exceeded, bounding memory under wide-scan/adversarial traffic.
+    if (architectureCache.size > ARCH_CACHE_MAX_ENTRIES) {
+      const oldestKey = architectureCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        architectureCache.delete(oldestKey);
+      }
+    }
+    return arch;
   }
 }
 

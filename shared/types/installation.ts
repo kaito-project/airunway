@@ -100,6 +100,59 @@ export interface ClusterGpuCapacity {
 }
 
 /**
+ * Estimated inference throughput for a model on the cluster's GPUs.
+ *
+ * Two distinct numbers (see issue #139):
+ *  - perChatTokensPerSec: single-stream decode speed (memory-bandwidth bound,
+ *    ~1/TPOT) — "how snappy does chat feel?"
+ *  - concurrentSequences / aggregateTokensPerSec: KV-cache-budget gated capacity
+ *    per replica — "how many requests can this serve at once?"
+ *
+ * Both are rough estimates (no inference is run). When architecture details are
+ * unavailable, only perChatTokensPerSec is populated and lowConfidence is true.
+ */
+export interface GpuThroughputEstimate {
+  /** Single-stream decode speed (tokens/sec per chat). */
+  perChatTokensPerSec: number;
+  /** Approx concurrent sequences per replica at the assumed context length. */
+  concurrentSequences?: number;
+  /** Aggregate tokens/sec per replica across concurrent sequences. */
+  aggregateTokensPerSec?: number;
+  /** Resolved GPU model the estimate was computed for. */
+  gpuModel: string;
+  /** Per-GPU VRAM (GB) used in the estimate. */
+  perGpuMemoryGb: number;
+  /** Per-GPU memory bandwidth (GB/s) used in the estimate. */
+  memBandwidthGBs: number;
+  /** Tensor-parallel size (GPUs per replica) assumed. */
+  tpSize: number;
+  /** Context length (tokens) assumed for KV sizing. */
+  contextLen: number;
+  /**
+   * Effective KV-cache dtype used for the concurrency estimate, after hardware
+   * gating. May differ from the requested dtype (e.g. fp8 downgraded to fp16 on
+   * GPUs without a native FP8 datapath). Independent of weight quantization.
+   */
+  kvCacheDtype?: 'fp16' | 'bf16' | 'fp8' | 'int8';
+  /**
+   * Whether the resolved GPU has a native FP8 datapath (Ada Lovelace and Hopper,
+   * e.g. L40S/L4/H100/H200). The UI uses this to block FP8 deployments on
+   * hardware without an FP8 datapath.
+   */
+  fp8Supported?: boolean;
+  /** Topology / capacity label, e.g. "4x80 GB". */
+  capacityLabel?: string;
+  /** True when architecture data was unavailable, so only perChat is meaningful. */
+  lowConfidence: boolean;
+  /**
+   * True (high-confidence) when model weights plus reserved headroom exceed the
+   * GPU's available VRAM, leaving no room for KV cache — the model does not fit
+   * and cannot be served on this GPU/topology. Distinct from lowConfidence.
+   */
+  doesNotFit?: boolean;
+}
+
+/**
  * Gateway CRD installation status
  */
 export interface GatewayCRDStatus {

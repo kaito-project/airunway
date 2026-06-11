@@ -7,9 +7,9 @@ import {
   extractParameterCount,
   processHfModel,
   filterCompatibleModels,
-  parseParameterCountFromName,
   getEngineArchitectures,
 } from './modelCompatibility';
+import { parseParameterCountFromName } from '@airunway/shared';
 import type { Engine, HfApiModelResult } from '@airunway/shared';
 
 describe('inferArchitectureFromModelId', () => {

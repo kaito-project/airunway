@@ -84,6 +84,27 @@ interface DeploymentFormProps {
   detailedCapacity?: DetailedClusterCapacity
   autoscaler?: AutoscalerDetectionResult
   runtimes?: RuntimeStatus[]
+  /** Weight precision chosen on the Deploy page (FP8 emits an engine arg). */
+  weightQuant?: 'fp16' | 'fp8'
+  /** KV-cache precision chosen on the Deploy page (FP8 emits an engine arg). */
+  kvCacheDtype?: 'fp16' | 'fp8'
+  /**
+   * True when FP8 was selected but the target GPU has no FP8 datapath. Disables
+   * the Deploy button so we never submit a flag the engine can't honor.
+   */
+  fp8Blocked?: boolean
+  /** Human-readable reason shown when fp8Blocked is true. */
+  fp8BlockReason?: string
+  /**
+   * True when the throughput estimate determined (with high confidence) that the
+   * model does not fit on the cluster's GPU at the estimated topology. Surfaced
+   * as a non-blocking warning near the Deploy button — it does NOT disable
+   * deploying, since the user may select more GPUs per replica than the estimate
+   * assumed.
+   */
+  doesNotFit?: boolean
+  /** Human-readable reason shown when doesNotFit is true. */
+  doesNotFitReason?: string
 }
 
 // Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
@@ -96,6 +117,13 @@ type GgufRunMode = 'build' | 'direct'
 
 const TENSOR_PARALLEL_SIZE_ARG = 'tensor-parallel-size'
 const PIPELINE_PARALLEL_SIZE_ARG = 'pipeline-parallel-size'
+// FP8 precision engine flags (vLLM / SGLang). Only emitted when FP8 is selected
+// on FP8-capable hardware; FP16/BF16 is the engine default and needs no flag.
+const QUANTIZATION_ARG = 'quantization'
+const KV_CACHE_DTYPE_ARG = 'kv-cache-dtype'
+// Engines that accept the generic --quantization / --kv-cache-dtype flags.
+// TRT-LLM uses a different mechanism and KAITO ignores generic engine args.
+const FP8_ARG_ENGINES: TraditionalEngine[] = ['vllm', 'sglang']
 
 // Runtime metadata for display
 const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defaultNamespace: string }> = {
@@ -211,7 +239,39 @@ function setDynamoParallelismEngineArgs(
   return Object.keys(nextEngineArgs).length > 0 ? nextEngineArgs : undefined;
 }
 
-export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }: DeploymentFormProps) {
+/**
+ * Merge or strip the FP8 precision engine args (`quantization`,
+ * `kv-cache-dtype`) without clobbering other args. Sets a key to `fp8` when the
+ * corresponding precision is FP8 and the engine supports the flag; otherwise
+ * removes ONLY a value this control owns (`fp8`). A user-provided non-fp8 value
+ * (e.g. `awq`/`gptq` typed into the advanced engine-args editor) is preserved,
+ * since FP16/BF16 is merely the engine default and shouldn't override an
+ * explicit user choice.
+ */
+export function setFp8PrecisionEngineArgs(
+  engineArgs: Record<string, unknown> | undefined,
+  opts: { weightFp8: boolean; kvFp8: boolean }
+): Record<string, unknown> | undefined {
+  const nextEngineArgs = { ...(engineArgs || {}) };
+
+  if (opts.weightFp8) {
+    nextEngineArgs[QUANTIZATION_ARG] = 'fp8';
+  } else if (nextEngineArgs[QUANTIZATION_ARG] === 'fp8') {
+    // Only strip the value WE set. A user-provided non-fp8 quantization
+    // (e.g. awq, gptq) from the advanced engine-args editor is preserved.
+    delete nextEngineArgs[QUANTIZATION_ARG];
+  }
+
+  if (opts.kvFp8) {
+    nextEngineArgs[KV_CACHE_DTYPE_ARG] = 'fp8';
+  } else if (nextEngineArgs[KV_CACHE_DTYPE_ARG] === 'fp8') {
+    delete nextEngineArgs[KV_CACHE_DTYPE_ARG];
+  }
+
+  return Object.keys(nextEngineArgs).length > 0 ? nextEngineArgs : undefined;
+}
+
+export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, weightQuant = 'fp16', kvCacheDtype = 'fp16', fp8Blocked = false, fp8BlockReason, doesNotFit = false, doesNotFitReason }: DeploymentFormProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const createDeployment = useCreateDeployment()
@@ -474,6 +534,28 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
     config.mode,
     topologyManagedByAIConfig,
   ])
+
+  // Apply (or strip) FP8 precision engine args based on the Deploy page's
+  // precision dropdowns. Only emitted for engines that accept the generic flags
+  // (vLLM / SGLang) and never when FP8 is blocked on hardware without an FP8
+  // datapath.
+  useEffect(() => {
+    const engineSupportsFp8Args = FP8_ARG_ENGINES.includes(config.engine as TraditionalEngine)
+    const weightFp8 = weightQuant === 'fp8' && engineSupportsFp8Args && !fp8Blocked
+    const kvFp8 = kvCacheDtype === 'fp8' && engineSupportsFp8Args && !fp8Blocked
+
+    setConfig(prev => {
+      const nextEngineArgs = setFp8PrecisionEngineArgs(prev.engineArgs, { weightFp8, kvFp8 })
+      const prevQuant = prev.engineArgs?.[QUANTIZATION_ARG]
+      const prevKv = prev.engineArgs?.[KV_CACHE_DTYPE_ARG]
+      const nextQuant = nextEngineArgs?.[QUANTIZATION_ARG]
+      const nextKv = nextEngineArgs?.[KV_CACHE_DTYPE_ARG]
+      if (prevQuant === nextQuant && prevKv === nextKv) {
+        return prev
+      }
+      return { ...prev, engineArgs: nextEngineArgs }
+    })
+  }, [weightQuant, kvCacheDtype, fp8Blocked, config.engine])
 
   // Auto-select matching premade model when navigating with a KAITO model from Models page
   useEffect(() => {
@@ -863,6 +945,10 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
   const getButtonContent = () => {
     if (needsHfAuth) {
       return 'HuggingFace Auth Required'
+    }
+
+    if (fp8Blocked) {
+      return 'FP8 Not Supported on This GPU'
     }
 
     if (!isRuntimeInstalled) {
@@ -1911,7 +1997,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
         </Button>
         <Button
           type="submit"
-          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled || !isKaitoConfigValid}
+          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled || !isKaitoConfigValid || fp8Blocked}
           loading={createDeployment.isProcessing}
           className={cn(
             "flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold shadow-glow-button gap-2",
@@ -1921,6 +2007,20 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
           {getButtonContent()}
         </Button>
       </div>
+      {fp8Blocked && (
+        <p className="text-sm text-destructive text-center">
+          {fp8BlockReason || 'FP8 is only supported on L40S/L4 and H100/H200 GPUs. Choose FP16/BF16 to deploy.'}
+        </p>
+      )}
+      {/* Non-blocking "does not fit" warning. Deploy stays enabled: the estimate
+          assumes a fixed GPUs-per-replica, but the user may select more here, so
+          we caution rather than block. Hidden when fp8Blocked already explains a
+          blocking reason. */}
+      {doesNotFit && !fp8Blocked && (
+        <p className="text-sm text-yellow-500/90 text-center">
+          {doesNotFitReason || "This model is estimated not to fit on this cluster's GPUs at the selected precision. Try more GPUs per replica, a smaller model, or FP8 precision."}
+        </p>
+      )}
     </form>
     </>
   )
