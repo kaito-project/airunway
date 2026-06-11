@@ -3,6 +3,7 @@ import { PINNED_GAIE_VERSION } from '@airunway/shared';
 import app from '../hono-app';
 import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
+import { huggingFaceService } from '../services/huggingface';
 import { mockServiceMethod } from '../test/helpers';
 import {
   mockInferenceProviderConfig,
@@ -1078,6 +1079,356 @@ describe('Gateway Installation Routes', () => {
 
       const res = await app.request('/api/installation/gateway/install-crds', { method: 'POST' });
       expect(res.status).toBe(500);
+    });
+  });
+
+  // ==========================================================================
+  // GET /api/installation/gpu-throughput
+  // ==========================================================================
+  describe('GET /api/installation/gpu-throughput', () => {
+    // A cluster with two pools: a multi-node A100 pool (8 GPUs across 4 nodes =
+    // 2 per node) and a single-node H100 pool (8 GPUs on 1 node = 8 per node).
+    function mockCapacity() {
+      return {
+        totalGpus: 16,
+        allocatedGpus: 0,
+        availableGpus: 16,
+        maxContiguousAvailable: 8,
+        maxNodeGpuCapacity: 8,
+        gpuNodeCount: 5,
+        totalMemoryGb: 1280,
+        nodePools: [
+          { name: 'a100-pool', gpuCount: 8, nodeCount: 4, availableGpus: 8, gpuModel: 'NVIDIA-A100-SXM4-80GB' },
+          { name: 'h100-pool', gpuCount: 8, nodeCount: 1, availableGpus: 8, gpuModel: 'NVIDIA-H100-80GB-HBM3' },
+        ],
+      };
+    }
+
+    test('bounds tpSize and label to the requested pool per-node GPU count', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      // A100 pool hosts 2 GPUs per node, so a requested tpSize=8 is clamped to 2.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&tpSize=8',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.gpuModel).toBe('A100-80GB');
+      expect(data.tpSize).toBe(2);
+      expect(data.capacityLabel).toBe('2x80 GB');
+    });
+
+    test('ignores a requested gpuModel absent from the cluster and falls back to highest-VRAM pool', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      // H200 is not in any pool; should fall through to the highest-VRAM pool.
+      // A100 and H100 are both 80GB; the first-seen (A100) wins the >, so the
+      // resolved model is whichever pool has strictly greater VRAM — here equal,
+      // so the first pool (A100) is kept. Either way it must be a real pool model.
+      const res = await app.request('/api/installation/gpu-throughput?gpuModel=H200');
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(['A100-80GB', 'H100-80GB']).toContain(data.gpuModel);
+      // maxContiguous comes from the selected pool's per-node count (2 for A100).
+      expect(data.tpSize).toBeLessThanOrEqual(8);
+    });
+
+    test('uses per-node count for the fallback (no explicit gpuModel) path', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?tpSize=8');
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Highest-VRAM pool selected (A100, first of the equal-VRAM pools): 2/node.
+      expect(data.capacityLabel).toBe('2x80 GB');
+      expect(data.tpSize).toBe(2);
+    });
+
+    test('returns 404 when no pool maps to a known GPU spec', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => ({
+          totalGpus: 0,
+          allocatedGpus: 0,
+          availableGpus: 0,
+          maxContiguousAvailable: 0,
+          maxNodeGpuCapacity: 0,
+          gpuNodeCount: 0,
+          totalMemoryGb: 0,
+          nodePools: [],
+        })),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?gpuModel=A100-80GB');
+      expect(res.status).toBe(404);
+    });
+
+    test('returns 404 when the only pool runs a GPU absent from the static spec table', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => ({
+          totalGpus: 8,
+          allocatedGpus: 0,
+          availableGpus: 8,
+          maxContiguousAvailable: 8,
+          maxNodeGpuCapacity: 8,
+          gpuNodeCount: 1,
+          totalMemoryGb: 0,
+          // A brand-new / unsupported GPU label. It must be treated as unknown
+          // (skipped) rather than silently coerced to an A10 estimate.
+          nodePools: [
+            { name: 'b200-pool', gpuCount: 8, nodeCount: 1, availableGpus: 8, gpuModel: 'NVIDIA-B200-192GB' },
+          ],
+        })),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?gpuModel=NVIDIA-B200-192GB');
+      expect(res.status).toBe(404);
+    });
+
+    test('skips an unknown-GPU pool and estimates on the known pool instead', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => ({
+          totalGpus: 16,
+          allocatedGpus: 0,
+          availableGpus: 16,
+          maxContiguousAvailable: 8,
+          maxNodeGpuCapacity: 8,
+          gpuNodeCount: 2,
+          totalMemoryGb: 0,
+          // Mixed cluster: one unrecognized GPU pool + one known A100 pool. The
+          // unknown pool must be skipped so the estimate resolves to the A100,
+          // never an A10 substitution for the B200.
+          nodePools: [
+            { name: 'b200-pool', gpuCount: 8, nodeCount: 1, availableGpus: 8, gpuModel: 'NVIDIA-B200-192GB' },
+            { name: 'a100-pool', gpuCount: 8, nodeCount: 4, availableGpus: 8, gpuModel: 'NVIDIA-A100-SXM4-80GB' },
+          ],
+        })),
+      );
+
+      const res = await app.request('/api/installation/gpu-throughput?tpSize=8');
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.gpuModel).toBe('A100-80GB');
+      expect(data.perGpuMemoryGb).toBe(80);
+    });
+
+    test('flags doesNotFit when model weights exceed available VRAM', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        // Valid architecture so capacity is high-confidence (not lowConfidence).
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      // ~200B params in bf16 (2 bytes) → ~400GB weights; even split across the
+      // A100 pool's 2 GPUs/node leaves ~200GB/GPU, far exceeding 80GB VRAM.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&modelId=org/huge&paramCount=200000000000&quantization=bf16',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.doesNotFit).toBe(true);
+      expect(data.concurrentSequences).toBe(0);
+      expect(data.lowConfidence).toBe(false);
+    });
+
+    test('caps inferred context length at the model max when no contextLen is provided', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        // Model advertises a 1M-token window but caller sends no contextLen.
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+          maxPositionEmbeddings: 1_000_000,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/long-ctx&paramCount=8000000000&quantization=bf16',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Falls back to maxPositionEmbeddings but capped at MAX_CONTEXT_LEN (32768).
+      expect(data.contextLen).toBe(32768);
+    });
+
+    test('respects an explicit contextLen query param over the model max', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+          maxPositionEmbeddings: 1_000_000,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/long-ctx&paramCount=8000000000&quantization=bf16&contextLen=8192',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.contextLen).toBe(8192);
+    });
+
+    test('caps an explicit contextLen that exceeds the max', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+          maxPositionEmbeddings: 1_000_000,
+        })),
+      );
+
+      // A caller forwarding a model's huge advertised window (here 256K) must be
+      // clamped to MAX_CONTEXT_LEN so the concurrency estimate doesn't collapse.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/long-ctx&paramCount=8000000000&quantization=bf16&contextLen=262144',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.contextLen).toBe(32768);
+    });
+
+    test('reports fp8Supported=true for an FP8-capable GPU', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=org/m&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fp8Supported).toBe(true);
+      // aggregate ≈ concurrentSequences × perChatTokensPerSec (single-stream rate).
+      // The response rounds perChat, so allow a small rounding margin.
+      expect(data.aggregateTokensPerSec).toBeGreaterThan(0);
+      expect(
+        Math.abs(data.aggregateTokensPerSec - data.concurrentSequences * data.perChatTokensPerSec)
+      ).toBeLessThanOrEqual(data.concurrentSequences);
+    });
+
+    test('reports fp8Supported=false for a GPU without an FP8 datapath', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=A100-80GB&modelId=org/m&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fp8Supported).toBe(false);
+      expect(data.aggregateTokensPerSec).toBeGreaterThan(0);
+      expect(
+        Math.abs(data.aggregateTokensPerSec - data.concurrentSequences * data.perChatTokensPerSec)
+      ).toBeLessThanOrEqual(data.concurrentSequences);
+    });
+
+    test('degrades to a low-confidence estimate for a malformed modelId without calling the HF service', async () => {
+      let archCalls = 0;
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => {
+          archCalls += 1;
+          return undefined;
+        }),
+      );
+
+      // A malformed id (path-traversal here) no longer hard-400s: paramCount is
+      // enough for a bandwidth-only estimate. Security is preserved by gating the
+      // token-bearing HF fetch on isValidHfRepoId, so the id never reaches it.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=../../etc/passwd&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // No arch → low-confidence, per-chat-only (no concurrency number).
+      expect(data.lowConfidence).toBe(true);
+      expect(data.perChatTokensPerSec).toBeGreaterThan(0);
+      expect(data.concurrentSequences).toBeUndefined();
+      // Security: the invalid id must never trigger a token-bearing HF request.
+      expect(archCalls).toBe(0);
+    });
+
+    test('produces a param-count-only estimate for a non-HF custom modelId without calling the HF service', async () => {
+      let archCalls = 0;
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => {
+          archCalls += 1;
+          return undefined;
+        }),
+      );
+
+      // A curated/custom id that is valid for Airunway but not a HuggingFace repo
+      // (three path segments) must not 400 — it degrades to the bandwidth-only
+      // estimate from paramCount and skips the HF architecture lookup entirely.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=catalog/custom/model&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.lowConfidence).toBe(true);
+      expect(data.perChatTokensPerSec).toBeGreaterThan(0);
+      expect(data.concurrentSequences).toBeUndefined();
+      expect(archCalls).toBe(0);
+    });
+
+    test('rejects a paramCount above the maximum with 400 and never estimates', async () => {
+      let archCalls = 0;
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => {
+          archCalls += 1;
+          return undefined;
+        }),
+      );
+
+      // 9T + 1 exceeds the .max(9_000_000_000_000) cap; zValidator rejects before the handler runs.
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&paramCount=9000000000001',
+      );
+      expect(res.status).toBe(400);
+      expect(archCalls).toBe(0);
+    });
+
+    test('accepts a well-formed modelId (200)', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getDetailedClusterGpuCapacity', async () => mockCapacity()),
+        mockServiceMethod(huggingFaceService, 'getModelArchitecture', async () => ({
+          numLayers: 80,
+          numKvHeads: 8,
+          headDim: 128,
+        })),
+      );
+
+      const res = await app.request(
+        '/api/installation/gpu-throughput?gpuModel=H100-80GB&modelId=meta-llama/Meta-Llama-3-70B&paramCount=8000000000',
+      );
+      expect(res.status).toBe(200);
     });
   });
 });
