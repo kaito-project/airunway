@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpuCapacity } from '@/hooks/useGpuOperator'
+import { useDetailedCapacity } from '@/hooks/useAutoscaler'
 import { ModelGrid } from '@/components/models/ModelGrid'
 import { ModelSearch } from '@/components/models/ModelSearch'
 import { HfModelSearch } from '@/components/models/HfModelSearch'
@@ -9,16 +10,19 @@ import { BookMarked, Search, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Engine } from '@airunway/shared'
 import { getGpuFitCapacityDisplay } from '@/lib/gpu-fit-capacity'
+import { hasEstimableGpu } from '@/lib/gpu-throughput-params'
 
 type Tab = 'curated' | 'huggingface'
 
 export function ModelsPage() {
   const { data: models, isLoading, error } = useModels()
   const { data: gpuCapacity } = useGpuCapacity()
+  const { data: detailedCapacity } = useDetailedCapacity()
   const [search, setSearch] = useState('')
   const [selectedEngines, setSelectedEngines] = useState<Engine[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('curated')
   const gpuFitCapacity = getGpuFitCapacityDisplay(gpuCapacity)
+  const gpuPresent = hasEstimableGpu(detailedCapacity)
 
   const filteredModels = useMemo(() => {
     if (!models) return []
@@ -142,6 +146,7 @@ export function ModelsPage() {
             gpuCapacityGb={gpuCapacity?.totalMemoryGb}
             gpuCount={gpuFitCapacity.gpuCount}
             gpuCapacityLabel={gpuFitCapacity.capacityLabel}
+            gpuPresent={gpuPresent}
           />
         </>
       )}
@@ -152,6 +157,7 @@ export function ModelsPage() {
           gpuCapacityGb={gpuCapacity?.totalMemoryGb}
           gpuCount={gpuFitCapacity.gpuCount}
           gpuCapacityLabel={gpuFitCapacity.capacityLabel}
+          gpuPresent={gpuPresent}
         />
       )}
     </div>

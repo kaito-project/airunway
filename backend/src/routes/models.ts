@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { HTTPException } from 'hono/http-exception';
-import { huggingFaceService } from '../services/huggingface';
+import { huggingFaceService, isValidHfRepoId } from '../services/huggingface';
 import models from '../data/models.json';
 import logger from '../lib/logger';
 
@@ -45,7 +45,13 @@ const modelsRoute = new Hono()
   })
   .get('/:modelId{.+}/gguf-files', async (c) => {
     const modelId = c.req.param('modelId');
-    
+
+    // Validate before any token-bearing outbound request (this is a greedy
+    // path param, so reject traversal / malformed ids up front).
+    if (!isValidHfRepoId(modelId)) {
+      throw new HTTPException(400, { message: 'Invalid Hugging Face model id' });
+    }
+
     // Extract HuggingFace token from dedicated header (not Authorization, which is for cluster auth)
     const hfToken = c.req.header('X-HF-Token') || undefined;
 
