@@ -495,10 +495,6 @@ function resolveEngineType(config: DeploymentConfig): EngineType {
 const RECIPE_PROVENANCE_GENERATED_BY = 'vllm-recipe-resolver';
 const RECIPE_PROVENANCE_ANNOTATION_PREFIX = 'airunway.ai/recipe.';
 
-function isDefined<T>(value: T | null | undefined): value is T {
-  return value !== undefined && value !== null;
-}
-
 export function recipeProvenanceToAnnotations(recipeProvenance?: RecipeProvenance): Record<string, string> | undefined {
   if (!recipeProvenance) {
     return undefined;
@@ -509,9 +505,12 @@ export function recipeProvenanceToAnnotations(recipeProvenance?: RecipeProvenanc
 
   const addStringAnnotation = (field: keyof Omit<RecipeProvenance, 'features'>) => {
     const value = recipeProvenance[field];
-    if (isDefined(value)) {
+    // Only emit meaningful provenance: skip undefined/null and empty/whitespace
+    // strings so we never produce annotations like airunway.ai/recipe.source=""
+    // or mark the object generated-by without real provenance.
+    if (typeof value === 'string' && value.trim() !== '') {
       hasProvenance = true;
-      annotations[`${RECIPE_PROVENANCE_ANNOTATION_PREFIX}${field}`] = value;
+      annotations[`${RECIPE_PROVENANCE_ANNOTATION_PREFIX}${field}`] = value.trim();
     }
   };
 
@@ -523,12 +522,9 @@ export function recipeProvenanceToAnnotations(recipeProvenance?: RecipeProvenanc
   addStringAnnotation('precision');
   addStringAnnotation('revision');
 
-  if (isDefined(recipeProvenance.features)) {
+  if (Array.isArray(recipeProvenance.features) && recipeProvenance.features.length > 0) {
     hasProvenance = true;
-    const serializedFeatures = JSON.stringify(recipeProvenance.features);
-    if (serializedFeatures !== undefined) {
-      annotations[`${RECIPE_PROVENANCE_ANNOTATION_PREFIX}features`] = serializedFeatures;
-    }
+    annotations[`${RECIPE_PROVENANCE_ANNOTATION_PREFIX}features`] = JSON.stringify(recipeProvenance.features);
   }
 
   if (!hasProvenance) {

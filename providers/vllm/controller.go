@@ -227,25 +227,17 @@ func (r *VLLMProviderReconciler) validateCompatibility(md *airunwayv1alpha1.Mode
 		return fmt.Errorf("vLLM provider only supports vllm engine, got %s", md.ResolvedEngineType())
 	}
 
-	// Disaggregated mode: validate component-level GPUs
+	// Direct vLLM advertises aggregated serving only (see GetProviderConfigSpec).
+	// Reject disaggregated here so the provider does not accept a mode it does
+	// not claim to support; the internal prefill/decode rendering remains
+	// experimental and unadvertised.
 	if md.Spec.Serving != nil && md.Spec.Serving.Mode == airunwayv1alpha1.ServingModeDisaggregated {
-		if md.Spec.Scaling == nil || md.Spec.Scaling.Prefill == nil {
-			return fmt.Errorf("spec.scaling.prefill is required for disaggregated serving mode")
-		}
-		if md.Spec.Scaling.Decode == nil {
-			return fmt.Errorf("spec.scaling.decode is required for disaggregated serving mode")
-		}
-		if md.Spec.Scaling.Prefill.GPU == nil || md.Spec.Scaling.Prefill.GPU.Count == 0 {
-			return fmt.Errorf("vLLM provider requires GPU resources for prefill (spec.scaling.prefill.gpu.count > 0)")
-		}
-		if md.Spec.Scaling.Decode.GPU == nil || md.Spec.Scaling.Decode.GPU.Count == 0 {
-			return fmt.Errorf("vLLM provider requires GPU resources for decode (spec.scaling.decode.gpu.count > 0)")
-		}
-	} else {
-		// Aggregated mode: require top-level GPU
-		if md.Spec.Resources == nil || md.Spec.Resources.GPU == nil || md.Spec.Resources.GPU.Count == 0 {
-			return fmt.Errorf("vLLM provider requires GPU resources (spec.resources.gpu.count > 0)")
-		}
+		return fmt.Errorf("vLLM provider does not support disaggregated serving mode; use spec.serving.mode: aggregated")
+	}
+
+	// Aggregated mode: require top-level GPU
+	if md.Spec.Resources == nil || md.Spec.Resources.GPU == nil || md.Spec.Resources.GPU.Count == 0 {
+		return fmt.Errorf("vLLM provider requires GPU resources (spec.resources.gpu.count > 0)")
 	}
 
 	return nil

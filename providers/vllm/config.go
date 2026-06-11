@@ -61,25 +61,24 @@ func NewProviderConfigManager(c client.Client) *ProviderConfigManager {
 func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 	return airunwayv1alpha1.InferenceProviderConfigSpec{
 		Capabilities: &airunwayv1alpha1.ProviderCapabilities{
-			Engines: []airunwayv1alpha1.EngineType{
-				airunwayv1alpha1.EngineTypeVLLM,
-			},
-			ServingModes: []airunwayv1alpha1.ServingMode{
-				airunwayv1alpha1.ServingModeAggregated,
-			},
-			CPUSupport: false,
-			GPUSupport: true,
-		},
-		// Direct vLLM is intentionally a low-priority fallback for vLLM GPU
-		// workloads. Managed providers such as Dynamo and KubeRay keep higher
-		// priorities, while users can still force Direct vLLM with
-		// spec.provider.name: vllm.
-		SelectionRules: []airunwayv1alpha1.SelectionRule{
-			{
-				Condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 0 && spec.engine.type == 'vllm'",
-				Priority:  10,
+			Engines: []airunwayv1alpha1.EngineCapability{
+				{
+					Name: airunwayv1alpha1.EngineTypeVLLM,
+					// Aggregated serving only. The internal prefill/decode
+					// rendering is experimental and deliberately unadvertised.
+					ServingModes: []airunwayv1alpha1.ServingMode{
+						airunwayv1alpha1.ServingModeAggregated,
+					},
+					GPUSupport: true,
+					CPUSupport: false,
+				},
 			},
 		},
+		// Direct vLLM is explicit-only: it advertises no selection rules, so the
+		// core selector never auto-selects it. Managed providers such as Dynamo
+		// and KubeRay remain the auto-selected defaults for vLLM GPU workloads;
+		// users opt into Direct vLLM with spec.provider.name: vllm.
+		SelectionRules: nil,
 	}
 }
 

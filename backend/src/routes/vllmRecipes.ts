@@ -61,8 +61,13 @@ const vllmRecipes = new Hono()
   /**
    * GET /api/vllm/recipes/:org/:model
    * Fetch the raw recipe payload for a Hugging Face model ID.
+   *
+   * `:model` is intentionally a single path segment (no `{.+}`): a Hugging Face
+   * model ID is exactly `<org>/<model>`, and allowing `/` here would let crafted
+   * paths traverse under the recipes base URL. `vllmRecipesClient` re-validates
+   * the resulting ID as a second layer of defense.
    */
-  .get('/:org/:model{.+}', async (c) => {
+  .get('/:org/:model', async (c) => {
     const org = c.req.param('org');
     const model = c.req.param('model');
 

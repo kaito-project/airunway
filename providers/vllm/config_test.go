@@ -13,33 +13,33 @@ func TestGetProviderConfigSpec(t *testing.T) {
 	if spec.Capabilities == nil {
 		t.Fatal("expected non-nil capabilities")
 	}
-	if !spec.Capabilities.GPUSupport {
-		t.Error("expected GPU support")
-	}
-	if spec.Capabilities.CPUSupport {
-		t.Error("expected no CPU support")
-	}
 
-	// Engines
+	// Engines (per-engine capabilities)
 	engines := spec.Capabilities.Engines
 	if len(engines) == 0 {
 		t.Fatal("expected at least one engine")
 	}
-	hasVLLM := false
-	for _, e := range engines {
-		if e == airunwayv1alpha1.EngineTypeVLLM {
-			hasVLLM = true
+
+	var vllmEngine *airunwayv1alpha1.EngineCapability
+	for i := range engines {
+		if engines[i].Name == airunwayv1alpha1.EngineTypeVLLM {
+			vllmEngine = &engines[i]
 		}
 	}
-	if !hasVLLM {
-		t.Error("expected vllm engine support")
+	if vllmEngine == nil {
+		t.Fatal("expected vllm engine support")
+	}
+	if !vllmEngine.GPUSupport {
+		t.Error("expected GPU support")
+	}
+	if vllmEngine.CPUSupport {
+		t.Error("expected no CPU support")
 	}
 
-	// Serving modes
-	modes := spec.Capabilities.ServingModes
+	// Serving modes (aggregated only)
 	hasAggregated := false
 	hasDisaggregated := false
-	for _, m := range modes {
+	for _, m := range vllmEngine.ServingModes {
 		if m == airunwayv1alpha1.ServingModeAggregated {
 			hasAggregated = true
 		}
@@ -54,14 +54,8 @@ func TestGetProviderConfigSpec(t *testing.T) {
 		t.Error("did not expect disaggregated serving mode to be advertised")
 	}
 
-	if len(spec.SelectionRules) != 1 {
-		t.Fatalf("expected one low-priority vLLM selection rule, got %d", len(spec.SelectionRules))
-	}
-	if spec.SelectionRules[0].Condition != "has(spec.resources.gpu) && spec.resources.gpu.count > 0 && spec.engine.type == 'vllm'" {
-		t.Errorf("unexpected selection rule condition %q", spec.SelectionRules[0].Condition)
-	}
-	if spec.SelectionRules[0].Priority != 10 {
-		t.Errorf("expected selection rule priority 10, got %d", spec.SelectionRules[0].Priority)
+	if len(spec.SelectionRules) != 0 {
+		t.Fatalf("expected Direct vLLM to be explicit-only (no selection rules), got %d", len(spec.SelectionRules))
 	}
 
 }

@@ -90,6 +90,38 @@ describe('shared deployment manifest conversion', () => {
     expect(manifest.spec.engine.extraArgs).toBeUndefined();
   });
 
+  test('empty-string and empty-array provenance produce no annotations', () => {
+    const manifest = toModelDeploymentManifest({
+      ...baseConfig,
+      provider: 'vllm',
+      recipeProvenance: {
+        source: '',
+        id: '   ',
+        features: [],
+      },
+    });
+
+    // No meaningful provenance → no recipe annotations and no generated-by marker.
+    expect(manifest.metadata.annotations).toBeUndefined();
+  });
+
+  test('trims provenance string values and skips blank ones', () => {
+    const manifest = toModelDeploymentManifest({
+      ...baseConfig,
+      provider: 'vllm',
+      recipeProvenance: {
+        source: '  vllm-recipes  ',
+        id: '',
+        features: [],
+      },
+    });
+
+    expect(manifest.metadata.annotations).toEqual({
+      'airunway.ai/generated-by': 'vllm-recipe-resolver',
+      'airunway.ai/recipe.source': 'vllm-recipes',
+    });
+  });
+
   test('maps env to spec.env', () => {
     const env = {
       VLLM_USE_V1: '1',

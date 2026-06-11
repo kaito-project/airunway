@@ -107,7 +107,7 @@ Server-side recipe alternative references are restricted to the configured recip
 
 ## Auto-selection behavior
 
-Direct vLLM registers a low-priority selection rule for GPU vLLM workloads. Managed providers such as Dynamo and KubeRay have higher-priority rules and will be selected first when they match. To force Direct vLLM, set:
+Direct vLLM is **explicit-only**: it advertises no selection rules, so the controller never auto-selects it. Managed providers such as Dynamo and KubeRay remain the auto-selected defaults for GPU vLLM workloads. To use Direct vLLM, set the provider explicitly:
 
 ```yaml
 spec:
