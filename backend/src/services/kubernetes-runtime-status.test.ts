@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { kubernetesService } from './kubernetes';
+import { kubernetesService, computeShimStatus } from './kubernetes';
 import { mockServiceMethod } from '../test/helpers';
 import { mockInferenceProviderConfig } from '../test/fixtures';
 
@@ -576,5 +576,140 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(true);
     expect(status.message).toBe('KubeRay CRD found and KubeRay operator pods are ready');
+  });
+
+  test('issue #244 regression: KAITO shim heartbeating + KAITO operator missing reports runtime not installed but integration connected', async () => {
+    const heartbeat = new Date().toISOString();
+    const kaitoConfig = {
+      ...mockInferenceProviderConfig,
+      status: {
+        ready: true,
+        version: '0.10.0',
+        lastHeartbeat: heartbeat,
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+        installed: false,
+        crdFound: false,
+        operatorRunning: false,
+        message: 'KAITO workspace CRD not found',
+      })),
+    );
+    mockProviderConfigs([kaitoConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const kaito = runtimes.find((runtime) => runtime.id === 'kaito');
+
+    expect(kaito).toBeDefined();
+    // Runtime install status reflects probe results, not the shim heartbeat
+    expect(kaito?.installed).toBe(false);
+    expect(kaito?.crdFound).toBe(false);
+    expect(kaito?.operatorRunning).toBe(false);
+    // Shim status is reported independently so the UI can distinguish them
+    expect(kaito?.shimRegistered).toBe(true);
+    expect(kaito?.shimConnected).toBe(true);
+    expect(kaito?.shimLastHeartbeat).toBe(heartbeat);
+  });
+
+  test('shim with no recent heartbeat is reported as not connected', async () => {
+    const staleHeartbeat = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const kaitoConfig = {
+      ...mockInferenceProviderConfig,
+      status: {
+        ready: true,
+        version: '0.10.0',
+        lastHeartbeat: staleHeartbeat,
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+      mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+        installed: true,
+        crdFound: true,
+        operatorRunning: true,
+        message: 'KAITO is installed and running',
+      })),
+    );
+    mockProviderConfigs([kaitoConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const kaito = runtimes.find((runtime) => runtime.id === 'kaito');
+
+    expect(kaito).toBeDefined();
+    expect(kaito?.installed).toBe(true);
+    expect(kaito?.shimRegistered).toBe(true);
+    expect(kaito?.shimConnected).toBe(false);
+    expect(kaito?.shimLastHeartbeat).toBe(staleHeartbeat);
+  });
+});
+
+describe('computeShimStatus', () => {
+  const now = Date.parse('2024-05-25T10:30:00.000Z');
+
+  test('reports connected when ready is true and heartbeat is fresh', () => {
+    const result = computeShimStatus(
+      { ready: true, lastHeartbeat: '2024-05-25T10:29:00.000Z' },
+      now,
+    );
+    expect(result).toEqual({
+      shimRegistered: true,
+      shimConnected: true,
+      shimLastHeartbeat: '2024-05-25T10:29:00.000Z',
+    });
+  });
+
+  test('reports not connected when heartbeat is stale (older than 3 minutes)', () => {
+    const result = computeShimStatus(
+      { ready: true, lastHeartbeat: '2024-05-25T10:25:00.000Z' },
+      now,
+    );
+    expect(result.shimRegistered).toBe(true);
+    expect(result.shimConnected).toBe(false);
+    expect(result.shimLastHeartbeat).toBe('2024-05-25T10:25:00.000Z');
+  });
+
+  test('treats heartbeat exactly at the 3-minute boundary as fresh', () => {
+    const result = computeShimStatus(
+      { ready: true, lastHeartbeat: '2024-05-25T10:27:00.000Z' },
+      now,
+    );
+    expect(result.shimConnected).toBe(true);
+  });
+
+  test('reports not connected when ready is false even with fresh heartbeat', () => {
+    const result = computeShimStatus(
+      { ready: false, lastHeartbeat: '2024-05-25T10:29:30.000Z' },
+      now,
+    );
+    expect(result.shimRegistered).toBe(true);
+    expect(result.shimConnected).toBe(false);
+  });
+
+  test('reports not connected when heartbeat is missing', () => {
+    const result = computeShimStatus({ ready: true }, now);
+    expect(result.shimRegistered).toBe(true);
+    expect(result.shimConnected).toBe(false);
+    expect(result.shimLastHeartbeat).toBeUndefined();
+  });
+
+  test('handles missing status defensively', () => {
+    const result = computeShimStatus(undefined, now);
+    expect(result.shimRegistered).toBe(true);
+    expect(result.shimConnected).toBe(false);
+    expect(result.shimLastHeartbeat).toBeUndefined();
+  });
+
+  test('ignores invalid heartbeat strings instead of throwing', () => {
+    const result = computeShimStatus(
+      { ready: true, lastHeartbeat: 'not-a-real-timestamp' },
+      now,
+    );
+    expect(result.shimRegistered).toBe(true);
+    expect(result.shimConnected).toBe(false);
+    expect(result.shimLastHeartbeat).toBe('not-a-real-timestamp');
   });
 });

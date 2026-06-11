@@ -431,6 +431,40 @@ describe('Installation Provider Routes', () => {
       expect(res.status).toBe(404);
     });
 
+    test('includes AI Runway integration (shim) status derived from the provider config heartbeat', async () => {
+      const recentHeartbeat = new Date().toISOString();
+      const configWithHeartbeat = {
+        ...mockInferenceProviderConfig,
+        status: {
+          ...mockInferenceProviderConfig.status,
+          lastHeartbeat: recentHeartbeat,
+        },
+      };
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => configWithHeartbeat),
+        mockServiceMethod(kubernetesService, 'checkKaitoInstallationStatus', async () => ({
+          installed: false,
+          crdFound: false,
+          operatorRunning: false,
+          message: 'KAITO workspace CRD not found',
+        })),
+      );
+
+      const res = await app.request('/api/installation/providers/kaito/status');
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      // Runtime install status still reflects the live probe, not shim heartbeat
+      expect(data.installed).toBe(false);
+      expect(data.crdFound).toBe(false);
+      expect(data.operatorRunning).toBe(false);
+      // Shim status is exposed separately so the UI can clarify the distinction
+      expect(data.shimRegistered).toBe(true);
+      expect(data.shimConnected).toBe(true);
+      expect(data.shimLastHeartbeat).toBe(recentHeartbeat);
+    });
+
     test('surfaces shim refuse-fast message when UpstreamReady=False is fresh', async () => {
       const freshHeartbeat = new Date(Date.now() - 30_000).toISOString();
       const configWithRefuseFast = {

@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import { kubernetesService, computeShimStatus } from '../services/kubernetes';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import { getProviderHealth } from '../services/providerHealth';
 import { getKnownGpuInfo, normalizeKnownGpuModel, gpuSupportsFp8 } from '../services/costEstimation';
@@ -488,6 +488,7 @@ const installation = new Hono()
     // condition reporting unhealthy (the refuse-fast path). Structural fields
     // (installed/operatorRunning) stay sourced from installationStatus since
     // that reflects what's actually in the cluster regardless of shim state.
+    const shim = computeShimStatus(status);
     const health = getProviderHealth(providerId, config);
     const baseMessage = hasInstallMetadata || provider.requiresCRD === false
       ? installationStatus.message
@@ -507,6 +508,9 @@ const installation = new Hono()
       installable,
       installationSteps: provider.installationSteps,
       helmCommands: installable ? helmService.getInstallCommands(provider.helmRepos, charts) : [],
+      shimRegistered: shim.shimRegistered,
+      shimConnected: shim.shimConnected,
+      shimLastHeartbeat: shim.shimLastHeartbeat,
     });
   })
   .get('/providers/:providerId/commands', async (c) => {
