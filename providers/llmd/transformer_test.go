@@ -186,6 +186,44 @@ func TestTransformAggregatedVLLMArgs(t *testing.T) {
 	assertFlag(t, args, "--trust-remote-code")
 }
 
+func TestTransformAggregatedPrefixCachingFlag(t *testing.T) {
+	tr := NewTransformer()
+
+	// EnablePrefixCaching=true should emit --enable-prefix-caching (the CRD
+	// default applied by the API server before reaching the provider).
+	mdOn := newTestMD("test-model", "default")
+	mdOn.Spec.Engine.EnablePrefixCaching = true
+	resOn, err := tr.Transform(context.Background(), mdOn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	containersOn, _, _ := unstructured.NestedSlice(resOn[0].Object, "spec", "template", "spec", "containers")
+	argsOn := argsToStrings(containersOn[0].(map[string]interface{})["args"].([]interface{}))
+	assertFlag(t, argsOn, "--enable-prefix-caching")
+	for _, a := range argsOn {
+		if a == "--no-enable-prefix-caching" {
+			t.Error("did not expect --no-enable-prefix-caching when EnablePrefixCaching=true")
+		}
+	}
+
+	// Explicitly disabled should emit --no-enable-prefix-caching so the
+	// provider's choice survives any vLLM-side default flips.
+	mdOff := newTestMD("test-model", "default")
+	mdOff.Spec.Engine.EnablePrefixCaching = false
+	resOff, err := tr.Transform(context.Background(), mdOff)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	containersOff, _, _ := unstructured.NestedSlice(resOff[0].Object, "spec", "template", "spec", "containers")
+	argsOff := argsToStrings(containersOff[0].(map[string]interface{})["args"].([]interface{}))
+	assertFlag(t, argsOff, "--no-enable-prefix-caching")
+	for _, a := range argsOff {
+		if a == "--enable-prefix-caching" {
+			t.Error("did not expect --enable-prefix-caching when EnablePrefixCaching=false")
+		}
+	}
+}
+
 func TestTransformAggregatedTensorParallelism(t *testing.T) {
 	tr := NewTransformer()
 	md := newTestMD("test-model", "default")
