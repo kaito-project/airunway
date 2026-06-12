@@ -197,11 +197,6 @@ const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defau
     description: 'GPU-accelerated vLLM inference with disaggregated prefill/decode support',
     defaultNamespace: 'default',
   },
-  vllm: {
-    name: 'vLLM',
-    description: 'High-throughput inference with the native vLLM provider',
-    defaultNamespace: 'default',
-  },
 }
 
 // Engine support by runtime (only traditional GPU engines, not llamacpp)
@@ -211,7 +206,6 @@ const RUNTIME_ENGINES: Record<RuntimeId, TraditionalEngine[]> = {
   kaito: ['vllm'], // KAITO exposes vLLM in the engine picker; single-engine llama.cpp models bypass it
   vllm: ['vllm'], // Direct vLLM uses vLLM exclusively
   llmd: ['vllm'], // llm-d uses vLLM exclusively
-  vllm: ['vllm'], // Native vLLM provider uses vLLM exclusively
 }
 
 function normalizeGatewayAvailability(

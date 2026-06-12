@@ -24,7 +24,7 @@ func TestValidateSpecRejectsConflictingImageFields(t *testing.T) {
 		},
 	}
 
-	err := r.validateSpec(context.Background(), md)
+	err := r.validateSpec(context.Background(), md, nil, md.ResolvedEngineType(), md.ResolvedServingMode())
 	if err == nil {
 		t.Fatalf("expected conflicting image fields to be rejected")
 	}

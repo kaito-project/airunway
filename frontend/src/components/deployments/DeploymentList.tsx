@@ -13,9 +13,9 @@ import {
 } from '@/components/ui/dialog'
 import { useDeleteDeployment, type DeploymentStatus } from '@/hooks/useDeployments'
 import { useToast } from '@/hooks/useToast'
-import { formatRelativeTime, generateAynaUrl } from '@/lib/utils'
+import { formatRelativeTime } from '@/lib/utils'
 import { getEngineDisplayName, getProviderDisplayName } from '@/lib/deploymentDisplay'
-import { Eye, Trash2, MessageSquare, Rocket } from 'lucide-react'
+import { Eye, Trash2, Rocket } from 'lucide-react'
 
 interface DeploymentListProps {
   deployments: DeploymentStatus[]
