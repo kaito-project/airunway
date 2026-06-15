@@ -2,7 +2,7 @@ import * as k8s from '@kubernetes/client-node';
 import type * as https from 'node:https';
 import { configService } from './config';
 import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus } from '@airunway/shared';
-import { toModelDeploymentManifest, toDeploymentStatus, INFERENCE_GATEWAY_LABEL } from '@airunway/shared';
+import { toModelDeploymentManifest, toDeploymentStatus } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
 import { loadKubeConfig, makeApiClient, kubeConfigToBunTls, type BunTlsOptions } from '../lib/kubeconfig';
 import { type K8sApiError } from '../lib/k8s-errors';
@@ -16,6 +16,13 @@ import {
   type RuntimeProviderId,
 } from './runtimeInstallation';
 export type { InstallationStatus } from './runtimeInstallation';
+import {
+  checkGatewayCRDStatus as checkGatewayCRDStatusWithAdapter,
+  getGatewayModels as getGatewayModelsWithAdapter,
+  getGatewayStatus as getGatewayStatusWithAdapter,
+  type GatewayItem,
+  type GatewayStatusAdapter,
+} from './gatewayStatus';
 
 // ModelDeployment CRD configuration
 const MODEL_DEPLOYMENT_CRD = {
@@ -24,19 +31,6 @@ const MODEL_DEPLOYMENT_CRD = {
   plural: 'modeldeployments',
   kind: 'ModelDeployment',
 };
-
-const GATEWAY_API_CRD_NAME = 'gateways.gateway.networking.k8s.io';
-const INFERENCE_POOL_CRD_NAME = 'inferencepools.inference.networking.k8s.io';
-
-const GATEWAY_API_VERSION_ANNOTATIONS = [
-  'gateway.networking.k8s.io/bundle-version',
-  'app.kubernetes.io/version',
-];
-
-const INFERENCE_EXTENSION_VERSION_ANNOTATIONS = [
-  'inference.networking.k8s.io/bundle-version',
-  'app.kubernetes.io/version',
-];
 
 /**
  * GPU availability information from cluster nodes
@@ -1806,112 +1800,16 @@ class KubernetesService {
    * Get gateway status by checking the required InferencePool, HTTPRoute, and
    * Gateway CRDs, listing Gateway resources, and selecting the Gateway the
    * controller auto-detection would select.
-   *
-   * `available` is true only when the CRDs exist and a Gateway can be selected
-   * (a single Gateway, or a Gateway labeled `INFERENCE_GATEWAY_LABEL=true` when
-   * multiple Gateways exist). `endpoint` is the selected Gateway's first status
-   * address value, when the Gateway has published one.
    */
   async getGatewayStatus(): Promise<GatewayInfo> {
-    // Check if InferencePool CRD exists - without it, gateway integration is not supported.
-    const inferencePoolCrdExists = await this.checkCRDExists('inferencepools.inference.networking.k8s.io');
-    if (!inferencePoolCrdExists) {
-      return { available: false };
-    }
-
-    // The controller creates HTTPRoutes, so the HTTPRoute CRD must be present.
-    const httpRouteCrdExists = await this.checkCRDExists('httproutes.gateway.networking.k8s.io');
-    if (!httpRouteCrdExists) {
-      return { available: false };
-    }
-
-    // The Gateway CRD must exist before the backend can list Gateway resources.
-    const gatewayCrdExists = await this.checkCRDExists('gateways.gateway.networking.k8s.io');
-    if (!gatewayCrdExists) {
-      return { available: false };
-    }
-
-    // "Available" means the controller auto-detection can select a Gateway -
-    // mirror that path so the UI matches what it will actually pick when
-    // reconciling a ModelDeployment with gateway.enabled=true and no explicit
-    // gateway override.
-    type GatewayItem = {
-      metadata?: { name?: string; namespace?: string; labels?: Record<string, string> };
-      status?: { addresses?: Array<{ value?: string }> };
-    };
-    let items: GatewayItem[] = [];
-    try {
-      const response = await withRetry(
-        () => this.customObjectsApi.listClusterCustomObject({
-          group: 'gateway.networking.k8s.io',
-          version: 'v1',
-          plural: 'gateways',
-        }),
-        { operationName: 'listGateways', maxRetries: 1 }
-      );
-      items = (response as { items?: GatewayItem[] }).items || [];
-    } catch (error) {
-      logger.debug({ error: getK8sErrorMessage(error) }, 'Could not list Gateway resources');
-      return { available: false };
-    }
-
-    if (items.length === 0) {
-      return { available: false };
-    }
-
-    let selected: GatewayItem | undefined;
-    if (items.length === 1) {
-      selected = items[0];
-    } else {
-      // Multiple Gateways: require the controller's inference-gateway label to disambiguate.
-      const labeled = items.filter((gw) => gw.metadata?.labels?.[INFERENCE_GATEWAY_LABEL] === 'true');
-      if (labeled.length === 0) {
-        return { available: false };
-      }
-      selected = labeled[0];
-    }
-
-    const endpoint = selected?.status?.addresses?.[0]?.value;
-    return { available: true, endpoint };
+    return getGatewayStatusWithAdapter(this.createGatewayStatusAdapter());
   }
 
   /**
    * List all models accessible through the gateway by checking ModelDeployment status.gateway
    */
   async getGatewayModels(): Promise<GatewayModelInfo[]> {
-    const namespace = await this.getDefaultNamespace();
-    const models: GatewayModelInfo[] = [];
-
-    try {
-      const response = await withRetry(
-        () => this.customObjectsApi.listNamespacedCustomObject({
-          group: MODEL_DEPLOYMENT_CRD.apiGroup,
-          version: MODEL_DEPLOYMENT_CRD.apiVersion,
-          namespace,
-          plural: MODEL_DEPLOYMENT_CRD.plural,
-        }),
-        { operationName: 'listDeploymentsForGateway' }
-      );
-
-      const items = (response as { items?: ModelDeployment[] }).items || [];
-      for (const md of items) {
-        const gw = md.status?.gateway;
-        if (gw?.modelName) {
-          models.push({
-            name: gw.modelName,
-            deploymentName: md.metadata.name,
-            provider: md.status?.provider?.name || md.spec.provider?.name,
-            ready: md.status?.conditions?.some(
-              (c: { type: string; status: string }) => c.type === 'GatewayReady' && c.status === 'True'
-            ) ?? false,
-          });
-        }
-      }
-    } catch (error) {
-      logger.debug({ error: getK8sErrorMessage(error) }, 'Could not list ModelDeployments for gateway models');
-    }
-
-    return models;
+    return getGatewayModelsWithAdapter(this.createGatewayStatusAdapter());
   }
 
   /**
@@ -1919,58 +1817,41 @@ class KubernetesService {
    * Also includes live gateway availability info.
    */
   async checkGatewayCRDStatus(): Promise<GatewayCRDStatus> {
-    const { PINNED_GAIE_VERSION, GAIE_CRD_URL, GATEWAY_API_CRD_URL } = await import('@airunway/shared');
+    return checkGatewayCRDStatusWithAdapter(this.createGatewayStatusAdapter());
+  }
 
-    const [gatewayApiStatus, inferenceExtStatus] = await Promise.all([
-      this.getCRDStatusFromAnnotations(GATEWAY_API_CRD_NAME, GATEWAY_API_VERSION_ANNOTATIONS),
-      this.getCRDStatusFromAnnotations(INFERENCE_POOL_CRD_NAME, INFERENCE_EXTENSION_VERSION_ANNOTATIONS),
-    ]);
-
-    const gatewayApiInstalled = gatewayApiStatus.installed;
-    const inferenceExtInstalled = inferenceExtStatus.installed;
-    const gatewayApiVersion = gatewayApiStatus.version;
-    const inferenceExtVersion = inferenceExtStatus.version;
-
-    // Get live gateway status
-    let gatewayAvailable = false;
-    let gatewayEndpoint: string | undefined;
-    if (gatewayApiInstalled && inferenceExtInstalled) {
-      try {
-        const gwStatus = await this.getGatewayStatus();
-        gatewayAvailable = gwStatus.available;
-        gatewayEndpoint = gwStatus.endpoint;
-      } catch {
-        // Gateway status check failed, not critical
-      }
-    }
-
-    const allInstalled = gatewayApiInstalled && inferenceExtInstalled;
-    let message: string;
-    if (allInstalled && gatewayAvailable) {
-      message = 'Gateway API and Inference Extension CRDs are installed. Gateway is available.';
-    } else if (allInstalled) {
-      message = 'Gateway API and Inference Extension CRDs are installed. No active gateway detected.';
-    } else if (!gatewayApiInstalled && !inferenceExtInstalled) {
-      message = 'Gateway API and Inference Extension CRDs are not installed.';
-    } else if (!gatewayApiInstalled) {
-      message = 'Gateway API CRDs are not installed.';
-    } else {
-      message = 'Inference Extension CRDs are not installed.';
-    }
-
+  private createGatewayStatusAdapter(): GatewayStatusAdapter {
     return {
-      gatewayApiInstalled,
-      inferenceExtInstalled,
-      gatewayApiVersion,
-      inferenceExtVersion,
-      pinnedVersion: PINNED_GAIE_VERSION,
-      gatewayAvailable,
-      gatewayEndpoint,
-      message,
-      installCommands: [
-        `kubectl apply -f ${GATEWAY_API_CRD_URL}`,
-        `kubectl apply -f ${GAIE_CRD_URL}`,
-      ],
+      checkCRDExists: (crdName) => this.checkCRDExists(crdName),
+      listGateways: async () => {
+        const response = await withRetry(
+          () => this.customObjectsApi.listClusterCustomObject({
+            group: 'gateway.networking.k8s.io',
+            version: 'v1',
+            plural: 'gateways',
+          }),
+          { operationName: 'listGateways', maxRetries: 1 }
+        );
+        return (response as { items?: GatewayItem[] }).items || [];
+      },
+      getDefaultNamespace: () => this.getDefaultNamespace(),
+      listModelDeployments: async (namespace) => {
+        const response = await withRetry(
+          () => this.customObjectsApi.listNamespacedCustomObject({
+            group: MODEL_DEPLOYMENT_CRD.apiGroup,
+            version: MODEL_DEPLOYMENT_CRD.apiVersion,
+            namespace,
+            plural: MODEL_DEPLOYMENT_CRD.plural,
+          }),
+          { operationName: 'listDeploymentsForGateway' }
+        );
+        return (response as { items?: ModelDeployment[] }).items || [];
+      },
+      getGatewayStatus: () => this.getGatewayStatus(),
+      getCRDStatusFromAnnotations: (crdName, annotationKeys) => (
+        this.getCRDStatusFromAnnotations(crdName, annotationKeys)
+      ),
+      logDebug: (context, message) => logger.debug(context, message),
     };
   }
 
