@@ -283,6 +283,9 @@ func buildAnnotations() (map[string]string, error) {
 					"app.kubernetes.io/name=kuberay-operator",
 				},
 			},
+			{
+				"selectors": []string{"app.kubernetes.io/name=kuberay-operator"},
+			},
 		},
 	}
 
