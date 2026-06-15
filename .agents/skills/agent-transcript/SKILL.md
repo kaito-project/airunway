@@ -1,11 +1,11 @@
 ---
 name: agent-transcript
-description: "Add a redacted agent session transcript to a GitHub PR or issue body as local-only provenance for OpenClaw workflows."
+description: "Add a redacted agent session transcript to a GitHub PR or issue body as local-only provenance for agent-authored workflows."
 ---
 
 # Agent Transcript
 
-Best-effort local-only provenance for OpenClaw PR/issue bodies. Use during agent-created GitHub PR or issue workflows before creating/updating the body.
+Best-effort local-only provenance for agent-authored PR/issue bodies. Use during agent-created GitHub PR or issue workflows before creating/updating the body.
 
 ## Contract
 
@@ -38,7 +38,7 @@ Find a likely local session:
   --since-days 14
 ```
 
-`find` scans the newest 400 matching local JSONL logs by default across Codex, Claude, Pi, and OpenClaw agent sessions. Use `--max-files N` for a wider local search.
+`find` scans the newest 400 matching local JSONL logs by default across Codex, Claude, Pi, and other local agent sessions. Use `--max-files N` for a wider local search.
 
 Render a PR/issue body section:
 
