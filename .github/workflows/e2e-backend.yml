@@ -25,6 +25,7 @@ jobs:
           source versions.env
           set +a
           echo "KAITO_VERSION=${KAITO_VERSION}" >> "$GITHUB_ENV"
+          echo "KAITO_WORKSPACE_IMAGE_TAG=0.10.0-20260615" >> "$GITHUB_ENV"
 
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -42,9 +43,6 @@ jobs:
           go install sigs.k8s.io/kind@latest
           kind create cluster --name airunway-backend-e2e --wait 120s
 
-      - name: Preload KAITO images
-        run: hack/preload-kaito-images.sh airunway-backend-e2e
-
       - name: Install KAITO operator
         run: |
           helm repo add kaito https://kaito-project.github.io/kaito/charts/kaito
@@ -55,12 +53,13 @@ jobs:
             --create-namespace \
             --version "${KAITO_VERSION}" \
             --set featureGates.disableNodeAutoProvisioning=true \
+            --set image.repository=ghcr.io/kaito-project/kaito/workspace \
+            --set image.tag="${KAITO_WORKSPACE_IMAGE_TAG}" \
             --set image.pullPolicy=IfNotPresent \
-            --set local-csi-driver.image.driver.pullPolicy=IfNotPresent \
-            --set local-csi-driver.image.manager.pullPolicy=IfNotPresent \
-            --set local-csi-driver.image.csiProvisioner.pullPolicy=IfNotPresent \
-            --set local-csi-driver.image.csiResizer.pullPolicy=IfNotPresent \
-            --set local-csi-driver.image.nodeDriverRegistrar.pullPolicy=IfNotPresent
+            --set nvidiaDevicePlugin.enabled=false \
+            --set localCSIDriver.useLocalCSIDriver=false \
+            --set gpu-feature-discovery.gfd.enabled=false \
+            --set gpu-feature-discovery.nfd.enabled=false
           kubectl wait --for=condition=Available deployment -n kaito-workspace -l app.kubernetes.io/name=workspace --timeout=120s
 
       - name: Build and deploy controller
