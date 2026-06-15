@@ -22,8 +22,9 @@ ENGINES = ("codex", "claude", "droid", "copilot")
 SENSITIVE_UNTRACKED_PATH = re.compile(
     r"(^|/)(\.envrc(?:[./_-]|$)|\.env(?:[./_-]|$)|\.direnv(?:/|$)|"
     r"\.npmrc$|\.netrc$|\.git-credentials$|credentials$|\.docker/config\.json$|"
-    r".*(?:auth|cookie|credential|secret|token)s?$|"
-    r".*(?:auth|cookie|credential|secret|token).*\.(?:json|ya?ml|log|txt|env)|"
+    r"\.kube/config$|kubeconfig(?:[._-].*)?$|"
+    r"(?:.*[._-])?(?:auth|cookie|credentials?|secrets?|tokens?)(?:[._-].*)?$|"
+    r"(?:.*[._-])?(?:auth|cookie|credentials?|secrets?|tokens?)(?:[._-].*)?\.(?:json|ya?ml|log|txt|env)|"
     r".*(?:id_rsa|id_ed25519|known_hosts|\.pem|\.p12|\.pfx|\.key|\.p8)$)",
     re.IGNORECASE,
 )
@@ -47,6 +48,10 @@ AUTH_URL_RE = re.compile(
 SERVICE_CREDENTIAL_URL_RE = re.compile(
     r"\b[A-Za-z][A-Za-z0-9+.-]*://(?=[^\s`\"'<>/]*:[^\s`\"'<>/]*@)[^\s`\"'<>]+",
     re.IGNORECASE,
+)
+QUOTED_SECRET_VALUE_RE = r'(?:(?:"(?:\\.|[^"\\\r\n])*")|(?:\'(?:\\.|[^\'\\\r\n])*\')|(?:`(?:\\.|[^`\\\r\n])*`))'
+KUBECONFIG_SECRET_FIELD_RE = re.compile(
+    r"(?im)^([ \t]*(?:client-key-data|client-certificate-data|client-key):[ \t]*).+$"
 )
 GOOGLE_OAUTH_ACCESS_TOKEN_RE = re.compile(r"\bya29\.[0-9A-Za-z._-]{20,}\b")
 HUGGINGFACE_ACCESS_TOKEN_RE = re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")
@@ -81,6 +86,7 @@ REVIEW_BUNDLE_REDACTIONS = [
     (COOKIE_ASSIGNMENT_RE, "[REDACTED_COOKIE]"),
     (AUTH_URL_RE, "[REDACTED_AUTH_URL]"),
     (SERVICE_CREDENTIAL_URL_RE, "[REDACTED_CREDENTIAL_URL]"),
+    (KUBECONFIG_SECRET_FIELD_RE, r"\1[REDACTED_KUBECONFIG_SECRET]"),
     (re.compile(r"/Users/(?!\[)[^\s`\"'>)]+"), "[LOCAL_PATH]"),
     (re.compile(r"/home/(?!\[)[^\s`\"'>)]+"), "[LOCAL_PATH]"),
     (re.compile(r"/(?:private/var/folders|var/folders|tmp)/[^\s`\"'>)]+"), "[LOCAL_PATH]"),
@@ -108,7 +114,7 @@ REVIEW_BUNDLE_REDACTIONS = [
     (
         re.compile(
             r"\b[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*[^\S\r\n]*=[^\S\r\n]*"
-            r"(?:\"[^\"\r\n]*\"|'[^'\r\n]*')"
+            + QUOTED_SECRET_VALUE_RE
         ),
         "[REDACTED_ENV_SECRET]",
     ),
@@ -116,7 +122,8 @@ REVIEW_BUNDLE_REDACTIONS = [
         re.compile(
             r"(?<![A-Za-z0-9_])[\"']?"
             r"[A-Za-z0-9_]*(?:api[_-]?key|token|secret|password|credential)[A-Za-z0-9_]*[\"']?"
-            r"[^\S\r\n]*:[^\S\r\n]*(?:\"[^\"\r\n]*\"|'[^'\r\n]*')",
+            r"[^\S\r\n]*:[^\S\r\n]*"
+            + QUOTED_SECRET_VALUE_RE,
             re.IGNORECASE,
         ),
         "[REDACTED_FIELD_SECRET]",
@@ -162,7 +169,7 @@ UNRESOLVED_SECRET_RE = re.compile(
     r"(?!(?:(?:try|await)\s+)*(?:[A-Za-z_][A-Za-z0-9_]*\.)*"
     r"(?:get|load|read|fetch|build|make|create|resolve|retrieve)"
     r"(?:password|token|secret|credentials?|api[_-]?key|key|hash)?\s*"
-    r"(?:\([^\S\r\n]*\)|\\\([^\S\r\n]*\\\))[^\S\r\n]*(?=$|[\r\n;,)\]\}\"']))"
+    r"(?:\([A-Za-z0-9_$.,\s]*\)|\\\([A-Za-z0-9_$.,\s]*\\\))[^\S\r\n]*(?=$|[\r\n;,)\]\}\"']))"
     r"[\"']?[A-Za-z0-9_./+=:-]{8,}"
 )
 THINKING_LEVELS_BY_ENGINE = {
@@ -984,7 +991,8 @@ def run_claude(args: argparse.Namespace, repo: Path, workspace: Path, prompt: st
         json.dumps(SCHEMA),
     ]
     if args.tools:
-        cmd.extend(["--allowedTools", claude_allowed_tools(args, workspace)])
+        tools = claude_allowed_tools(args, workspace)
+        cmd.extend(["--tools", tools, "--allowedTools", tools])
     else:
         cmd.extend(["--tools", ""])
     if args.stream_engine_output:

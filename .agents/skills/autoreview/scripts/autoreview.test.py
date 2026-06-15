@@ -58,6 +58,13 @@ class AutoReviewHelperTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             autoreview.redact_review_text(prefixed_secret_identifier_call)
 
+    def test_allows_non_literal_secret_helper_calls(self) -> None:
+        text = "const token = fetchToken(user.id);\nlet password = retrievePassword(account.id, request.userId);"
+
+        output = autoreview.redact_review_text(text)
+
+        self.assertEqual(text, output)
+
     def test_redacts_colon_style_quoted_secret_values_with_spaces(self) -> None:
         output = autoreview.redact_review_text('password: "mock secret phrase value"\n{"api_key": "mock api key value"}')
 
@@ -65,6 +72,14 @@ class AutoReviewHelperTests(unittest.TestCase):
         self.assertNotIn("mock secret phrase value", output)
         self.assertNotIn("mock api key value", output)
         self.assertNotIn("phrase value", output)
+
+    def test_redacts_escaped_and_backtick_quoted_secret_fields(self) -> None:
+        output = autoreview.redact_review_text('password: "abc\\"restOfSecret"\napi_key: `template secret value`')
+
+        self.assertIn("[REDACTED_FIELD_SECRET]", output)
+        self.assertNotIn("abc", output)
+        self.assertNotIn("restOfSecret", output)
+        self.assertNotIn("template secret value", output)
 
     def test_redacts_short_unquoted_secret_fields(self) -> None:
         output = autoreview.redact_review_text('password: abc123\n{"api_key": x9}')
@@ -254,6 +269,39 @@ class AutoReviewHelperTests(unittest.TestCase):
         self.assertNotIn("config/secrets.yml", output)
         self.assertNotIn("opaque-credential-value", output)
 
+    def test_safe_diff_omits_kubeconfig_paths_and_redacts_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            run(["git", "init"], repo)
+            kubeconfig = repo / ".kube" / "config"
+            kubeconfig.parent.mkdir()
+            kubeconfig.write_text("client-key-data: mock-client-key-data\nclient-certificate-data: mock-client-cert-data\n")
+            run(["git", "add", ".kube/config"], repo)
+
+            output = autoreview.safe_diff(repo, ["--cached"], ["--patch"])
+            redacted = autoreview.redact_review_text(kubeconfig.read_text())
+
+        self.assertIn("[1 sensitive changed path omitted from review bundle]", output)
+        self.assertNotIn(".kube/config", output)
+        self.assertNotIn("mock-client-key-data", output)
+        self.assertIn("[REDACTED_KUBECONFIG_SECRET]", redacted)
+        self.assertNotIn("mock-client-cert-data", redacted)
+
+    def test_safe_diff_includes_tokenizer_json_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            run(["git", "init"], repo)
+            tokenizer = repo / "models" / "tokenizer.json"
+            tokenizer.parent.mkdir()
+            tokenizer.write_text('{"model": "reviewable-tokenizer-change"}\n')
+            run(["git", "add", "models/tokenizer.json"], repo)
+
+            output = autoreview.safe_diff(repo, ["--cached"], ["--patch"])
+
+        self.assertNotIn("sensitive changed path omitted", output)
+        self.assertIn("models/tokenizer.json", output)
+        self.assertIn("reviewable-tokenizer-change", output)
+
     def test_safe_diff_omits_extensionless_secret_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -372,6 +420,47 @@ class AutoReviewHelperTests(unittest.TestCase):
 
             with self.assertRaises(SystemExit):
                 autoreview.claude_allowed_tools(args, workspace)
+
+    def test_claude_run_restricts_and_auto_approves_readonly_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            captured: dict[str, list[str]] = {}
+            args = type("Args", (), {
+                "claude_bin": "claude",
+                "tools": True,
+                "claude_allowed_tools": "Read,Grep,Glob,WebSearch",
+                "web_search": True,
+                "stream_engine_output": False,
+                "model": None,
+                "thinking": None,
+            })()
+            original_resolve = autoreview.resolve_command
+            original_run = autoreview.run_with_heartbeat
+
+            def fake_resolve(command: str, repo: Path) -> str:
+                return command
+
+            def fake_run(cmd: list[str], cwd: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
+                captured["cmd"] = cmd
+                return subprocess.CompletedProcess(cmd, 0, '{"findings": []}', "")
+
+            try:
+                autoreview.resolve_command = fake_resolve
+                autoreview.run_with_heartbeat = fake_run
+                autoreview.run_claude(args, Path(temp), workspace, "prompt")
+            finally:
+                autoreview.resolve_command = original_resolve
+                autoreview.run_with_heartbeat = original_run
+
+        cmd = captured["cmd"]
+        tools = cmd[cmd.index("--tools") + 1]
+        allowed = cmd[cmd.index("--allowedTools") + 1]
+        self.assertEqual(tools, allowed)
+        self.assertIn("Read(./**)", tools)
+        self.assertIn("Grep(./**)", tools)
+        self.assertIn("Glob(./**)", tools)
+        self.assertNotIn("Bash", tools)
+        self.assertNotIn("Edit", tools)
 
 
 if __name__ == "__main__":

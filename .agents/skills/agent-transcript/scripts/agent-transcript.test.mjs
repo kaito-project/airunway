@@ -319,6 +319,24 @@ test("render omits quoted secret env assignments with spaces", () => {
   assert.doesNotMatch(output, /phrase value/);
 });
 
+test("render omits backtick secret env assignments", () => {
+  const dir = tempDir();
+  const session = path.join(dir, "session.jsonl");
+  writeJsonl(session, [
+    {
+      type: "response_item",
+      payload: {
+        role: "user",
+        content: [{ type: "text", text: "PASSWORD=`super secret phrase value`" }],
+      },
+    },
+  ]);
+
+  const output = run(["render", "--session", session]);
+  assert.match(output, /browser\/session\/auth internals/);
+  assert.doesNotMatch(output, /super secret phrase/);
+});
+
 test("render omits colon-style quoted secret fields with spaces", () => {
   const dir = tempDir();
   const session = path.join(dir, "session.jsonl");
