@@ -1,10 +1,9 @@
 import * as k8s from '@kubernetes/client-node';
-import type * as https from 'node:https';
 import { configService } from './config';
 import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus, ModelDeployment, GatewayInfo, GatewayModelInfo, GatewayCRDStatus } from '@airunway/shared';
 import { toModelDeploymentManifest, toDeploymentStatus } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
-import { loadKubeConfig, makeApiClient, kubeConfigToBunTls, type BunTlsOptions } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import { type K8sApiError } from '../lib/k8s-errors';
 import logger from '../lib/logger';
 import { aggregateRequiresCRDFromCapabilities, getAnnotatedProviderDisplayName, getProviderDisplayName, providerRequiresRuntimeCRD } from '../lib/providers';
@@ -31,6 +30,13 @@ import {
   type ClusterGpuCapacityAdapter,
 } from './clusterGpuCapacity';
 export type { ClusterGpuCapacity, NodeGpuInfo } from './clusterGpuCapacity';
+import {
+  proxyServiceGet as proxyServiceGetWithAdapter,
+  proxyServicePostStream as proxyServicePostStreamWithAdapter,
+  type ProxyServiceGetOptions,
+  type ProxyServiceOptions,
+  type ServiceProxyAdapter,
+} from './serviceProxy';
 
 // ModelDeployment CRD configuration
 const MODEL_DEPLOYMENT_CRD = {
@@ -146,19 +152,6 @@ export function toPodStatus(pod: k8s.V1Pod): PodStatus {
     message: waitingState?.message || terminatedState?.message || pod.status?.message,
   };
 }
-
-type ProxyServiceOptions = {
-  signal?: AbortSignal;
-  userToken?: string;
-};
-
-type ProxyServiceGetOptions = ProxyServiceOptions & {
-  accept?: string;
-};
-
-type ProxyServiceRequestInit = RequestInit & {
-  userToken?: string;
-};
 
 class KubernetesService {
   private kc: k8s.KubeConfig;
@@ -1437,19 +1430,14 @@ class KubernetesService {
     path: string,
     options: ProxyServiceGetOptions = {},
   ): Promise<string> {
-    const response = await this.proxyServiceRequest(serviceName, namespace, port, path, {
-      method: 'GET',
-      headers: {
-        'Accept': options.accept ?? 'text/plain',
-      },
-      signal: options.signal,
-      userToken: options.userToken,
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return await response.text();
+    return proxyServiceGetWithAdapter(
+      this.createServiceProxyAdapter(),
+      serviceName,
+      namespace,
+      port,
+      path,
+      options
+    );
   }
 
   /**
@@ -1465,59 +1453,23 @@ class KubernetesService {
     headers: Record<string, string> = {},
     options: ProxyServiceOptions = {}
   ): Promise<Response> {
-    return await this.proxyServiceRequest(serviceName, namespace, port, path, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        ...headers,
-      },
-      body: JSON.stringify(body),
-      signal: options.signal,
-      userToken: options.userToken,
-    });
+    return proxyServicePostStreamWithAdapter(
+      this.createServiceProxyAdapter(),
+      serviceName,
+      namespace,
+      port,
+      path,
+      body,
+      headers,
+      options
+    );
   }
 
-  private async proxyServiceRequest(
-    serviceName: string,
-    namespace: string,
-    port: number,
-    path: string,
-    init: ProxyServiceRequestInit
-  ): Promise<Response> {
-    const { userToken, ...requestInit } = init;
-    const kubeConfig = userToken ? this.createUserKubeConfig(userToken) : this.kc;
-    const cluster = kubeConfig.getCurrentCluster();
-    if (!cluster) {
-      throw new Error('No active Kubernetes cluster configured');
-    }
-
-    // Build proxy URL: /api/v1/namespaces/{ns}/services/{name}:{port}/proxy/{path}
-    const proxyUrl = `${cluster.server}/api/v1/namespaces/${encodeURIComponent(namespace)}/services/${encodeURIComponent(serviceName)}:${port}/proxy/${path}`;
-
-    // Extract auth headers from KubeConfig
-    const authOpts = await kubeConfig.applyToFetchOptions({ headers: {} } as https.RequestOptions);
-
-    // Extract TLS material (CA, client cert/key, SNI, verification mode) via the
-    // shared kubeconfig→Bun mapping, so this raw-`fetch` path and the typed-API
-    // path (`BunTlsHttpLibrary`) stay in lockstep and cannot drift.
-    const tlsOpts = await kubeConfigToBunTls(kubeConfig);
-
-    const headers = new Headers((authOpts.headers as HeadersInit) || {});
-    if (requestInit.headers) {
-      new Headers(requestInit.headers).forEach((value, key) => headers.set(key, value));
-    }
-
-    const fetchOpts: RequestInit & { tls?: BunTlsOptions } = {
-      ...requestInit,
-      headers,
+  private createServiceProxyAdapter(): ServiceProxyAdapter {
+    return {
+      getKubeConfig: (userToken) => userToken ? this.createUserKubeConfig(userToken) : this.kc,
+      fetch: (input, init) => fetch(input, init),
     };
-
-    if (tlsOpts) {
-      fetchOpts.tls = tlsOpts;
-    }
-
-    return await fetch(proxyUrl, fetchOpts);
   }
 
   /**
