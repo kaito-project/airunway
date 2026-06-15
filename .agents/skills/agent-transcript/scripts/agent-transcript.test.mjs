@@ -915,6 +915,25 @@ test("render omits bare Google OAuth access tokens", () => {
   assert.doesNotMatch(output, /abcdefghijklmnopqrstuvwxyz0123456789_-/);
 });
 
+test("render omits bare Hugging Face access tokens", () => {
+  const dir = tempDir();
+  const session = path.join(dir, "session.jsonl");
+  const token = `hf_${"a".repeat(34)}`;
+  writeJsonl(session, [
+    {
+      type: "response_item",
+      payload: {
+        role: "user",
+        content: [{ type: "text", text: `Use Hugging Face token ${token} for model downloads.` }],
+      },
+    },
+  ]);
+
+  const output = run(["render", "--session", session]);
+  assert.match(output, /browser\/session\/auth internals/);
+  assert.doesNotMatch(output, /hf_a{34}/);
+});
+
 test("render keeps benign token prose", () => {
   const dir = tempDir();
   const session = path.join(dir, "session.jsonl");

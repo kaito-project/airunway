@@ -122,6 +122,17 @@ class AutoReviewHelperTests(unittest.TestCase):
         self.assertIn("[REDACTED_AUTH_HEADER]", output)
         self.assertNotIn("abcdefghijklmnop", output)
 
+    def test_redacts_bare_oauth_and_huggingface_tokens(self) -> None:
+        oauth = "ya29.a0AfH6SMBabcdefghijklmnopqrstuvwxyz0123456789_-"
+        hf_token = "hf_" + "a" * 34
+
+        output = autoreview.redact_review_text(f"oauth {oauth}\nhf {hf_token}")
+
+        self.assertIn("[REDACTED_GOOGLE_OAUTH_TOKEN]", output)
+        self.assertIn("[REDACTED_HUGGINGFACE_TOKEN]", output)
+        self.assertNotIn(oauth, output)
+        self.assertNotIn(hf_token, output)
+
     def test_keeps_benign_token_prose(self) -> None:
         output = autoreview.redact_review_text("token classification should stay reviewable")
 

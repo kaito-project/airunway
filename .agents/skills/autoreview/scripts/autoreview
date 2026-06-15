@@ -28,7 +28,8 @@ SENSITIVE_UNTRACKED_PATH = re.compile(
     re.IGNORECASE,
 )
 SENSITIVE_UNTRACKED_TEXT = re.compile(
-    r"BEGIN [A-Z ]*PRIVATE KEY|github_pat_|gh[pousr]_|AIza[0-9A-Za-z_-]{20,}|SAPISID|"
+    r"BEGIN [A-Z ]*PRIVATE KEY|github_pat_|gh[pousr]_|AIza[0-9A-Za-z_-]{20,}|"
+    r"ya29\.[0-9A-Za-z._-]{20,}|hf_[A-Za-z0-9]{20,}|SAPISID|"
     r"Cookie:|Set-Cookie:|[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*\s*=",
     re.IGNORECASE,
 )
@@ -47,6 +48,8 @@ SERVICE_CREDENTIAL_URL_RE = re.compile(
     r"\b[A-Za-z][A-Za-z0-9+.-]*://(?=[^\s`\"'<>/]*:[^\s`\"'<>/]*@)[^\s`\"'<>]+",
     re.IGNORECASE,
 )
+GOOGLE_OAUTH_ACCESS_TOKEN_RE = re.compile(r"\bya29\.[0-9A-Za-z._-]{20,}\b")
+HUGGINGFACE_ACCESS_TOKEN_RE = re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")
 REVIEW_BUNDLE_REDACTIONS = [
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL), "[REDACTED_PRIVATE_KEY]"),
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "[REDACTED_OPENAI_KEY]"),
@@ -58,6 +61,8 @@ REVIEW_BUNDLE_REDACTIONS = [
     (re.compile(r"gh[pousr]_[A-Za-z0-9_]{20,}"), "[REDACTED_GITHUB_TOKEN]"),
     (re.compile(r"AKIA[0-9A-Z]{16}"), "[REDACTED_AWS_KEY]"),
     (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), "[REDACTED_GOOGLE_API_KEY]"),
+    (GOOGLE_OAUTH_ACCESS_TOKEN_RE, "[REDACTED_GOOGLE_OAUTH_TOKEN]"),
+    (HUGGINGFACE_ACCESS_TOKEN_RE, "[REDACTED_HUGGINGFACE_TOKEN]"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}"), "[REDACTED_JWT]"),
     (
         re.compile(r"(\bAuthorization:\s*)(?:Token|ApiKey)\s+[A-Za-z0-9._~+/=:-]{8,}", re.IGNORECASE),
