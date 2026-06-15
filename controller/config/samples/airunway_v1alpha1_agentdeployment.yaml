@@ -1,0 +1,57 @@
+# Example: bind a Kagent SRE agent to an in-cluster ModelDeployment.
+apiVersion: airunway.ai/v1alpha1
+kind: AgentDeployment
+metadata:
+  name: sre-bot
+  labels:
+    app.kubernetes.io/name: airunway
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  framework:
+    name: kagent
+  models:
+    - name: default
+      deploymentRef:
+        name: llama-3-8b
+  config:
+    systemPrompt: |
+      You are a Kubernetes SRE assistant. Diagnose pod, deployment, and
+      networking issues. Prefer minimal-blast-radius actions.
+    skills:
+      - cluster-diagnose
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+---
+# Example: bind OpenClaw to an external OpenAI-compatible API.
+apiVersion: airunway.ai/v1alpha1
+kind: AgentDeployment
+metadata:
+  name: personal-assistant
+  labels:
+    app.kubernetes.io/name: airunway
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  framework:
+    name: openclaw
+  models:
+    - name: default
+      externalAPI:
+        type: openai
+        baseURL: https://api.openai.com/v1
+        modelName: gpt-4o-mini
+        credentialsRef:
+          name: openai-api-key
+          key: api-key
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+  # OpenClaw writes to its working directory, so the openclaw
+  # AgentProviderConfig catalog entry ships a recommendedSecurity with
+  # containerSecurityContext.readOnlyRootFilesystem=false. Security posture
+  # is owned by the provider/catalog, not set per AgentDeployment.
