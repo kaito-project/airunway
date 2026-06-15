@@ -68,10 +68,13 @@ type AgentProviderCapabilities struct {
 	// +optional
 	Protocols []AgentToolProtocol `json:"protocols,omitempty"`
 
-	// backend identifies the rendering strategy this provider uses. See
+	// backend identifies the rendering strategy this provider uses
+	// (crd-native vs container-based). It is required because the core
+	// controller cannot determine how to render an agent workload
+	// without it, and it backs the Backend printer column. See
 	// AgentProviderBackend for values.
-	// +optional
-	Backend AgentProviderBackend `json:"backend,omitempty"`
+	// +kubebuilder:validation:Required
+	Backend AgentProviderBackend `json:"backend"`
 
 	// requiresOperator indicates the framework relies on an upstream
 	// Kubernetes operator/CRD being installed in the cluster (e.g.

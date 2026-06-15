@@ -445,7 +445,7 @@ type AgentDeploymentStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,shortName=ad
+// +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Framework",type=string,JSONPath=".spec.framework.name"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

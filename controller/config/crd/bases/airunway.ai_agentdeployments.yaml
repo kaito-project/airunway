@@ -11,8 +11,6 @@ spec:
     kind: AgentDeployment
     listKind: AgentDeploymentList
     plural: agentdeployments
-    shortNames:
-    - ad
     singular: agentdeployment
   scope: Namespaced
   versions:
