@@ -895,6 +895,26 @@ test("render omits token auth schemes", () => {
   assert.doesNotMatch(output, /abcdefghijklmnop/);
 });
 
+test("render omits bare Google OAuth access tokens", () => {
+  const dir = tempDir();
+  const session = path.join(dir, "session.jsonl");
+  const token = "ya29.a0AfH6SMBabcdefghijklmnopqrstuvwxyz0123456789_-";
+  writeJsonl(session, [
+    {
+      type: "response_item",
+      payload: {
+        role: "user",
+        content: [{ type: "text", text: `Copied OAuth token ${token} into the prompt.` }],
+      },
+    },
+  ]);
+
+  const output = run(["render", "--session", session]);
+  assert.match(output, /browser\/session\/auth internals/);
+  assert.doesNotMatch(output, /ya29\.a0AfH6SMB/);
+  assert.doesNotMatch(output, /abcdefghijklmnopqrstuvwxyz0123456789_-/);
+});
+
 test("render keeps benign token prose", () => {
   const dir = tempDir();
   const session = path.join(dir, "session.jsonl");

@@ -149,6 +149,36 @@ class AutoReviewHelperTests(unittest.TestCase):
 
         self.assertEqual({"file.txt": [(10, 10)]}, autoreview.parse_changed_line_ranges(patch))
 
+    def test_git_quoted_diff_paths_are_unescaped_for_line_ranges(self) -> None:
+        patch = r'''diff --git "a/\303\251.txt" "b/\303\251.txt"
+--- "a/\303\251.txt"
++++ "b/\303\251.txt"
+@@ -1 +1,3 @@
+-old
++new
++next
++last
+'''
+
+        self.assertEqual({"é.txt": [(1, 3)]}, autoreview.parse_changed_line_ranges(patch))
+
+    def test_review_changed_lines_handles_git_quoted_non_ascii_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            run(["git", "init"], repo)
+            run(["git", "config", "user.email", "test@example.invalid"], repo)
+            run(["git", "config", "user.name", "Test User"], repo)
+            run(["git", "config", "core.quotepath", "true"], repo)
+            path = repo / "é.txt"
+            path.write_text("old\n")
+            run(["git", "add", "é.txt"], repo)
+            run(["git", "commit", "-m", "add non-ascii path"], repo)
+            path.write_text("new\nnext\nlast\n")
+            run(["git", "add", "é.txt"], repo)
+            run(["git", "commit", "-m", "update non-ascii path"], repo)
+
+            self.assertEqual({"é.txt": [(1, 3)]}, autoreview.review_changed_lines(repo, "branch", "HEAD~1", ""))
+
     def test_local_bundle_hides_sensitive_untracked_filenames(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

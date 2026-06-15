@@ -739,7 +739,7 @@ def review_changed_paths(repo: Path, target: str, target_ref: str | None, commit
         sources = [git(repo, "show", "--name-only", "--format=", commit_ref)]
     for source in sources:
         for line in source.splitlines():
-            path = line.strip()
+            path = decode_git_quoted_path(line.strip())
             if path:
                 names.add(path)
     return names
@@ -794,10 +794,53 @@ def parse_changed_line_ranges(patch: str) -> LineRanges:
     return ranges
 
 
+def decode_git_quoted_path(path_text: str) -> str:
+    text = path_text.strip()
+    if len(text) < 2 or text[0] != '"' or text[-1] != '"':
+        return text
+    inner = text[1:-1]
+    out = bytearray()
+    index = 0
+    simple_escapes = {
+        'a': b"\a",
+        'b': b"\b",
+        'f': b"\f",
+        'n': b"\n",
+        'r': b"\r",
+        't': b"\t",
+        'v': b"\v",
+        '"': b'"',
+        '\\': b"\\",
+    }
+    while index < len(inner):
+        char = inner[index]
+        if char != "\\":
+            out.extend(char.encode("utf-8", "surrogateescape"))
+            index += 1
+            continue
+        index += 1
+        if index >= len(inner):
+            out.extend(b"\\")
+            break
+        escaped = inner[index]
+        if escaped in "01234567":
+            digits = escaped
+            index += 1
+            while index < len(inner) and len(digits) < 3 and inner[index] in "01234567":
+                digits += inner[index]
+                index += 1
+            out.append(int(digits, 8))
+            continue
+        out.extend(simple_escapes.get(escaped, escaped.encode("utf-8", "surrogateescape")))
+        index += 1
+    return out.decode("utf-8", "surrogateescape")
+
+
 def strip_diff_prefix(path_text: str) -> str:
-    if path_text.startswith("a/") or path_text.startswith("b/"):
-        return path_text[2:]
-    return path_text
+    path = decode_git_quoted_path(path_text)
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
 
 
 def file_line_count(path: Path) -> int:
