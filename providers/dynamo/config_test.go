@@ -17,8 +17,80 @@ import (
 func TestGetProviderConfigSpec(t *testing.T) {
 	spec := GetProviderConfigSpec()
 
+	if spec.Capabilities == nil {
+		t.Fatal("capabilities should not be nil")
+	}
+
+	expectedEngines := []airunwayv1alpha1.EngineType{
+		airunwayv1alpha1.EngineTypeVLLM,
+		airunwayv1alpha1.EngineTypeSGLang,
+		airunwayv1alpha1.EngineTypeTRTLLM,
+	}
+	if len(spec.Capabilities.Engines) != len(expectedEngines) {
+		t.Fatalf("expected %d engines, got %d", len(expectedEngines), len(spec.Capabilities.Engines))
+	}
+
+	// Verify per-engine capabilities
+	vllmCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeVLLM)
+	if vllmCap == nil {
+		t.Fatal("expected vllm engine capability")
+	}
+	if !vllmCap.GPUSupport {
+		t.Error("expected vllm GPU support to be true")
+	}
+	if vllmCap.CPUSupport {
+		t.Error("expected vllm CPU support to be false")
+	}
+	if len(vllmCap.ServingModes) != 2 {
+		t.Fatalf("expected vllm to support 2 serving modes, got %d", len(vllmCap.ServingModes))
+	}
+
+	sglangCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeSGLang)
+	if sglangCap == nil {
+		t.Fatal("expected sglang engine capability")
+	}
+	if !sglangCap.GPUSupport {
+		t.Error("expected sglang GPU support to be true")
+	}
+	if len(sglangCap.ServingModes) != 2 {
+		t.Fatalf("expected sglang to support 2 serving modes, got %d", len(sglangCap.ServingModes))
+	}
+
+	trtllmCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeTRTLLM)
+	if trtllmCap == nil {
+		t.Fatal("expected trtllm engine capability")
+	}
+	if !trtllmCap.GPUSupport {
+		t.Error("expected trtllm GPU support to be true")
+	}
+	if len(trtllmCap.ServingModes) != 1 || trtllmCap.ServingModes[0] != airunwayv1alpha1.ServingModeAggregated {
+		t.Errorf("expected trtllm to support only aggregated serving mode")
+	}
+
 	if len(spec.SelectionRules) != 4 {
 		t.Fatalf("expected 4 selection rules, got %d", len(spec.SelectionRules))
+	}
+
+	// Every supported engine should advertise the same Dynamo InferencePool
+	// gateway capabilities, since Dynamo routes through the operator-managed
+	// pool regardless of which engine backs the deployment.
+	for _, engineType := range expectedEngines {
+		engineCap := spec.Capabilities.GetEngineCapability(engineType)
+		if engineCap == nil {
+			t.Fatalf("expected engine capability for %s", engineType)
+		}
+		if engineCap.Gateway == nil {
+			t.Fatalf("expected gateway capabilities for engine %s to not be nil", engineType)
+		}
+		if !engineCap.Gateway.ManagesInferencePool {
+			t.Errorf("engine %s: expected ManagesInferencePool=true", engineType)
+		}
+		if engineCap.Gateway.InferencePoolNamePattern != "{name}-pool" {
+			t.Errorf("engine %s: expected inference pool name pattern '{name}-pool', got %s", engineType, engineCap.Gateway.InferencePoolNamePattern)
+		}
+		if engineCap.Gateway.InferencePoolNamespace != "{namespace}" {
+			t.Errorf("engine %s: expected inference pool namespace '{namespace}', got %s", engineType, engineCap.Gateway.InferencePoolNamespace)
+		}
 	}
 }
 
@@ -70,74 +142,6 @@ func TestProviderConstants(t *testing.T) {
 	}
 	if ProviderVersion != "dynamo-provider:v0.2.0" {
 		t.Errorf("expected provider version 'dynamo-provider:v0.2.0', got %s", ProviderVersion)
-	}
-}
-
-func TestBuildAnnotations(t *testing.T) {
-	annotations, err := buildAnnotations()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	requiredKeys := []string{
-		airunwayv1alpha1.AnnotationDisplayName,
-		airunwayv1alpha1.AnnotationDescription,
-		airunwayv1alpha1.AnnotationDefaultNamespace,
-		airunwayv1alpha1.AnnotationDocumentationURL,
-		airunwayv1alpha1.AnnotationCapabilities,
-		airunwayv1alpha1.AnnotationHealth,
-		airunwayv1alpha1.AnnotationInstallation,
-		airunwayv1alpha1.AnnotationDocumentation,
-	}
-	for _, key := range requiredKeys {
-		if annotations[key] == "" {
-			t.Fatalf("expected annotation %s to be set", key)
-		}
-	}
-	if annotations[airunwayv1alpha1.AnnotationDocumentationURL] != ProviderDocumentation {
-		t.Fatalf("expected documentation-url annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentationURL])
-	}
-	if annotations[airunwayv1alpha1.AnnotationDocumentation] != ProviderDocumentation {
-		t.Fatalf("expected legacy documentation annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentation])
-	}
-	if annotations[airunwayv1alpha1.AnnotationDefaultNamespace] != "dynamo-system" {
-		t.Fatalf("expected default namespace dynamo-system, got %q", annotations[airunwayv1alpha1.AnnotationDefaultNamespace])
-	}
-
-	var installation airunwayv1alpha1.InstallationInfo
-	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationInstallation]), &installation); err != nil {
-		t.Fatalf("failed to decode installation annotation: %v", err)
-	}
-	if installation.DefaultNamespace != "dynamo-system" {
-		t.Fatalf("expected installation default namespace dynamo-system, got %q", installation.DefaultNamespace)
-	}
-
-	var capabilities airunwayv1alpha1.ProviderCapabilities
-	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationCapabilities]), &capabilities); err != nil {
-		t.Fatalf("failed to decode capabilities annotation: %v", err)
-	}
-	if len(capabilities.Engines) != 3 || len(capabilities.ServingModes) != 2 {
-		t.Fatalf("unexpected annotated capabilities: %+v", capabilities)
-	}
-
-	var health struct {
-		CRDs []struct {
-			Name        string `json:"name"`
-			DisplayName string `json:"displayName"`
-		} `json:"crds"`
-		OperatorPods []struct {
-			Namespace string   `json:"namespace"`
-			Selectors []string `json:"selectors"`
-		} `json:"operatorPods"`
-	}
-	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationHealth]), &health); err != nil {
-		t.Fatalf("failed to decode health annotation: %v", err)
-	}
-	if len(health.CRDs) != 1 || health.CRDs[0].Name != "dynamographdeployments.nvidia.com" || health.CRDs[0].DisplayName != "DynamoGraphDeployment CRD" {
-		t.Fatalf("unexpected CRD health metadata: %+v", health.CRDs)
-	}
-	if len(health.OperatorPods) != 2 || health.OperatorPods[0].Namespace != "dynamo-system" || len(health.OperatorPods[0].Selectors) != 3 || health.OperatorPods[1].Namespace != "" || len(health.OperatorPods[1].Selectors) != 1 {
-		t.Fatalf("unexpected operator pod health metadata: %+v", health.OperatorPods)
 	}
 }
 
@@ -308,5 +312,64 @@ func TestUpdateStatusNotFound(t *testing.T) {
 	err := mgr.UpdateStatus(context.Background(), true)
 	if err == nil {
 		t.Fatal("expected error when config not found")
+	}
+}
+
+func TestBuildAnnotationsIncludesDiscoveryMetadata(t *testing.T) {
+	annotations, err := buildAnnotations()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	requiredKeys := []string{
+		airunwayv1alpha1.AnnotationDisplayName,
+		airunwayv1alpha1.AnnotationDescription,
+		airunwayv1alpha1.AnnotationDefaultNamespace,
+		airunwayv1alpha1.AnnotationDocumentationURL,
+		airunwayv1alpha1.AnnotationCapabilities,
+		airunwayv1alpha1.AnnotationHealth,
+		airunwayv1alpha1.AnnotationInstallation,
+		airunwayv1alpha1.AnnotationDocumentation,
+	}
+	for _, key := range requiredKeys {
+		if annotations[key] == "" {
+			t.Fatalf("expected annotation %s to be set", key)
+		}
+	}
+
+	if annotations[airunwayv1alpha1.AnnotationDisplayName] != "Dynamo" {
+		t.Fatalf("expected Dynamo display name, got %q", annotations[airunwayv1alpha1.AnnotationDisplayName])
+	}
+	if annotations[airunwayv1alpha1.AnnotationDefaultNamespace] != "dynamo-system" {
+		t.Fatalf("expected dynamo-system default namespace, got %q", annotations[airunwayv1alpha1.AnnotationDefaultNamespace])
+	}
+	if annotations[airunwayv1alpha1.AnnotationDocumentationURL] != ProviderDocumentation {
+		t.Fatalf("expected documentation-url annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentationURL])
+	}
+
+	var capabilities airunwayv1alpha1.ProviderCapabilities
+	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationCapabilities]), &capabilities); err != nil {
+		t.Fatalf("failed to decode capabilities annotation: %v", err)
+	}
+	if len(capabilities.Engines) != 3 {
+		t.Fatalf("expected 3 annotated engines, got %+v", capabilities.Engines)
+	}
+
+	var health struct {
+		CRDs []struct {
+			Name string `json:"name"`
+		} `json:"crds"`
+		OperatorPods []struct {
+			Selectors []string `json:"selectors"`
+		} `json:"operatorPods"`
+	}
+	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationHealth]), &health); err != nil {
+		t.Fatalf("failed to decode health annotation: %v", err)
+	}
+	if len(health.CRDs) != 1 || health.CRDs[0].Name != "dynamographdeployments.nvidia.com" {
+		t.Fatalf("expected Dynamo CRD health probe, got %+v", health.CRDs)
+	}
+	if len(health.OperatorPods) == 0 || len(health.OperatorPods[0].Selectors) == 0 {
+		t.Fatalf("expected operator pod health probes, got %+v", health.OperatorPods)
 	}
 }

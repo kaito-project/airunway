@@ -1,6 +1,7 @@
 # CRD Reference
 
 ## ModelDeployment
+
 Unified API for deploying ML models.
 
 ```yaml
@@ -63,7 +64,8 @@ Each entry is a `StorageVolume`. Maximum 8 volumes per deployment.
 | `accessMode` | string | no | PVC access mode for controller-created PVCs. One of `ReadWriteOnce`, `ReadWriteMany`, `ReadOnlyMany`, `ReadWriteOncePod`. Default: `ReadWriteMany`. Only used when `size` is set. |
 
 ## InferenceProviderConfig
-Cluster-scoped resource for provider registration. Each provider controller self-registers its `InferenceProviderConfig` at startup. Provider display metadata and capabilities are stored in `metadata.annotations`; `spec` contains only desired-state selection rules used for provider auto-selection.
+
+Cluster-scoped resource for provider registration. Each provider controller self-registers its `InferenceProviderConfig` at startup, declaring capabilities and selection rules in `spec`, and display, installation, health, and documentation metadata in `metadata.annotations`:
 
 ```yaml
 apiVersion: airunway.ai/v1alpha1
@@ -71,23 +73,7 @@ kind: InferenceProviderConfig
 metadata:
   name: dynamo
   annotations:
-    airunway.ai/display-name: Dynamo
-    airunway.ai/description: NVIDIA Dynamo for high-performance GPU inference
-    airunway.ai/default-namespace: dynamo-system
-    airunway.ai/documentation-url: "https://github.com/kaito-project/dynamo-provider"
-    # Backward-compatible documentation fallback for older backends.
     airunway.ai/documentation: "https://github.com/kaito-project/dynamo-provider"
-    airunway.ai/capabilities: |
-      {
-        "engines": ["vllm", "sglang", "trtllm"],
-        "servingModes": ["aggregated", "disaggregated"],
-        "gpuSupport": true,
-        "cpuSupport": false,
-        "gateway": {
-          "inferencePoolNamePattern": "{namespace}-{name}-pool",
-          "inferencePoolNamespace": "dynamo-system"
-        }
-      }
     airunway.ai/installation: |
       {
         "description": "NVIDIA Dynamo for high-performance GPU inference",
@@ -98,7 +84,7 @@ metadata:
         "helmCharts": [
           {
             "name": "dynamo-platform",
-            "chart": "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.2.tgz",
+            "chart": "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.1.1.tgz",
             "namespace": "dynamo-system",
             "createNamespace": true,
             "values": { "global.grove.install": true }
@@ -107,12 +93,36 @@ metadata:
         "steps": [
           {
             "title": "Install Dynamo Platform",
-            "command": "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.0.2.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
+            "command": "helm upgrade --install dynamo-platform https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-1.1.1.tgz --namespace dynamo-system --create-namespace --set-json global.grove.install=true",
             "description": "Install the Dynamo platform operator with bundled Grove and CRDs"
           }
         ]
       }
 spec:
+  capabilities:
+    engines:
+      - name: vllm
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        requiresCRD: true                            # Optional; nil is treated as true for backward compatibility
+        gateway:                                     # Optional: per-engine gateway capabilities
+          managesInferencePool: true                 # Provider creates and owns the InferencePool/EPP
+          inferencePoolNamePattern: "{name}-pool"    # Pool naming pattern ({name}, {namespace} accepted)
+          inferencePoolNamespace: "{namespace}"      # Namespace for provider's InferencePool
+      - name: sglang
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
+      - name: trtllm
+        servingModes: [aggregated]
+        gpuSupport: true
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
   selectionRules:
     - condition: "spec.serving.mode == 'disaggregated'"
       priority: 100
@@ -121,56 +131,12 @@ status:
   version: "dynamo-provider:v0.2.0"
 ```
 
-### Spec
-
-| Field | Type | Description |
-|---|---|---|
-| `selectionRules` | `SelectionRule[]` | Optional CEL expressions for auto-selecting this provider. |
-
-`InferenceProviderConfig.spec` is limited to desired state. Do not put display metadata, default namespace, documentation URL, or capabilities under `spec`.
-
-### Provider metadata and capabilities annotations
+### Annotations
 
 | Annotation | Type | Description |
 |---|---|---|
-| `airunway.ai/display-name` | string | Human-readable provider name for UI display. |
-| `airunway.ai/description` | string | Human-readable provider description. |
-| `airunway.ai/default-namespace` | string | Default namespace for the provider's workloads or upstream components. |
-| `airunway.ai/documentation-url` | string | Canonical URL to provider documentation. |
-| `airunway.ai/documentation` | string | Legacy URL to provider documentation; keep as a backward-compatible fallback when registering providers. |
-| `airunway.ai/capabilities` | JSON string | Provider capabilities metadata. The controller uses this annotation for engine auto-selection, provider selection, and gateway delegation. |
+| `airunway.ai/documentation` | string | URL to provider documentation |
 | `airunway.ai/installation` | JSON string | Installation metadata (description, defaultNamespace, helmRepos, helmCharts, steps). The backend parses this JSON to show installation commands and steps in the UI. |
-
-The `airunway.ai/capabilities` JSON object supports:
-
-| Field | Type | Description |
-|---|---|---|
-| `engines` | string[] | Supported inference engines, such as `vllm`, `sglang`, `trtllm`, or `llamacpp`. |
-| `servingModes` | string[] | Supported serving modes, such as `aggregated` or `disaggregated`. |
-| `cpuSupport` | bool | Whether the provider supports CPU-only inference. |
-| `gpuSupport` | bool | Whether the provider supports GPU inference. |
-| `gateway` | object | Optional provider-managed gateway settings. |
-| `gateway.inferencePoolNamePattern` | string | Naming pattern for the provider-created `InferencePool`; supports `{name}` and `{namespace}` placeholders. |
-| `gateway.inferencePoolNamespace` | string | Namespace for the provider-created `InferencePool`; supports `{name}` and `{namespace}` placeholders. |
-
-### Installation metadata
-
-`metadata.annotations["airunway.ai/installation"]` is a JSON-encoded object. It can contain `description`, `defaultNamespace`, Helm repository/chart data, and manual installation steps. Display metadata and capabilities should use the dedicated annotations listed above.
-
-Helm chart entries support:
-
-| Field | Type | Description |
-|---|---|---|
-| `name` | string | Helm release name. |
-| `chart` | string | Chart reference, URL, or local chart path. |
-| `version` | string | Optional chart version. |
-| `namespace` | string | Namespace to install into. |
-| `createNamespace` | bool | Whether to create the namespace. |
-| `skipCrds` | bool | Whether Helm should skip installing CRDs from the chart. |
-| `fetchUrl` | string | Optional URL to fetch the chart from before installation. |
-| `preCrdUrls` | string[] | CRD manifest URLs to apply before chart installation. |
-| `preInstallMissingCrds` | bool | Whether missing CRDs should be applied from the chart before installing it. |
-| `values` | object | JSON object of Helm `--set-json` overrides. |
 
 ## See also
 

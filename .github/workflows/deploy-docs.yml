@@ -1,0 +1,76 @@
+name: Deploy Docs Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - '.github/workflows/deploy-docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - '.github/workflows/deploy-docs.yml'
+
+permissions:
+  contents: read
+
+# Allow one concurrent deployment in flight; don't cancel in-progress deploys
+# from earlier main pushes (those are real publishes we want to complete).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build website
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Build website
+        run: bun run build
+
+      - name: Upload Pages artifact
+        # GitHub Pages needs the artifact uploaded under the specific name
+        # "github-pages" so deploy-pages picks it up.
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: website/build
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only publish on push to main on the canonical repo. PR builds verify the
+    # build but never deploy. Permissions scoped to this job alone so PR
+    # builds keep a read-only token.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && github.repository == 'kaito-project/airunway'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

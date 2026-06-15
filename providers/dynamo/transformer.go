@@ -35,12 +35,6 @@ const (
 	DynamoAPIVersion = "v1alpha1"
 	// DynamoGraphDeploymentKind is the kind for DynamoGraphDeployment
 	DynamoGraphDeploymentKind = "DynamoGraphDeployment"
-	// DynamoRuntimeVersion is the default upstream runtime tag used for Dynamo engines.
-	DynamoRuntimeVersion      = "1.0.2"
-	defaultVLLMRuntimeImage   = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:" + DynamoRuntimeVersion
-	defaultSGLangRuntimeImage = "nvcr.io/nvidia/ai-dynamo/sglang-runtime:" + DynamoRuntimeVersion
-	defaultTRTLLMRuntimeImage = "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:" + DynamoRuntimeVersion
-	defaultFrontendImage      = "nvcr.io/nvidia/ai-dynamo/dynamo-frontend:" + DynamoRuntimeVersion
 
 	// Default component settings
 	DefaultEppReplicas = 1
@@ -62,6 +56,16 @@ const (
 	// VLLMKVTransferConfig is the --kv-transfer-config value required by
 	// newer vLLM for NIXL-based disaggregated serving (replaces --connector).
 	VLLMKVTransferConfig = `{"kv_connector":"NixlConnector","kv_role":"kv_both"}`
+)
+
+// Default upstream runtime image tags, derived from DynamoVersion.
+// Declared as vars (not consts) so a build-time ldflags override of
+// DynamoVersion in config.go flows through automatically.
+var (
+	defaultVLLMRuntimeImage   = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:" + DynamoVersion
+	defaultSGLangRuntimeImage = "nvcr.io/nvidia/ai-dynamo/sglang-runtime:" + DynamoVersion
+	defaultTRTLLMRuntimeImage = "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:" + DynamoVersion
+	defaultFrontendImage      = "nvcr.io/nvidia/ai-dynamo/dynamo-frontend:" + DynamoVersion
 )
 
 // DynamoOverrides contains Dynamo-specific override configuration
@@ -209,6 +213,13 @@ func (t *Transformer) buildServices(md *airunwayv1alpha1.ModelDeployment, overri
 
 	gatewayEnabled := md.Spec.Gateway == nil || md.Spec.Gateway.Enabled == nil || *md.Spec.Gateway.Enabled
 
+	// Mocker mode always uses the standalone Frontend path. It exercises the
+	// Dynamo Frontend → mocker worker slice without EPP/GAIE complexity, so the
+	// gateway/EPP branch is never taken regardless of spec.gateway.enabled.
+	if isMockerMode(md) {
+		gatewayEnabled = false
+	}
+
 	if gatewayEnabled {
 		// GAIE path: Gateway → EPP → worker frontendSidecar. No standalone
 		// Frontend — each worker's sidecar handles requests locally.
@@ -268,6 +279,13 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 
 	cpu := "2"
 	memory := "4Gi"
+	// Mocker mode targets GPU-less CI nodes that are often small. The Frontend
+	// is a lightweight router, so default to modest requests (overridable) to
+	// leave headroom for the mocker worker on the same node.
+	if isMockerMode(md) {
+		cpu = MockerWorkerCPU
+		memory = MockerWorkerMemory
+	}
 	if overrides.Frontend != nil && overrides.Frontend.Resources != nil {
 		if overrides.Frontend.Resources.CPU != "" {
 			cpu = overrides.Frontend.Resources.CPU
@@ -311,7 +329,7 @@ func (t *Transformer) buildFrontendService(md *airunwayv1alpha1.ModelDeployment,
 // The plugin set and env vars are mode-aware. Both modes set DYN_KV_CACHE_BLOCK_SIZE,
 // DYN_MODEL_NAME, and DYN_ENFORCE_DISAGG on the EPP container. The Dynamo KV scorer
 // FFI reads these at init time and create_routers fails ("code 5") without them on
-// Dynamo runtime 1.0.2. The shape mirrors the canonical examples in
+// Dynamo runtime 1.0.2+. The shape mirrors the canonical examples in
 // ai-dynamo/dynamo/examples/backends/vllm/deploy/gaie/{agg,disagg}.yaml.
 func (t *Transformer) buildEPP(overrides *DynamoOverrides, servingMode airunwayv1alpha1.ServingMode) map[string]interface{} {
 	// Determine replicas
@@ -333,9 +351,9 @@ func (t *Transformer) buildEPP(overrides *DynamoOverrides, servingMode airunwayv
 	// In aggregated mode, set decode_fallback=true to avoid "create_routers failed" errors.
 	// In disaggregated mode, set it to false to catch missing prefill workers.
 	decodeFallback := "true"
-	// DYN_ENFORCE_DISAGG is a no-op on 1.0.2 (the binding doesn't read it) but
-	// is the equivalent knob on Dynamo main with inverted semantics. We set
-	// both so this code is forward-compatible with a future runtime bump.
+	// DYN_ENFORCE_DISAGG is a no-op on 1.0.2 / 1.1.1 (the binding doesn't read
+	// it) but is the equivalent knob on Dynamo main with inverted semantics.
+	// We set both so this code is forward-compatible with a future runtime bump.
 	enforceDisagg := "false"
 	if isDisagg {
 		decodeFallback = "false"
@@ -492,6 +510,19 @@ func (t *Transformer) buildAggregatedWorker(md *airunwayv1alpha1.ModelDeployment
 		return nil, err
 	}
 
+	command := t.engineCommand(md.ResolvedEngineType())
+
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU) so the
+	// worker schedules on CPU-only nodes. Equal requests and limits make the pod
+	// Guaranteed QoS — the point is simply to avoid BestEffort, which is evicted
+	// first under memory pressure and rejected by request-mandating LimitRanges.
+	if isMockerMode(md) {
+		command = mockerCommand()
+		args = buildMockerArgs(md)
+		resources = mockerWorkerResources()
+	}
+
 	worker := map[string]interface{}{
 		"componentType": ComponentTypeWorker,
 		"replicas":      replicas,
@@ -499,7 +530,7 @@ func (t *Transformer) buildAggregatedWorker(md *airunwayv1alpha1.ModelDeployment
 		"extraPodSpec": map[string]interface{}{
 			"mainContainer": map[string]interface{}{
 				"image":   image,
-				"command": toInterfaceSlice(t.engineCommand(md.ResolvedEngineType())),
+				"command": toInterfaceSlice(command),
 				"args":    toInterfaceSlice(args),
 			},
 		},
@@ -580,6 +611,18 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
 	}
 
+	command := t.engineCommand(md.ResolvedEngineType())
+
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU). The mocker
+	// keeps --disaggregation-mode but does NOT use --kv-transfer-config (that NIXL
+	// flag is real-vLLM-only).
+	if isMockerMode(md) {
+		command = mockerCommand()
+		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypePrefill)
+		resources = mockerWorkerResources()
+	}
+
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
 		"subComponentType": SubComponentTypePrefill,
@@ -588,7 +631,7 @@ func (t *Transformer) buildPrefillWorker(md *airunwayv1alpha1.ModelDeployment, i
 		"extraPodSpec": map[string]interface{}{
 			"mainContainer": map[string]interface{}{
 				"image":   image,
-				"command": toInterfaceSlice(t.engineCommand(md.ResolvedEngineType())),
+				"command": toInterfaceSlice(command),
 				"args":    toInterfaceSlice(args),
 			},
 		},
@@ -645,6 +688,18 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 		args = append(args, "--kv-transfer-config", VLLMKVTransferConfig)
 	}
 
+	command := t.engineCommand(md.ResolvedEngineType())
+
+	// Mocker mode: swap the real engine for python3 -m dynamo.mocker and replace
+	// the GPU resources with small CPU/memory requests+limits (no GPU). The mocker
+	// keeps --disaggregation-mode but does NOT use --kv-transfer-config (that NIXL
+	// flag is real-vLLM-only).
+	if isMockerMode(md) {
+		command = mockerCommand()
+		args = append(buildMockerArgs(md), "--disaggregation-mode", SubComponentTypeDecode)
+		resources = mockerWorkerResources()
+	}
+
 	worker := map[string]interface{}{
 		"componentType":    ComponentTypeWorker,
 		"subComponentType": SubComponentTypeDecode,
@@ -653,7 +708,7 @@ func (t *Transformer) buildDecodeWorker(md *airunwayv1alpha1.ModelDeployment, im
 		"extraPodSpec": map[string]interface{}{
 			"mainContainer": map[string]interface{}{
 				"image":   image,
-				"command": toInterfaceSlice(t.engineCommand(md.ResolvedEngineType())),
+				"command": toInterfaceSlice(command),
 				"args":    toInterfaceSlice(args),
 			},
 		},
@@ -845,6 +900,14 @@ var defaultImages = map[airunwayv1alpha1.EngineType]string{
 
 // getImage returns the container image to use
 func (t *Transformer) getImage(md *airunwayv1alpha1.ModelDeployment) string {
+	// Mocker mode runs python3 -m dynamo.mocker, which lives only in the
+	// dynamo-planner image. This is annotation-gated, test-only behavior, so the
+	// planner image must win even over an explicit spec.image: a custom image
+	// without the dynamo.mocker module would silently break the test backend.
+	if isMockerMode(md) {
+		return defaultMockerImage
+	}
+
 	// Use custom image if specified
 	if md.Spec.Image != "" {
 		return md.Spec.Image

@@ -1,6 +1,32 @@
 import { describe, test, expect } from 'bun:test';
+import type { V1Pod } from '@kubernetes/client-node';
 import { extractCRDVersionFromAnnotations, kubernetesService, toPodStatus, type ClusterGpuCapacity, type NodeGpuInfo, type GPUAvailability, type GPUOperatorStatus } from './kubernetes';
-import { toDeploymentStatus, type ClusterStatus, type PodStatus, type DeploymentStatus, type PodPhase, type ModelDeployment } from '@airunway/shared';
+import { toDeploymentStatus, type ClusterStatus, type PodStatus, type ModelDeployment } from '@airunway/shared';
+
+// Shape of the arguments the Kubernetes client passes to the API methods these
+// tests stub. Only the fields the tests read are modeled.
+interface K8sCallArg {
+  name?: string;
+  namespace?: string;
+  labelSelector?: string;
+  fieldSelector?: string;
+  container?: string;
+}
+
+// Writable view of the private KubernetesService internals these tests reach
+// into to install stubs. Methods are typed loosely as the tests only need to
+// swap them for fakes and restore them afterwards.
+type MockableKubernetesService = {
+  coreV1Api: Record<string, (arg: K8sCallArg) => Promise<unknown>>;
+  apiExtensionsApi: Record<string, (arg: K8sCallArg) => Promise<unknown>>;
+  customObjectsApi: Record<string, (arg: K8sCallArg) => Promise<unknown>>;
+  getGatewayStatus: () => Promise<unknown>;
+  createUserKubeConfig: (token: string) => unknown;
+  kc: unknown;
+};
+
+const asMockable = (): MockableKubernetesService =>
+  kubernetesService as unknown as MockableKubernetesService;
 
 
 describe('KubernetesService - CRD Version Annotation Extraction', () => {
@@ -53,22 +79,21 @@ describe('KubernetesService - CRD Version Annotation Extraction', () => {
 
 
   test('checks Gateway CRD status with a single read per CRD', async () => {
-    const service = kubernetesService as any;
+    const service = asMockable();
     const originalApiExtensionsApi = service.apiExtensionsApi;
     const originalGetGatewayStatus = service.getGatewayStatus;
     const readCalls: string[] = [];
 
     service.apiExtensionsApi = {
-      readCustomResourceDefinition: async (crdName: string) => {
+      readCustomResourceDefinition: async (arg: K8sCallArg) => {
+        const crdName = arg.name as string;
         readCalls.push(crdName);
 
         if (crdName === 'gateways.gateway.networking.k8s.io') {
           return {
-            body: {
-              metadata: {
-                annotations: {
-                  'gateway.networking.k8s.io/bundle-version': 'v1.2.1',
-                },
+            metadata: {
+              annotations: {
+                'gateway.networking.k8s.io/bundle-version': 'v1.2.1',
               },
             },
           };
@@ -76,11 +101,9 @@ describe('KubernetesService - CRD Version Annotation Extraction', () => {
 
         if (crdName === 'inferencepools.inference.networking.k8s.io') {
           return {
-            body: {
-              metadata: {
-                annotations: {
-                  'inference.networking.k8s.io/bundle-version': 'v1.5.0',
-                },
+            metadata: {
+              annotations: {
+                'inference.networking.k8s.io/bundle-version': 'v1.5.0',
               },
             },
           };
@@ -111,6 +134,312 @@ describe('KubernetesService - CRD Version Annotation Extraction', () => {
   });
 });
 
+
+describe('KubernetesService - deployment pod lookup', () => {
+  test('aggregates and de-duplicates pods across exact supported selectors', async () => {
+    const service = asMockable();
+    const originalCoreV1Api = service.coreV1Api;
+    const selectors: string[] = [];
+
+    const pod = (name: string, labels: Record<string, string> = {}) => ({
+      metadata: { name, labels },
+      status: {
+        phase: 'Running',
+        containerStatuses: [
+          { ready: true, restartCount: 0, state: { running: {} } },
+        ],
+      },
+    });
+
+    service.coreV1Api = {
+      listNamespacedPod: async (arg: K8sCallArg) => {
+        const labelSelector = arg.labelSelector as string;
+        selectors.push(labelSelector);
+
+        if (labelSelector === 'app.kubernetes.io/instance=demo') {
+          return { items: [pod('demo-router'), pod('demo-shared')] };
+        }
+
+        if (labelSelector === 'airunway.ai/deployment=demo') {
+          return { items: [pod('demo-shared'), pod('demo-worker')] };
+        }
+
+        if (labelSelector === 'airunway.ai/model-deployment=demo') {
+          return { items: [pod('demo-ray-template')] };
+        }
+
+        if (labelSelector === 'nvidia.com/dynamo-graph-deployment-name=demo') {
+          return { items: [pod('demo-epp'), pod('demo-vllmworker')] };
+        }
+
+        if (labelSelector === 'app=demo') {
+          return { items: [pod('unrelated-app-pod')] };
+        }
+
+        if (labelSelector === 'ray.io/cluster') {
+          return {
+            items: [
+              pod('demo-ray-head', { 'ray.io/cluster': 'demo-raycluster' }),
+              pod('demo2-ray-head', { 'ray.io/cluster': 'demo2-raycluster' }),
+              pod('demo-extra-ray-head', { 'ray.io/cluster': 'demo-extra-raycluster' }),
+              pod('other-ray-head', { 'ray.io/cluster': 'other-raycluster' }),
+            ],
+          };
+        }
+
+        return { items: [] };
+      },
+    };
+
+    try {
+      const pods = await kubernetesService.getDeploymentPods('demo', 'default');
+
+      expect(pods.map((item) => item.name)).toEqual([
+        'demo-epp',
+        'demo-ray-head',
+        'demo-ray-template',
+        'demo-router',
+        'demo-shared',
+        'demo-vllmworker',
+        'demo-worker',
+      ]);
+      expect(new Set(pods.map((item) => item.name)).size).toBe(pods.length);
+      expect(selectors).toEqual([
+        'app.kubernetes.io/instance=demo',
+        'airunway.ai/deployment=demo',
+        'airunway.ai/model-deployment=demo',
+        'nvidia.com/dynamo-graph-deployment-name=demo',
+        'kaito.sh/workspace=demo',
+        'ray.io/cluster',
+      ]);
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+
+  test('uses broad app selector only as a last-resort fallback', async () => {
+    const service = asMockable();
+    const originalCoreV1Api = service.coreV1Api;
+    const selectors: string[] = [];
+
+    const pod = (name: string) => ({
+      metadata: { name },
+      status: {
+        phase: 'Running',
+        containerStatuses: [
+          { ready: true, restartCount: 0, state: { running: {} } },
+        ],
+      },
+    });
+
+    service.coreV1Api = {
+      listNamespacedPod: async (arg: K8sCallArg) => {
+        const labelSelector = arg.labelSelector as string;
+        selectors.push(labelSelector);
+
+        if (labelSelector === 'app=legacy-demo') {
+          return { items: [pod('legacy-demo-pod')] };
+        }
+
+        return { items: [] };
+      },
+    };
+
+    try {
+      const pods = await kubernetesService.getDeploymentPods('legacy-demo', 'default');
+
+      expect(pods.map((item) => item.name)).toEqual(['legacy-demo-pod']);
+      expect(selectors).toEqual([
+        'app.kubernetes.io/instance=legacy-demo',
+        'airunway.ai/deployment=legacy-demo',
+        'airunway.ai/model-deployment=legacy-demo',
+        'nvidia.com/dynamo-graph-deployment-name=legacy-demo',
+        'kaito.sh/workspace=legacy-demo',
+        'ray.io/cluster',
+        'app=legacy-demo',
+      ]);
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+});
+
+
+describe('KubernetesService - pod logs', () => {
+  test('defaults multi-container pod logs to the primary main container using pod list permission', async () => {
+    const service = asMockable();
+    const originalCoreV1Api = service.coreV1Api;
+    let requestedContainer: string | undefined;
+
+    service.coreV1Api = {
+      listNamespacedPod: async (arg: K8sCallArg) => {
+        expect(arg.namespace).toBe('default');
+        expect(arg.fieldSelector).toBe('metadata.name=demo-worker');
+        return {
+          items: [
+            {
+              spec: {
+                containers: [
+                  { name: 'frontend' },
+                  { name: 'main' },
+                ],
+              },
+              status: {
+                containerStatuses: [
+                  { name: 'frontend', ready: true, restartCount: 0, state: { running: {} } },
+                  { name: 'main', ready: true, restartCount: 0, state: { running: {} } },
+                ],
+              },
+            },
+          ],
+        };
+      },
+      readNamespacedPodLog: async (arg: K8sCallArg) => {
+        requestedContainer = arg.container as string | undefined;
+        return 'worker logs';
+      },
+    };
+
+    try {
+      const logs = await kubernetesService.getPodLogs('demo-worker', 'default', { tailLines: 10 });
+
+      expect(logs).toBe('worker logs');
+      expect(requestedContainer).toBe('main');
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+
+  test('prefers generated model containers before ready sidecars', async () => {
+    const service = asMockable();
+    const originalCoreV1Api = service.coreV1Api;
+    let requestedContainer: string | undefined;
+
+    service.coreV1Api = {
+      listNamespacedPod: async (arg: K8sCallArg) => {
+        expect(arg.fieldSelector).toBe('metadata.name=demo-model');
+        return {
+          items: [
+            {
+              spec: {
+                containers: [
+                  { name: 'istio-proxy' },
+                  { name: 'vllm' },
+                ],
+              },
+              status: {
+                containerStatuses: [
+                  { name: 'istio-proxy', ready: true, restartCount: 0, state: { running: {} } },
+                  { name: 'vllm', ready: false, restartCount: 3, state: { waiting: { reason: 'CrashLoopBackOff' } } },
+                ],
+              },
+            },
+          ],
+        };
+      },
+      readNamespacedPodLog: async (arg: K8sCallArg) => {
+        requestedContainer = arg.container as string | undefined;
+        return 'model logs';
+      },
+    };
+
+    try {
+      const logs = await kubernetesService.getPodLogs('demo-model', 'default', { tailLines: 10 });
+
+      expect(logs).toBe('model logs');
+      expect(requestedContainer).toBe('vllm');
+    } finally {
+      service.coreV1Api = originalCoreV1Api;
+    }
+  });
+});
+
+describe('KubernetesService - service proxy', () => {
+  test('uses caller token kubeconfig for proxied GET and streaming POST requests', async () => {
+    const service = asMockable();
+    const originalKubeConfig = service.kc;
+    const originalCreateUserKubeConfig = service.createUserKubeConfig;
+    const originalFetch = globalThis.fetch;
+    const createUserKubeConfigCalls: string[] = [];
+    const fetchCalls: Array<{ url: string; init: RequestInit & { userToken?: string } }> = [];
+
+    const fakeKubeConfig = (authHeader: string) => ({
+      getCurrentCluster: () => ({ server: 'https://cluster.example', skipTLSVerify: false }),
+      applyToFetchOptions: async (requestOptions: { headers?: Record<string, string> }) => {
+        return {
+          ...requestOptions,
+          headers: {
+            ...(requestOptions?.headers ?? {}),
+            Authorization: authHeader,
+          },
+        };
+      },
+      applyToHTTPSOptions: async () => undefined,
+    });
+
+    service.kc = fakeKubeConfig('Bearer shared-service-account-token');
+    service.createUserKubeConfig = (userToken: string) => {
+      createUserKubeConfigCalls.push(userToken);
+      return fakeKubeConfig(`Bearer ${userToken}`);
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init: init as RequestInit & { userToken?: string } });
+      return new Response(fetchCalls.length === 1 ? 'models' : 'stream', {
+        status: 200,
+        statusText: 'OK',
+      });
+    }) as typeof fetch;
+
+    try {
+      const getBody = await kubernetesService.proxyServiceGet(
+        'model-svc',
+        'tenant-ns',
+        8000,
+        'v1/models',
+        { accept: 'application/json', userToken: 'user-token' },
+      );
+      const postResponse = await kubernetesService.proxyServicePostStream(
+        'model-svc',
+        'tenant-ns',
+        8000,
+        'v1/chat/completions',
+        { messages: [{ role: 'user', content: 'Hello' }] },
+        { 'X-Trace-Id': 'trace-1' },
+        { userToken: 'user-token' },
+      );
+
+      expect(getBody).toBe('models');
+      expect(await postResponse.text()).toBe('stream');
+      expect(createUserKubeConfigCalls).toEqual(['user-token', 'user-token']);
+      expect(fetchCalls.map((call) => call.url)).toEqual([
+        'https://cluster.example/api/v1/namespaces/tenant-ns/services/model-svc:8000/proxy/v1/models',
+        'https://cluster.example/api/v1/namespaces/tenant-ns/services/model-svc:8000/proxy/v1/chat/completions',
+      ]);
+
+      const getHeaders = new Headers(fetchCalls[0].init.headers);
+      expect(fetchCalls[0].init.method).toBe('GET');
+      expect(getHeaders.get('authorization')).toBe('Bearer user-token');
+      expect(getHeaders.get('authorization')).not.toBe('Bearer shared-service-account-token');
+      expect(getHeaders.get('accept')).toBe('application/json');
+      expect(fetchCalls[0].init.userToken).toBeUndefined();
+
+      const postHeaders = new Headers(fetchCalls[1].init.headers);
+      expect(fetchCalls[1].init.method).toBe('POST');
+      expect(postHeaders.get('authorization')).toBe('Bearer user-token');
+      expect(postHeaders.get('accept')).toBe('text/event-stream');
+      expect(postHeaders.get('content-type')).toBe('application/json');
+      expect(postHeaders.get('x-trace-id')).toBe('trace-1');
+      expect(fetchCalls[1].init.body).toBe(JSON.stringify({
+        messages: [{ role: 'user', content: 'Hello' }],
+      }));
+      expect(fetchCalls[1].init.userToken).toBeUndefined();
+    } finally {
+      service.kc = originalKubeConfig;
+      service.createUserKubeConfig = originalCreateUserKubeConfig;
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
 
 describe('KubernetesService - Type Definitions', () => {
   describe('ClusterGpuCapacity', () => {
@@ -329,7 +658,7 @@ describe('KubernetesService - Type Definitions', () => {
             },
           ],
         },
-      } as any);
+      } satisfies V1Pod);
 
       expect(pod.phase).toBe('Pending');
       expect(pod.ready).toBe(false);

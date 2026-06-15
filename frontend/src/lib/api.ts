@@ -7,6 +7,7 @@ console.log('[API] API_BASE:', API_BASE || '(same origin)');
 
 // Auth token storage key
 const AUTH_TOKEN_KEY = 'airunway_auth_token';
+const AIRUNWAY_AUTH_ERROR_HEADER = 'X-Airunway-Auth-Error';
 
 /**
  * Get the stored auth token
@@ -24,6 +25,11 @@ function getAuthToken(): string | null {
  */
 function dispatchUnauthorized(): void {
   window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+}
+
+function isAuthenticationError(response: Response): boolean {
+  return response.status === 401 &&
+    response.headers.get(AIRUNWAY_AUTH_ERROR_HEADER)?.toLowerCase() === 'true';
 }
 
 // ============================================================================
@@ -109,6 +115,7 @@ export type {
   AutoscalerDetectionResult,
   AutoscalerStatusInfo,
   DetailedClusterCapacity,
+  GpuThroughputEstimate,
   NodePoolInfo,
   PodFailureReason,
   PodLogsOptions,
@@ -153,6 +160,7 @@ import type {
   AutoscalerDetectionResult,
   AutoscalerStatusInfo,
   DetailedClusterCapacity,
+  GpuThroughputEstimate,
   PodFailureReason,
   RuntimesStatusResponse,
   PodLogsResponse,
@@ -231,8 +239,9 @@ async function request<T>(endpoint: string, options?: RequestOptions): Promise<T
   console.log('[API] Response status:', response.status, 'for', url);
 
   if (!response.ok) {
-    // Handle 401 Unauthorized - dispatch event to trigger logout
-    if (response.status === 401) {
+    // Handle Airunway auth failures - dispatch event to trigger logout.
+    // Upstream/model 401s are application errors and should not log out the user.
+    if (isAuthenticationError(response)) {
       console.warn('[API] Unauthorized - dispatching auth:unauthorized event');
       dispatchUnauthorized();
     }
@@ -266,6 +275,21 @@ export const modelsApi = {
 // ============================================================================
 // Deployments API
 // ============================================================================
+
+export interface ChatMessage {
+  role: string;
+  content: unknown;
+}
+
+export interface ChatCompletionRequest {
+  messages: ChatMessage[];
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+  max_completion_tokens?: number;
+  top_p?: number;
+  [key: string]: unknown;
+}
 
 export const deploymentsApi = {
   list: (namespace?: string, options?: { limit?: number; offset?: number }) => {
@@ -331,6 +355,32 @@ export const deploymentsApi = {
     );
   },
 
+  chat: async (name: string, payload: ChatCompletionRequest, namespace?: string, options?: { signal?: AbortSignal }): Promise<Response> => {
+    const url = namespace
+      ? `${API_BASE}/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/chat`
+      : `${API_BASE}/api/deployments/${encodeURIComponent(name)}/chat`;
+
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    const token = getAuthToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    });
+
+    if (isAuthenticationError(response)) {
+      console.warn('[API] Unauthorized chat response - dispatching auth:unauthorized event');
+      dispatchUnauthorized();
+    }
+
+    return response;
+  },
+
   getManifest: (name: string, namespace?: string) =>
     request<{
       resources: Array<{
@@ -345,6 +395,11 @@ export const deploymentsApi = {
       };
     }>(
       `/deployments/${encodeURIComponent(name)}/manifest${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`
+    ),
+
+  listPVCs: (namespace: string) =>
+    request<{ pvcs: Array<{ name: string; status: string; storageClass: string; capacity: string }> }>(
+      `/deployments/-/pvcs?namespace=${encodeURIComponent(namespace)}`
     ),
 };
 
@@ -473,6 +528,37 @@ export const gpuOperatorApi = {
   getCapacity: () => request<ClusterGpuCapacity>('/installation/gpu-capacity'),
 
   getDetailedCapacity: () => request<DetailedClusterCapacity>('/installation/gpu-capacity/detailed'),
+
+  /** Estimate inference throughput (per-chat speed + concurrent capacity) for a model on the cluster's GPUs */
+  getThroughput: (
+    params: {
+      modelId?: string;
+      paramCount?: number;
+      contextLen?: number;
+      quantization?: 'fp8' | 'int8' | 'fp16' | 'bf16';
+      kvCacheDtype?: 'fp8' | 'int8' | 'fp16' | 'bf16';
+      gpuModel?: string;
+      tpSize?: number;
+    },
+    hfToken?: string
+  ) => {
+    const search = new URLSearchParams();
+    if (params.modelId) search.set('modelId', params.modelId);
+    if (params.paramCount) search.set('paramCount', String(params.paramCount));
+    if (params.contextLen) search.set('contextLen', String(params.contextLen));
+    if (params.quantization) search.set('quantization', params.quantization);
+    if (params.kvCacheDtype) search.set('kvCacheDtype', params.kvCacheDtype);
+    if (params.gpuModel) search.set('gpuModel', params.gpuModel);
+    if (params.tpSize) search.set('tpSize', String(params.tpSize));
+
+    const headers: Record<string, string> = {};
+    if (hfToken) {
+      headers['X-HF-Token'] = hfToken;
+    }
+    return request<GpuThroughputEstimate>(`/installation/gpu-throughput?${search.toString()}`, {
+      headers,
+    });
+  },
 };
 
 // ============================================================================

@@ -1,7 +1,29 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { kubernetesService } from './kubernetes';
 import { mockServiceMethod } from '../test/helpers';
 import { mockInferenceProviderConfig } from '../test/fixtures';
+
+// Minimal pod shape these tests construct and match against label selectors.
+interface PodLike {
+  metadata?: { name?: string; labels?: Record<string, string> };
+  status?: unknown;
+}
+
+// Arguments the Kubernetes client passes to the pod-listing methods we stub.
+interface K8sCallArg {
+  namespace?: string;
+  labelSelector?: string;
+}
+
+// Writable view of the private KubernetesService internals these tests stub.
+type MockableKubernetesService = {
+  coreV1Api: Record<string, (arg: K8sCallArg) => Promise<unknown>>;
+  customObjectsApi: Record<string, (arg?: K8sCallArg) => Promise<unknown>>;
+};
+
+const asMockable = (): MockableKubernetesService =>
+  kubernetesService as unknown as MockableKubernetesService;
 
 describe('KubernetesService - Runtime Status', () => {
   const restores: Array<() => void> = [];
@@ -14,16 +36,16 @@ describe('KubernetesService - Runtime Status', () => {
     restores.length = 0;
   });
 
-  function mockProviderConfigs(items: any[]) {
-    const service = kubernetesService as any;
+  function mockProviderConfigs(items: unknown[]) {
+    const service = asMockable();
     const original = service.customObjectsApi.listClusterCustomObject;
-    service.customObjectsApi.listClusterCustomObject = async () => ({ body: { items } });
+    service.customObjectsApi.listClusterCustomObject = async () => ({ items });
     restores.push(() => {
       service.customObjectsApi.listClusterCustomObject = original;
     });
   }
 
-  function podMatchesSelector(pod: any, selector?: string): boolean {
+  function podMatchesSelector(pod: PodLike, selector?: string): boolean {
     if (!selector) return true;
     const labels = pod.metadata?.labels || {};
     return selector.split(',').every((part) => {
@@ -32,18 +54,18 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
-  function mockOperatorPods(namespace: string, selector: string, items: any[], allNamespaceItems: any[] = []) {
-    const service = kubernetesService as any;
+  function mockOperatorPods(namespace: string, selector: string, items: PodLike[], allNamespaceItems: PodLike[] = []) {
+    const service = asMockable();
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
-    service.coreV1Api.listNamespacedPod = async (...args: any[]) => {
-      expect(args[0]).toBe(namespace);
-      const requestedSelector = args[5];
-      return { body: { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
+    service.coreV1Api.listNamespacedPod = async (arg: K8sCallArg) => {
+      expect(arg.namespace).toBe(namespace);
+      const requestedSelector = arg.labelSelector;
+      return { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
-    service.coreV1Api.listPodForAllNamespaces = async (...args: any[]) => {
-      const requestedSelector = args[3];
-      return { body: { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) } };
+    service.coreV1Api.listPodForAllNamespaces = async (arg: K8sCallArg) => {
+      const requestedSelector = arg?.labelSelector;
+      return { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
     restores.push(() => {
       service.coreV1Api.listNamespacedPod = originalNamespaced;
@@ -183,6 +205,210 @@ describe('KubernetesService - Runtime Status', () => {
     expect(dynamo?.message).toBe('DynamoGraphDeployment CRD not found');
   });
 
+  test('treats legacy LLM-D and vLLM provider configs without requiresCRD as CRD-less', async () => {
+    const llmdConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: { ...mockInferenceProviderConfig.metadata, name: 'llmd' },
+      status: {
+        ready: true,
+        version: '0.1.0',
+      },
+    };
+    const vllmConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: { ...mockInferenceProviderConfig.metadata, name: 'vllm' },
+      status: {
+        ready: true,
+        version: '0.8.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([llmdConfig, vllmConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const llmd = runtimes.find((runtime) => runtime.id === 'llmd');
+    const vllm = runtimes.find((runtime) => runtime.id === 'vllm');
+
+    expect(llmd).toBeDefined();
+    expect(llmd?.name).toBe('LLM-D');
+    expect(llmd?.installed).toBe(true);
+    expect(llmd?.healthy).toBe(true);
+    expect(llmd?.requiresCRD).toBe(false);
+    expect(llmd?.version).toBe('0.1.0');
+    expect(llmd?.message).toBe('Runtime is ready to use.');
+
+    expect(vllm).toBeDefined();
+    expect(vllm?.name).toBe('vLLM');
+    expect(vllm?.installed).toBe(true);
+    expect(vllm?.healthy).toBe(true);
+    expect(vllm?.requiresCRD).toBe(false);
+    expect(vllm?.version).toBe('0.8.0');
+    expect(vllm?.message).toBe('Runtime is ready to use.');
+  });
+
+  test('honors explicit requiresCRD metadata for custom-named CRD-less runtime entries', async () => {
+    const customVllmConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'custom-vllm-registration',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/provider-name': 'vLLM',
+        },
+      },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
+        capabilities: {
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: true },
+          ],
+        },
+      },
+      status: {
+        ready: true,
+        version: '0.8.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([customVllmConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const vllm = runtimes.find((runtime) => runtime.id === 'custom-vllm-registration');
+
+    expect(vllm).toBeDefined();
+    expect(vllm?.name).toBe('vLLM');
+    expect(vllm?.installed).toBe(true);
+    expect(vllm?.healthy).toBe(true);
+    expect(vllm?.crdFound).toBe(true);
+    expect(vllm?.operatorRunning).toBe(true);
+    expect(vllm?.requiresCRD).toBe(true);
+    expect(vllm?.version).toBe('0.8.0');
+    expect(vllm?.message).toBe('vLLM is installed and running');
+  });
+
+  test('honors per-engine requiresCRD: false on the migrated schema for custom-named runtime entries', async () => {
+    // Post-migration: legacy top-level capabilities.requiresCRD has been
+    // stripped, and the verdict lives on each engine. The provider id/display
+    // name are non-canonical, so the canonical-id fallback cannot mask a
+    // buggy aggregation.
+    const customConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'mycustom-runtime',
+        annotations: {
+          ...mockInferenceProviderConfig.metadata.annotations,
+          'airunway.ai/provider-name': 'My Custom Runtime',
+        },
+      },
+      spec: {
+        capabilities: {
+          engines: [
+            { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+            { name: 'sglang', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+          ],
+        },
+      },
+      status: {
+        ready: true,
+        version: '0.1.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([customConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const custom = runtimes.find((runtime) => runtime.id === 'mycustom-runtime');
+
+    expect(custom).toBeDefined();
+    expect(custom?.name).toBe('My Custom Runtime');
+    expect(custom?.installed).toBe(true);
+    expect(custom?.requiresCRD).toBe(false);
+    expect(custom?.crdFound).toBe(true);
+    expect(custom?.operatorRunning).toBe(true);
+    expect(custom?.message).toBe('Runtime is ready to use.');
+  });
+
+  test('reports ready providers that do not require runtime CRDs as installed without probing an operator', async () => {
+    const llmdConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: { ...mockInferenceProviderConfig.metadata, name: 'llmd' },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
+        capabilities: {
+          ...mockInferenceProviderConfig.spec.capabilities,
+          requiresCRD: false,
+        },
+      },
+      status: {
+        ready: true,
+        version: '0.1.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([llmdConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const llmd = runtimes.find((runtime) => runtime.id === 'llmd');
+
+    expect(llmd).toBeDefined();
+    expect(llmd?.installed).toBe(true);
+    expect(llmd?.healthy).toBe(true);
+    expect(llmd?.crdFound).toBe(true);
+    expect(llmd?.operatorRunning).toBe(true);
+    expect(llmd?.requiresCRD).toBe(false);
+    expect(llmd?.version).toBe('0.1.0');
+    expect(llmd?.message).toBe('Runtime is ready to use.');
+  });
+
+  test('honors provider readiness for runtimes that do not require runtime CRDs', async () => {
+    const llmdConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: { ...mockInferenceProviderConfig.metadata, name: 'llmd' },
+      spec: {
+        ...mockInferenceProviderConfig.spec,
+        capabilities: {
+          ...mockInferenceProviderConfig.spec.capabilities,
+          requiresCRD: false,
+        },
+      },
+      status: {
+        ready: false,
+        version: '0.1.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([llmdConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const llmd = runtimes.find((runtime) => runtime.id === 'llmd');
+
+    expect(llmd).toBeDefined();
+    expect(llmd?.installed).toBe(false);
+    expect(llmd?.healthy).toBe(false);
+    expect(llmd?.crdFound).toBe(true);
+    expect(llmd?.operatorRunning).toBe(false);
+    expect(llmd?.requiresCRD).toBe(false);
+    expect(llmd?.version).toBe('0.1.0');
+    expect(llmd?.message).toBe('Provider is registered but not ready yet.');
+  });
+
   test('reports KAITO as not fully installed when the CRD exists but no ready operator pod is found', async () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
@@ -229,6 +455,33 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.crdFound).toBe(true);
     expect(status.operatorRunning).toBe(true);
     expect(status.message).toBe('KAITO workspace CRD found and KAITO operator pods are ready');
+  });
+
+  test('reports KAITO as installed when the AKS AI-toolchain-operator add-on pod is running in kube-system', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'workspaces.kaito.sh'),
+    );
+    // The AKS add-on runs the KAITO operator in kube-system, labeled
+    // app=ai-toolchain-operator rather than the upstream Helm chart labels, so
+    // it only surfaces through the cross-namespace fallback search.
+    mockOperatorPods('kaito-workspace', kaitoOperatorSelector, [], [
+      {
+        metadata: { namespace: 'kube-system', name: 'kaito-workspace-557dbc5ffb-smczp', labels: { app: 'ai-toolchain-operator' } },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: true, restartCount: 0 },
+          ],
+        },
+      },
+    ]);
+
+    const status = await kubernetesService.checkKaitoInstallationStatus();
+
+    expect(status.installed).toBe(true);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(true);
+    expect(status.message).toBe('KAITO workspace CRD found and KAITO operator pods are ready in kube-system');
   });
 
   test('reports Dynamo as installed when a ready operator pod is found', async () => {
@@ -361,7 +614,7 @@ describe('KubernetesService - Runtime Status', () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
     );
-    const service = kubernetesService as any;
+    const service = asMockable();
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
     const forbidden = { statusCode: 403, body: { message: 'pods is forbidden' } };

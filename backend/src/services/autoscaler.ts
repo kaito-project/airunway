@@ -1,9 +1,31 @@
 import * as k8s from '@kubernetes/client-node';
 import type { AutoscalerDetectionResult, AutoscalerStatusInfo } from '@airunway/shared';
 import { withRetry } from '../lib/retry';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
+import { getK8sErrorStatusCode } from '../lib/k8s-errors';
 import logger from '../lib/logger';
 import * as yaml from 'js-yaml';
+
+/**
+ * Subset of the cluster-autoscaler status ConfigMap (YAML) that we read.
+ * The upstream format is loosely specified, so every field is optional.
+ */
+interface ClusterAutoscalerStatus {
+  time?: string;
+  autoscalerStatus?: string;
+  clusterWide?: {
+    health?: { status?: string };
+  };
+  nodeGroups?: Array<{
+    name?: string;
+    health?: {
+      minSize?: number;
+      maxSize?: number;
+      cloudProviderTarget?: number;
+      nodeCounts?: { registered?: { total?: number } };
+    };
+  }>;
+}
 
 class AutoscalerService {
   private kc: k8s.KubeConfig;
@@ -13,9 +35,9 @@ class AutoscalerService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.appsV1Api = this.kc.makeApiClient(k8s.AppsV1Api);
-    this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
+    this.appsV1Api = makeApiClient(this.kc, k8s.AppsV1Api);
+    this.customObjectsApi = makeApiClient(this.kc, k8s.CustomObjectsApi);
   }
 
   /**
@@ -28,11 +50,11 @@ class AutoscalerService {
         { operationName: 'isAKSCluster', maxRetries: 1 }
       );
 
-      if (nodesResponse.body.items.length === 0) {
+      if (nodesResponse.items.length === 0) {
         return false;
       }
 
-      const node = nodesResponse.body.items[0];
+      const node = nodesResponse.items[0];
       const labels = node.metadata?.labels || {};
       const providerID = node.spec?.providerID || '';
 
@@ -65,7 +87,7 @@ class AutoscalerService {
       // Count unique node pools (agentpools) that have autoscaling enabled
       const autoscalingNodePools = new Set<string>();
 
-      for (const node of nodesResponse.body.items) {
+      for (const node of nodesResponse.items) {
         const labels = node.metadata?.labels || {};
 
         // AKS labels autoscaler-enabled nodes with this label
@@ -127,23 +149,19 @@ class AutoscalerService {
 
       // Fallback: Look for cluster-autoscaler deployment
       const deploymentsResponse = await withRetry(
-        () => this.appsV1Api.listNamespacedDeployment(
-          'kube-system',
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          'app=cluster-autoscaler'
-        ),
+        () => this.appsV1Api.listNamespacedDeployment({
+          namespace: 'kube-system',
+          labelSelector: 'app=cluster-autoscaler',
+        }),
         { operationName: 'detectClusterAutoscalerDeployment', maxRetries: 1 }
       );
 
-      const deployments = deploymentsResponse.body.items;
+      const deployments = deploymentsResponse.items;
 
       if (deployments.length === 0) {
         // Try without label selector
-        const allDeployments = await this.appsV1Api.listNamespacedDeployment('kube-system');
-        const caDeployment = allDeployments.body.items.find(
+        const allDeployments = await this.appsV1Api.listNamespacedDeployment({ namespace: 'kube-system' });
+        const caDeployment = allDeployments.items.find(
           d => d.metadata?.name?.includes('cluster-autoscaler')
         );
 
@@ -166,8 +184,8 @@ class AutoscalerService {
         healthy,
         nodeGroupCount: 0, // ConfigMap not available, can't determine node group count
       };
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode !== 404 && statusCode !== 403) {
         logger.error({ error }, 'Error detecting cluster-autoscaler');
       }
@@ -181,20 +199,20 @@ class AutoscalerService {
   async getAutoscalerStatus(): Promise<AutoscalerStatusInfo | null> {
     try {
       const configMapResponse = await withRetry(
-        () => this.coreV1Api.readNamespacedConfigMap(
-          'cluster-autoscaler-status',
-          'kube-system'
-        ),
+        () => this.coreV1Api.readNamespacedConfigMap({
+          name: 'cluster-autoscaler-status',
+          namespace: 'kube-system',
+        }),
         { operationName: 'getAutoscalerStatus', maxRetries: 1 }
       );
 
-      const configMap = configMapResponse.body;
+      const configMap = configMapResponse;
       const statusData = configMap.data?.['status'] || '{}';
 
-      let parsedStatus: any;
+      let parsedStatus: ClusterAutoscalerStatus;
       try {
         // Parse YAML format (cluster-autoscaler uses YAML in the ConfigMap)
-        parsedStatus = yaml.load(statusData);
+        parsedStatus = (yaml.load(statusData) as ClusterAutoscalerStatus) ?? {};
       } catch (error) {
         logger.warn({ error }, 'Failed to parse cluster-autoscaler-status ConfigMap');
         return null;
@@ -205,7 +223,7 @@ class AutoscalerService {
       if (Array.isArray(parsedStatus.nodeGroups)) {
         for (const group of parsedStatus.nodeGroups) {
           nodeGroups.push({
-            name: group.name,
+            name: group.name || 'unknown',
             minSize: group.health?.minSize || 0,
             maxSize: group.health?.maxSize || 0,
             currentSize: group.health?.cloudProviderTarget || group.health?.nodeCounts?.registered?.total || 0,
@@ -221,8 +239,8 @@ class AutoscalerService {
         lastUpdateTime,
         nodeGroups,
       };
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode !== 404 && statusCode !== 403) {
         logger.error({ error }, 'Error getting autoscaler status');
       }

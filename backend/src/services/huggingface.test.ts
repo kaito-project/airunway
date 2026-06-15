@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { isValidHfRepoId, encodeHfRepoPath } from './huggingface';
 
 // Store original fetch
 const originalFetch = global.fetch;
@@ -232,6 +233,276 @@ describe('HuggingFaceService', () => {
           'http://localhost:3000/oauth/callback'
         )
       ).rejects.toThrow();
+    });
+  });
+
+  describe('getModelArchitecture', () => {
+    const configJson = JSON.stringify({
+      num_hidden_layers: 80,
+      num_attention_heads: 64,
+      num_key_value_heads: 8,
+      head_dim: 128,
+      max_position_embeddings: 8192,
+      torch_dtype: 'bfloat16',
+    });
+
+    test('parses architecture from config.json', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('meta-llama/Meta-Llama-3-70B');
+
+      expect(arch).toEqual({
+        numLayers: 80,
+        numKvHeads: 8,
+        headDim: 128,
+        maxPositionEmbeddings: 8192,
+        torchDtype: 'bfloat16',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('reads transformer dimensions from a nested text_config (multimodal)', async () => {
+      // Many image-text-to-text / multimodal configs describe the composite
+      // model at the top level and nest the language-model dimensions under
+      // text_config. Those fields must be read from the nested object so the
+      // estimate stays high-confidence instead of degrading to per-chat-only.
+      const multimodalConfig = JSON.stringify({
+        model_type: 'llava',
+        torch_dtype: 'float16',
+        vision_config: { hidden_size: 1024 },
+        text_config: {
+          num_hidden_layers: 32,
+          num_attention_heads: 32,
+          num_key_value_heads: 8,
+          hidden_size: 4096,
+          max_position_embeddings: 4096,
+          torch_dtype: 'bfloat16',
+        },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(multimodalConfig, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/multimodal-text');
+
+      expect(arch).toEqual({
+        numLayers: 32,
+        numKvHeads: 8,
+        // head_dim derived from nested hidden_size / num_attention_heads.
+        headDim: 128,
+        maxPositionEmbeddings: 4096,
+        // Nested torch_dtype wins over the top-level one.
+        torchDtype: 'bfloat16',
+      });
+    });
+
+    test('prefers top-level transformer fields over a nested text_config', async () => {
+      // A plain decoder LLM that also happens to carry a nested sub-config must
+      // still read its dimensions from the top level (it's the real model).
+      const config = JSON.stringify({
+        num_hidden_layers: 80,
+        num_attention_heads: 64,
+        num_key_value_heads: 8,
+        head_dim: 128,
+        max_position_embeddings: 8192,
+        torch_dtype: 'bfloat16',
+        text_config: { num_hidden_layers: 4, num_attention_heads: 4 },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(config, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/decoder-with-subconfig');
+
+      expect(arch?.numLayers).toBe(80);
+      expect(arch?.numKvHeads).toBe(8);
+    });
+
+    test('reads from llm_config when text_config is absent', async () => {
+      const config = JSON.stringify({
+        model_type: 'internvl',
+        llm_config: {
+          num_hidden_layers: 48,
+          num_attention_heads: 32,
+          num_key_value_heads: 4,
+          head_dim: 128,
+          max_position_embeddings: 16384,
+        },
+      });
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(config, { status: 200 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/internvl');
+
+      expect(arch?.numLayers).toBe(48);
+      expect(arch?.numKvHeads).toBe(4);
+      expect(arch?.maxPositionEmbeddings).toBe(16384);
+    });
+
+    test('serves a cached result without re-fetching while fresh', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      await huggingFaceService.getModelArchitecture('org/model');
+      await huggingFaceService.getModelArchitecture('org/model');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('drops the expired entry and re-fetches after the TTL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      const realNow = Date.now;
+      const base = realNow();
+      try {
+        // First call caches with expiresAt = base + 1h.
+        Date.now = () => base;
+        await huggingFaceService.getModelArchitecture('org/model');
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        // Advance past the 1-hour TTL: entry is expired, must re-fetch.
+        Date.now = () => base + 60 * 60 * 1000 + 1;
+        await huggingFaceService.getModelArchitecture('org/model');
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    test('evicts the least-recently-used entry past the size cap', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      // ARCH_CACHE_MAX_ENTRIES is 500. Fill the cache to the cap, then touch the
+      // first key so it is no longer the least-recently-used, then insert one
+      // more distinct key to trigger a single eviction.
+      const CAP = 500;
+      for (let i = 0; i < CAP; i++) {
+        await huggingFaceService.getModelArchitecture(`org/model-${i}`);
+      }
+      expect(mockFetch).toHaveBeenCalledTimes(CAP);
+
+      // Re-access model-0 (currently the oldest): served from cache (no fetch)
+      // and promoted to most-recently-used.
+      await huggingFaceService.getModelArchitecture('org/model-0');
+      expect(mockFetch).toHaveBeenCalledTimes(CAP);
+
+      // Insert a brand-new key, pushing the cache over the cap. The LRU victim is
+      // now model-1 (model-0 was just promoted), so model-1 must re-fetch while
+      // model-0 stays cached.
+      await huggingFaceService.getModelArchitecture('org/overflow');
+      expect(mockFetch).toHaveBeenCalledTimes(CAP + 1);
+
+      // model-0 was promoted → still cached (no new fetch).
+      await huggingFaceService.getModelArchitecture('org/model-0');
+      expect(mockFetch).toHaveBeenCalledTimes(CAP + 1);
+
+      // model-1 was evicted → must re-fetch.
+      await huggingFaceService.getModelArchitecture('org/model-1');
+      expect(mockFetch).toHaveBeenCalledTimes(CAP + 2);
+    });
+
+    test('returns undefined on a non-ok response', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response('not found', { status: 404 }))
+      );
+
+      const arch = await huggingFaceService.getModelArchitecture('org/missing');
+      expect(arch).toBeUndefined();
+    });
+
+    test('rejects a malformed model id without fetching', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      for (const bad of ['../../etc/passwd', 'a/b/c', 'foo bar', '.', '..', 'owner/', 'owner/name?x=1']) {
+        const arch = await huggingFaceService.getModelArchitecture(bad);
+        expect(arch).toBeUndefined();
+      }
+      // Security: no token-bearing request is ever issued for an invalid id.
+      expect(mockFetch).toHaveBeenCalledTimes(0);
+    });
+
+    test('encodes the model id when building the config.json URL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(configJson, { status: 200 }))
+      );
+
+      await huggingFaceService.getModelArchitecture('meta-llama/Meta-Llama-3-70B');
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://huggingface.co/meta-llama/Meta-Llama-3-70B/resolve/main/config.json');
+    });
+  });
+
+  describe('getGgufFiles', () => {
+    test('throws on a malformed model id without fetching', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ siblings: [] }), { status: 200 }))
+      );
+
+      await expect(huggingFaceService.getGgufFiles('../../etc/passwd')).rejects.toThrow(
+        'Invalid Hugging Face model id'
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(0);
+    });
+
+    test('encodes the model id when building the api URL', async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ siblings: [{ rfilename: 'model.Q4_K_M.gguf' }] }), {
+            status: 200,
+          })
+        )
+      );
+
+      const files = await huggingFaceService.getGgufFiles('unsloth/Qwen3-4B-GGUF');
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://huggingface.co/api/models/unsloth/Qwen3-4B-GGUF');
+      expect(files).toEqual(['model.Q4_K_M.gguf']);
+    });
+  });
+
+  describe('isValidHfRepoId', () => {
+    test('accepts canonical single- and two-segment ids', () => {
+      for (const ok of ['gpt2', 'meta-llama/Meta-Llama-3-70B', 'unsloth/Qwen3-4B-GGUF', 'a_b.c-d/e.f_g-h']) {
+        expect(isValidHfRepoId(ok)).toBe(true);
+      }
+    });
+
+    test('rejects traversal, extra segments, and unsafe characters', () => {
+      for (const bad of [
+        '',
+        '.',
+        '..',
+        'owner/',
+        '/name',
+        'a/b/c',
+        '../../etc/passwd',
+        'foo bar',
+        'owner/name?x=1',
+        'owner/name#frag',
+        'owner/na me',
+        'a'.repeat(97) + '/b',
+      ]) {
+        expect(isValidHfRepoId(bad)).toBe(false);
+      }
+    });
+  });
+
+  describe('encodeHfRepoPath', () => {
+    test('percent-encodes each segment but preserves the slash', () => {
+      expect(encodeHfRepoPath('owner/name')).toBe('owner/name');
+      expect(encodeHfRepoPath('gpt2')).toBe('gpt2');
     });
   });
 });

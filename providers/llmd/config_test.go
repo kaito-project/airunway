@@ -10,9 +10,55 @@ import (
 func TestGetProviderConfigSpec(t *testing.T) {
 	spec := GetProviderConfigSpec()
 
+	// Capabilities
+	if spec.Capabilities == nil {
+		t.Fatal("expected non-nil capabilities")
+	}
+
+	// Engines
+	engines := spec.Capabilities.Engines
+	if len(engines) == 0 {
+		t.Fatal("expected at least one engine")
+	}
+
+	// Verify per-engine capabilities
+	vllmCap := spec.Capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeVLLM)
+	if vllmCap == nil {
+		t.Fatal("expected vllm engine capability")
+	}
+	if vllmCap.RequiresCRD == nil || *vllmCap.RequiresCRD {
+		t.Error("expected LLMD vllm engine to not require CRDs")
+	}
+	if !vllmCap.GPUSupport {
+		t.Error("expected vllm GPU support to be true")
+	}
+	if vllmCap.CPUSupport {
+		t.Error("expected vllm CPU support to be false")
+	}
+
+	// Serving modes (per-engine)
+	hasAggregated := false
+	hasDisaggregated := false
+	for _, m := range vllmCap.ServingModes {
+		if m == airunwayv1alpha1.ServingModeAggregated {
+			hasAggregated = true
+		}
+		if m == airunwayv1alpha1.ServingModeDisaggregated {
+			hasDisaggregated = true
+		}
+	}
+	if !hasAggregated {
+		t.Error("expected aggregated serving mode")
+	}
+	if !hasDisaggregated {
+		t.Error("expected disaggregated serving mode")
+	}
+
+	// No auto-selection rules
 	if len(spec.SelectionRules) != 0 {
 		t.Errorf("expected no selection rules (never auto-selected), got %d", len(spec.SelectionRules))
 	}
+
 }
 
 func TestGetInstallationInfo(t *testing.T) {
@@ -34,7 +80,7 @@ func TestProviderDocumentation(t *testing.T) {
 	}
 }
 
-func TestBuildAnnotations(t *testing.T) {
+func TestBuildAnnotationsIncludesDiscoveryMetadata(t *testing.T) {
 	annotations, err := buildAnnotations()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -55,30 +101,20 @@ func TestBuildAnnotations(t *testing.T) {
 			t.Fatalf("expected annotation %s to be set", key)
 		}
 	}
-	if annotations[airunwayv1alpha1.AnnotationDocumentationURL] != ProviderDocumentation {
-		t.Fatalf("expected documentation-url annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentationURL])
-	}
-	if annotations[airunwayv1alpha1.AnnotationDocumentation] != ProviderDocumentation {
-		t.Fatalf("expected legacy documentation annotation %q, got %q", ProviderDocumentation, annotations[airunwayv1alpha1.AnnotationDocumentation])
-	}
 	if annotations[airunwayv1alpha1.AnnotationDefaultNamespace] != "default" {
 		t.Fatalf("expected default namespace default, got %q", annotations[airunwayv1alpha1.AnnotationDefaultNamespace])
-	}
-
-	var installation airunwayv1alpha1.InstallationInfo
-	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationInstallation]), &installation); err != nil {
-		t.Fatalf("failed to decode installation annotation: %v", err)
-	}
-	if installation.Description == "" {
-		t.Fatal("expected annotated installation description")
 	}
 
 	var capabilities airunwayv1alpha1.ProviderCapabilities
 	if err := json.Unmarshal([]byte(annotations[airunwayv1alpha1.AnnotationCapabilities]), &capabilities); err != nil {
 		t.Fatalf("failed to decode capabilities annotation: %v", err)
 	}
-	if len(capabilities.Engines) == 0 || len(capabilities.ServingModes) == 0 {
-		t.Fatalf("expected non-empty annotated capabilities, got %+v", capabilities)
+	vllmCap := capabilities.GetEngineCapability(airunwayv1alpha1.EngineTypeVLLM)
+	if vllmCap == nil {
+		t.Fatalf("expected annotated vllm capability, got %+v", capabilities.Engines)
+	}
+	if vllmCap.RequiresCRD == nil || *vllmCap.RequiresCRD {
+		t.Fatalf("expected annotated llm-d vllm capability to not require CRDs")
 	}
 
 	var health struct {

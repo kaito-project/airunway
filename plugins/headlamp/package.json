@@ -18,18 +18,21 @@
     "@airunway/shared": "workspace:*"
   },
   "devDependencies": {
-    "@kinvolk/headlamp-plugin": "^0.9.0",
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
+    "@iconify/react": "^6.0.2",
+    "@kinvolk/headlamp-plugin": "^0.14.0",
+    "@mui/material": "^9.0.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^14.1.2",
-    "@types/react": "^18.2.47",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^19.2.16",
     "@types/react-router-dom": "5",
-    "@vitejs/plugin-react": "^5.1.2",
-    "@vitest/coverage-v8": "^1.1.3",
-    "jsdom": "^23.2.0",
-    "react-router": "^6.22.0",
-    "react-router-dom": "5",
-    "typescript": "^5.3.3",
-    "vitest": "^1.1.3"
+    "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/coverage-v8": "^4.1.7",
+    "jsdom": "^29.1.1",
+    "react-router-dom": "7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   },
   "peerDependencies": {
     "react": "^18.2.0",
@@ -44,7 +47,9 @@
     "machine-learning",
     "kaito",
     "kuberay",
-    "dynamo"
+    "dynamo",
+    "llm-d",
+    "gateway"
   ],
   "author": "",
   "license": "MIT",

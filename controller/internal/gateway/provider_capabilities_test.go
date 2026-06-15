@@ -18,7 +18,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,39 +36,29 @@ func newTestScheme() *runtime.Scheme {
 	return s
 }
 
-func newProviderConfigWithCapabilities(t *testing.T, name string, capabilities *airunwayv1alpha1.ProviderCapabilities) *airunwayv1alpha1.InferenceProviderConfig {
-	t.Helper()
-
-	annotations := map[string]string{}
-	if capabilities != nil {
-		data, err := json.Marshal(capabilities)
-		if err != nil {
-			t.Fatalf("failed to marshal capabilities: %v", err)
-		}
-		annotations[airunwayv1alpha1.AnnotationCapabilities] = string(data)
-	}
-
-	return &airunwayv1alpha1.InferenceProviderConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Annotations: annotations,
-		},
-	}
-}
-
 func TestGetGatewayCapabilities_ProviderWithGateway(t *testing.T) {
 	scheme := newTestScheme()
-	ipc := newProviderConfigWithCapabilities(t, "dynamo", &airunwayv1alpha1.ProviderCapabilities{
-		Gateway: &airunwayv1alpha1.GatewayCapabilities{
-			InferencePoolNamePattern: "{namespace}-{name}-pool",
-			InferencePoolNamespace:   "dynamo-system",
+	ipc := &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "dynamo"},
+		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
+			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+				Engines: []airunwayv1alpha1.EngineCapability{
+					{
+						Name: airunwayv1alpha1.EngineTypeVLLM,
+						Gateway: &airunwayv1alpha1.GatewayCapabilities{
+							InferencePoolNamePattern: "{namespace}-{name}-pool",
+							InferencePoolNamespace:   "dynamo-system",
+						},
+					},
+				},
+			},
 		},
-	})
+	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
 
-	caps := resolver.GetGatewayCapabilities(context.Background(), "dynamo")
+	caps := resolver.GetGatewayCapabilities(context.Background(), "dynamo", airunwayv1alpha1.EngineTypeVLLM)
 	if caps == nil {
 		t.Fatal("expected gateway capabilities, got nil")
 	}
@@ -86,7 +75,7 @@ func TestGetGatewayCapabilities_ProviderNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
 
-	caps := resolver.GetGatewayCapabilities(context.Background(), "nonexistent")
+	caps := resolver.GetGatewayCapabilities(context.Background(), "nonexistent", airunwayv1alpha1.EngineTypeVLLM)
 	if caps != nil {
 		t.Errorf("expected nil capabilities for missing provider, got %+v", caps)
 	}
@@ -94,12 +83,15 @@ func TestGetGatewayCapabilities_ProviderNotFound(t *testing.T) {
 
 func TestGetGatewayCapabilities_ProviderWithNilCapabilities(t *testing.T) {
 	scheme := newTestScheme()
-	ipc := newProviderConfigWithCapabilities(t, "kaito", nil)
+	ipc := &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "kaito"},
+		Spec:       airunwayv1alpha1.InferenceProviderConfigSpec{},
+	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
 
-	caps := resolver.GetGatewayCapabilities(context.Background(), "kaito")
+	caps := resolver.GetGatewayCapabilities(context.Background(), "kaito", airunwayv1alpha1.EngineTypeVLLM)
 	if caps != nil {
 		t.Errorf("expected nil capabilities for provider without capabilities, got %+v", caps)
 	}
@@ -107,15 +99,51 @@ func TestGetGatewayCapabilities_ProviderWithNilCapabilities(t *testing.T) {
 
 func TestGetGatewayCapabilities_ProviderWithNoGateway(t *testing.T) {
 	scheme := newTestScheme()
-	ipc := newProviderConfigWithCapabilities(t, "kaito", &airunwayv1alpha1.ProviderCapabilities{
-		GPUSupport: true,
-	})
+	ipc := &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "kaito"},
+		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
+			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+				Engines: []airunwayv1alpha1.EngineCapability{
+					{Name: airunwayv1alpha1.EngineTypeVLLM, GPUSupport: true},
+				},
+			},
+		},
+	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
 	resolver := NewInferenceProviderConfigResolver(c)
 
-	caps := resolver.GetGatewayCapabilities(context.Background(), "kaito")
+	caps := resolver.GetGatewayCapabilities(context.Background(), "kaito", airunwayv1alpha1.EngineTypeVLLM)
 	if caps != nil {
 		t.Errorf("expected nil capabilities for provider without gateway config, got %+v", caps)
+	}
+}
+
+func TestGetGatewayCapabilities_EngineNotDeclared(t *testing.T) {
+	scheme := newTestScheme()
+	ipc := &airunwayv1alpha1.InferenceProviderConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "dynamo"},
+		Spec: airunwayv1alpha1.InferenceProviderConfigSpec{
+			Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+				Engines: []airunwayv1alpha1.EngineCapability{
+					{
+						Name: airunwayv1alpha1.EngineTypeVLLM,
+						Gateway: &airunwayv1alpha1.GatewayCapabilities{
+							InferencePoolNamePattern: "{name}-pool",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ipc).Build()
+	resolver := NewInferenceProviderConfigResolver(c)
+
+	// Asking for a different engine should return nil even though the provider
+	// declares gateway capabilities for vllm.
+	caps := resolver.GetGatewayCapabilities(context.Background(), "dynamo", airunwayv1alpha1.EngineTypeSGLang)
+	if caps != nil {
+		t.Errorf("expected nil capabilities for engine not declared by provider, got %+v", caps)
 	}
 }

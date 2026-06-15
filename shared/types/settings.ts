@@ -44,6 +44,7 @@ export interface ProviderInfo {
   icon?: string;
   warnings?: string[];
   installable?: boolean;
+  requiresCRD?: boolean;
   capabilities?: ProviderCapabilities;
   deploymentDefaults?: ProviderDeploymentDefaults;
   health?: ProviderHealthConfig;
@@ -127,6 +128,7 @@ export interface RuntimeStatus {
   icon?: string;
   warnings?: string[];
   installable?: boolean;
+  requiresCRD?: boolean; // Whether the provider depends on an upstream runtime operator/CRD
   capabilities?: ProviderCapabilities;
   deploymentDefaults?: ProviderDeploymentDefaults;
   health?: ProviderHealthConfig;

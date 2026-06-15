@@ -66,29 +66,27 @@ func NewProviderConfigManager(c client.Client, discoveryClients ...discovery.Dis
 	return manager
 }
 
-// GetProviderConfigSpec returns the InferenceProviderConfigSpec for KubeRay.
+// GetProviderConfigSpec returns the InferenceProviderConfigSpec for KubeRay
 func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 	return airunwayv1alpha1.InferenceProviderConfigSpec{
+		Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+			Engines: []airunwayv1alpha1.EngineCapability{
+				{
+					Name: airunwayv1alpha1.EngineTypeVLLM,
+					ServingModes: []airunwayv1alpha1.ServingMode{
+						airunwayv1alpha1.ServingModeAggregated,
+						airunwayv1alpha1.ServingModeDisaggregated,
+					},
+					GPUSupport: true,
+				},
+			},
+		},
 		SelectionRules: []airunwayv1alpha1.SelectionRule{
 			{
 				Condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 1 && spec.engine.type == 'vllm'",
 				Priority:  80,
 			},
 		},
-	}
-}
-
-func getProviderCapabilities() *airunwayv1alpha1.ProviderCapabilities {
-	return &airunwayv1alpha1.ProviderCapabilities{
-		Engines: []airunwayv1alpha1.EngineType{
-			airunwayv1alpha1.EngineTypeVLLM,
-		},
-		ServingModes: []airunwayv1alpha1.ServingMode{
-			airunwayv1alpha1.ServingModeAggregated,
-			airunwayv1alpha1.ServingModeDisaggregated,
-		},
-		CPUSupport: false,
-		GPUSupport: true,
 	}
 }
 
@@ -292,7 +290,7 @@ func buildAnnotations() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal installation info: %w", err)
 	}
-	capabilitiesJSON, err := json.Marshal(getProviderCapabilities())
+	capabilitiesJSON, err := json.Marshal(GetProviderConfigSpec().Capabilities)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal capabilities: %w", err)
 	}

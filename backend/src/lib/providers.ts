@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type {
   HelmChart,
   HelmRepo,
@@ -25,8 +26,47 @@ const ANNOTATIONS = {
   installation: 'airunway.ai/installation',
 } as const;
 
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  kaito: 'KAITO',
+  dynamo: 'Dynamo',
+  kuberay: 'KubeRay',
+  llmd: 'LLM-D',
+  vllm: 'vLLM',
+};
+
+const CRD_LESS_PROVIDER_IDS = new Set([
+  'llmd',
+  'vllm',
+]);
+
+const CRD_LESS_PROVIDER_DISPLAY_NAMES = new Set([
+  'LLM-D',
+  'vLLM',
+]);
+
+const DISPLAY_NAME_ANNOTATION_KEYS = [
+  'airunway.ai/provider-name',
+  'airunway.io/provider-name',
+  'airunway.ai/display-name',
+  'airunway.io/display-name',
+];
+
 function displayName(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  const knownDisplayName = PROVIDER_DISPLAY_NAMES[name.toLowerCase()];
+  return knownDisplayName || name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function normalizeCanonicalProviderId(providerId: string | null | undefined): string {
+  return String(providerId ?? '').toLowerCase();
+}
+
+function isCanonicalCrdLessProviderId(providerId: string | null | undefined): boolean {
+  const normalizedProviderId = normalizeCanonicalProviderId(providerId);
+  return CRD_LESS_PROVIDER_IDS.has(normalizedProviderId);
+}
+
+function isCrdLessProviderDisplayName(providerName: string | null | undefined): boolean {
+  return CRD_LESS_PROVIDER_DISPLAY_NAMES.has(String(providerName ?? '').trim());
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -94,6 +134,23 @@ function normalizeCapabilities(raw: unknown, warnings: string[]): ProviderCapabi
   }
 
   const value = raw as Record<string, unknown>;
+  const engineEntries = Array.isArray(value.engines) ? value.engines : [];
+  const engines = Array.from(new Set(engineEntries.flatMap((engine): string[] => {
+    if (typeof engine === 'string' && engine.trim().length > 0) {
+      return [engine.trim()];
+    }
+    if (engine && typeof engine === 'object' && !Array.isArray(engine)) {
+      const name = nonEmptyString((engine as Record<string, unknown>).name);
+      return name ? [name] : [];
+    }
+    return [];
+  })));
+
+  const perEngineModes = engineEntries.flatMap((engine): string[] => {
+    if (!engine || typeof engine !== 'object' || Array.isArray(engine)) return [];
+    return stringArray((engine as Record<string, unknown>).servingModes);
+  });
+
   const features = value.features && typeof value.features === 'object' && !Array.isArray(value.features)
     ? Object.fromEntries(
         Object.entries(value.features as Record<string, unknown>)
@@ -101,9 +158,20 @@ function normalizeCapabilities(raw: unknown, warnings: string[]): ProviderCapabi
       ) as Record<string, boolean>
     : {};
 
+  const hasGpuSupport = engineEntries.some((engine) => (
+    engine && typeof engine === 'object' && !Array.isArray(engine) && (engine as Record<string, unknown>).gpuSupport === true
+  ));
+  const hasCpuSupport = engineEntries.some((engine) => (
+    engine && typeof engine === 'object' && !Array.isArray(engine) && (engine as Record<string, unknown>).cpuSupport === true
+  ));
+  if (hasGpuSupport) features.gpu = true;
+  if (hasCpuSupport) features.cpu = true;
+
   return {
-    engines: stringArray(value.engines),
-    modes: stringArray(value.modes ?? value.servingModes),
+    engines,
+    modes: stringArray(value.modes ?? value.servingModes).length > 0
+      ? stringArray(value.modes ?? value.servingModes)
+      : Array.from(new Set(perEngineModes)),
     modelSources: stringArray(value.modelSources),
     routerModes: stringArray(value.routerModes),
     features,
@@ -329,10 +397,16 @@ function normalizeProvider(config: any): ProviderDetails {
   const warnings: string[] = [];
 
   const installation = parseInstallationAnnotation(config, warnings);
+  const parsedCapabilities = parseJsonAnnotation<unknown>(config, ANNOTATIONS.capabilities, warnings);
+  const capabilitiesSource = parsedCapabilities ?? config.spec?.capabilities;
   const capabilities = normalizeCapabilities(
-    parseJsonAnnotation<unknown>(config, ANNOTATIONS.capabilities, warnings),
+    capabilitiesSource,
     warnings,
   );
+  const explicitRequiresCRD = aggregateRequiresCRDFromCapabilities(config.spec?.capabilities ?? parsedCapabilities)
+    ?? ((parsedCapabilities as { requiresCRD?: unknown } | undefined)?.requiresCRD);
+  const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
+  const requiresCRD = providerRequiresRuntimeCRD(id, explicitRequiresCRD, annotatedDisplayName);
   const deploymentDefaults = normalizeDeploymentDefaults(
     parseJsonAnnotation<unknown>(config, ANNOTATIONS.deploymentDefaults, warnings),
     warnings,
@@ -349,13 +423,14 @@ function normalizeProvider(config: any): ProviderDetails {
 
   return {
     id,
-    name: nonEmptyString(annotations[ANNOTATIONS.displayName]) || displayName(id),
+    name: getProviderDisplayName(id, annotations),
     description: nonEmptyString(annotations[ANNOTATIONS.description]) || nonEmptyString(installation.description) || 'No description available',
     defaultNamespace: nonEmptyString(annotations[ANNOTATIONS.defaultNamespace]) || nonEmptyString(installation.defaultNamespace) || 'default',
     documentationUrl: nonEmptyString(annotations[ANNOTATIONS.documentationUrl]) || nonEmptyString(annotations[ANNOTATIONS.documentation]),
     icon: nonEmptyString(annotations[ANNOTATIONS.icon]),
     warnings,
     installable: helmCharts.length > 0 || helmRepos.length > 0 || installationSteps.length > 0,
+    requiresCRD,
     capabilities,
     deploymentDefaults,
     health,
@@ -385,6 +460,7 @@ export function extractProviderInfo(config: any): ProviderInfo {
     icon: provider.icon,
     warnings: provider.warnings,
     installable: provider.installable,
+    requiresCRD: provider.requiresCRD,
     capabilities: provider.capabilities,
     deploymentDefaults: provider.deploymentDefaults,
     health: provider.health,
@@ -396,4 +472,90 @@ export function extractProviderInfo(config: any): ProviderInfo {
  */
 export function extractProviderDetails(config: any): ProviderDetails {
   return normalizeProvider(config);
+}
+
+/**
+ * Aggregate a provider-level `requiresCRD` verdict from
+ * `spec.capabilities.engines[].requiresCRD`.
+ */
+export function aggregateRequiresCRDFromCapabilities(
+  capabilities: unknown,
+): boolean | undefined {
+  const engines = (capabilities as { engines?: unknown })?.engines;
+  if (!Array.isArray(engines) || engines.length === 0) {
+    return undefined;
+  }
+
+  let sawExplicit = false;
+  let allFalse = true;
+  for (const engine of engines) {
+    const value = (engine as { requiresCRD?: unknown })?.requiresCRD;
+    if (typeof value === 'boolean') {
+      sawExplicit = true;
+      if (value) {
+        return true;
+      }
+    } else {
+      allFalse = false;
+    }
+  }
+
+  if (!sawExplicit) {
+    return undefined;
+  }
+  return allFalse ? false : undefined;
+}
+
+export function providerRequiresRuntimeCRD(
+  providerId: string,
+  explicitRequiresCRD?: unknown,
+  providerName?: string | null,
+): boolean {
+  if (typeof explicitRequiresCRD === 'boolean') {
+    return explicitRequiresCRD;
+  }
+
+  if (isCanonicalCrdLessProviderId(providerId) || isCrdLessProviderDisplayName(providerName)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function getAnnotatedProviderDisplayName(
+  annotations?: Record<string, unknown>,
+): string | undefined {
+  for (const key of DISPLAY_NAME_ANNOTATION_KEYS) {
+    const value = annotations?.[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
+export function getProviderDisplayName(
+  providerId: string,
+  annotations?: Record<string, unknown>,
+): string {
+  for (const key of ['airunway.ai/provider-name', 'airunway.io/provider-name']) {
+    const value = annotations?.[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  const normalizedProviderId = providerId.toLowerCase();
+  const knownDisplayName = PROVIDER_DISPLAY_NAMES[normalizedProviderId];
+  if (knownDisplayName) {
+    return knownDisplayName;
+  }
+
+  const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
+  if (annotatedDisplayName) {
+    return annotatedDisplayName;
+  }
+
+  return displayName(providerId);
 }

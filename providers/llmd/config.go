@@ -57,24 +57,25 @@ func NewProviderConfigManager(c client.Client) *ProviderConfigManager {
 	}
 }
 
-// GetProviderConfigSpec returns the InferenceProviderConfigSpec for llm-d.
+// GetProviderConfigSpec returns the InferenceProviderConfigSpec for llm-d
 func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
-	return airunwayv1alpha1.InferenceProviderConfigSpec{
-		SelectionRules: []airunwayv1alpha1.SelectionRule{},
-	}
-}
+	requiresCRD := false
 
-func getProviderCapabilities() *airunwayv1alpha1.ProviderCapabilities {
-	return &airunwayv1alpha1.ProviderCapabilities{
-		Engines: []airunwayv1alpha1.EngineType{
-			airunwayv1alpha1.EngineTypeVLLM,
+	return airunwayv1alpha1.InferenceProviderConfigSpec{
+		Capabilities: &airunwayv1alpha1.ProviderCapabilities{
+			Engines: []airunwayv1alpha1.EngineCapability{
+				{
+					Name: airunwayv1alpha1.EngineTypeVLLM,
+					ServingModes: []airunwayv1alpha1.ServingMode{
+						airunwayv1alpha1.ServingModeAggregated,
+						airunwayv1alpha1.ServingModeDisaggregated,
+					},
+					GPUSupport:  true,
+					RequiresCRD: &requiresCRD,
+				},
+			},
 		},
-		ServingModes: []airunwayv1alpha1.ServingMode{
-			airunwayv1alpha1.ServingModeAggregated,
-			airunwayv1alpha1.ServingModeDisaggregated,
-		},
-		CPUSupport: false,
-		GPUSupport: true,
+		SelectionRules: []airunwayv1alpha1.SelectionRule{},
 	}
 }
 
@@ -213,7 +214,7 @@ func buildAnnotations() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal installation info: %w", err)
 	}
-	capabilitiesJSON, err := json.Marshal(getProviderCapabilities())
+	capabilitiesJSON, err := json.Marshal(GetProviderConfigSpec().Capabilities)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal capabilities: %w", err)
 	}

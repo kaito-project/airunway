@@ -1,5 +1,5 @@
 # Example: KAITO provider registration (typically created by kaito-provider controller)
-# Provider metadata and capabilities are stored in annotations. The spec only contains desired-state selection rules.
+# Human-facing metadata is stored in annotations; scheduling capabilities live in spec.
 apiVersion: airunway.ai/v1alpha1
 kind: InferenceProviderConfig
 metadata:
@@ -13,14 +13,16 @@ metadata:
     airunway.ai/default-namespace: kaito-workspace
     airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md
     airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md
-    airunway.ai/capabilities: |
-      {
-        "engines": ["vllm", "llamacpp"],
-        "servingModes": ["aggregated"],
-        "cpuSupport": true,
-        "gpuSupport": true
-      }
 spec:
+  capabilities:
+    engines:
+      - name: vllm
+        servingModes: [aggregated]
+        gpuSupport: true
+      - name: llamacpp
+        servingModes: [aggregated]
+        gpuSupport: true
+        cpuSupport: true
   selectionRules:
     - condition: "!has(spec.resources.gpu) || spec.resources.gpu.count == 0"
       priority: 100
@@ -41,18 +43,30 @@ metadata:
     airunway.ai/default-namespace: dynamo-system
     airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md
     airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md
-    airunway.ai/capabilities: |
-      {
-        "engines": ["vllm", "sglang", "trtllm"],
-        "servingModes": ["aggregated", "disaggregated"],
-        "cpuSupport": false,
-        "gpuSupport": true,
-        "gateway": {
-          "inferencePoolNamePattern": "{name}-pool",
-          "inferencePoolNamespace": "{namespace}"
-        }
-      }
 spec:
+  capabilities:
+    engines:
+      - name: vllm
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
+      - name: sglang
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
+      - name: trtllm
+        servingModes: [aggregated]
+        gpuSupport: true
+        gateway:
+          managesInferencePool: true
+          inferencePoolNamePattern: "{name}-pool"
+          inferencePoolNamespace: "{namespace}"
   selectionRules:
     - condition: "spec.engine.type == 'trtllm'"
       priority: 100
@@ -77,14 +91,12 @@ metadata:
     airunway.ai/default-namespace: ray-system
     airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md
     airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md
-    airunway.ai/capabilities: |
-      {
-        "engines": ["vllm"],
-        "servingModes": ["aggregated", "disaggregated"],
-        "cpuSupport": false,
-        "gpuSupport": true
-      }
 spec:
+  capabilities:
+    engines:
+      - name: vllm
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
   selectionRules:
     - condition: "has(spec.resources.gpu) && spec.resources.gpu.count > 1 && spec.engine.type == 'vllm'"
       priority: 80
@@ -103,12 +115,11 @@ metadata:
     airunway.ai/default-namespace: default
     airunway.ai/documentation-url: https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md
     airunway.ai/documentation: https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md
-    airunway.ai/capabilities: |
-      {
-        "engines": ["vllm"],
-        "servingModes": ["aggregated", "disaggregated"],
-        "cpuSupport": false,
-        "gpuSupport": true
-      }
 spec:
+  capabilities:
+    engines:
+      - name: vllm
+        servingModes: [aggregated, disaggregated]
+        gpuSupport: true
+        requiresCRD: false
   selectionRules: []

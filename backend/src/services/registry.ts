@@ -1,7 +1,8 @@
 import * as k8s from '@kubernetes/client-node';
-import { loadKubeConfig } from '../lib/kubeconfig';
+import { loadKubeConfig, makeApiClient } from '../lib/kubeconfig';
 import logger from '../lib/logger';
 import { withRetry } from '../lib/retry';
+import { getK8sErrorStatusCode } from '../lib/k8s-errors';
 
 /**
  * In-cluster registry configuration
@@ -37,8 +38,8 @@ class RegistryService {
 
   constructor() {
     this.kc = loadKubeConfig();
-    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.appsV1Api = this.kc.makeApiClient(k8s.AppsV1Api);
+    this.coreV1Api = makeApiClient(this.kc, k8s.CoreV1Api);
+    this.appsV1Api = makeApiClient(this.kc, k8s.AppsV1Api);
   }
 
   /**
@@ -118,15 +119,15 @@ class RegistryService {
   private async getDeployment(): Promise<k8s.V1Deployment | null> {
     try {
       const response = await withRetry(
-        () => this.appsV1Api.readNamespacedDeployment(
-          REGISTRY_CONFIG.name,
-          REGISTRY_CONFIG.namespace
-        ),
+        () => this.appsV1Api.readNamespacedDeployment({
+          name: REGISTRY_CONFIG.name,
+          namespace: REGISTRY_CONFIG.namespace,
+        }),
         { operationName: 'getRegistryDeployment', maxRetries: 1 }
       );
-      return response.body;
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+      return response;
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode === 404) {
         return null;
       }
@@ -140,15 +141,15 @@ class RegistryService {
   private async getService(): Promise<k8s.V1Service | null> {
     try {
       const response = await withRetry(
-        () => this.coreV1Api.readNamespacedService(
-          REGISTRY_CONFIG.name,
-          REGISTRY_CONFIG.namespace
-        ),
+        () => this.coreV1Api.readNamespacedService({
+          name: REGISTRY_CONFIG.name,
+          namespace: REGISTRY_CONFIG.namespace,
+        }),
         { operationName: 'getRegistryService', maxRetries: 1 }
       );
-      return response.body;
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+      return response;
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode === 404) {
         return null;
       }
@@ -161,17 +162,19 @@ class RegistryService {
    */
   private async ensureNamespace(): Promise<void> {
     try {
-      await this.coreV1Api.readNamespace(REGISTRY_CONFIG.namespace);
+      await this.coreV1Api.readNamespace({ name: REGISTRY_CONFIG.namespace });
       logger.debug({ namespace: REGISTRY_CONFIG.namespace }, 'Namespace already exists');
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode === 404) {
         logger.info({ namespace: REGISTRY_CONFIG.namespace }, 'Creating namespace');
         await this.coreV1Api.createNamespace({
-          metadata: {
-            name: REGISTRY_CONFIG.namespace,
-            labels: {
-              'app.kubernetes.io/managed-by': 'airunway',
+          body: {
+            metadata: {
+              name: REGISTRY_CONFIG.namespace,
+              labels: {
+                'app.kubernetes.io/managed-by': 'airunway',
+              },
             },
           },
         });
@@ -240,7 +243,7 @@ class RegistryService {
                 livenessProbe: {
                   httpGet: {
                     path: '/v2/',
-                    port: REGISTRY_CONFIG.port as any,
+                    port: REGISTRY_CONFIG.port,
                   },
                   initialDelaySeconds: 5,
                   periodSeconds: 10,
@@ -248,7 +251,7 @@ class RegistryService {
                 readinessProbe: {
                   httpGet: {
                     path: '/v2/',
-                    port: REGISTRY_CONFIG.port as any,
+                    port: REGISTRY_CONFIG.port,
                   },
                   initialDelaySeconds: 2,
                   periodSeconds: 5,
@@ -273,10 +276,10 @@ class RegistryService {
     };
 
     await withRetry(
-      () => this.appsV1Api.createNamespacedDeployment(
-        REGISTRY_CONFIG.namespace,
-        deployment
-      ),
+      () => this.appsV1Api.createNamespacedDeployment({
+        namespace: REGISTRY_CONFIG.namespace,
+        body: deployment,
+      }),
       { operationName: 'createRegistryDeployment' }
     );
 
@@ -308,7 +311,7 @@ class RegistryService {
           {
             name: 'registry',
             port: REGISTRY_CONFIG.port,
-            targetPort: REGISTRY_CONFIG.port as any,
+            targetPort: REGISTRY_CONFIG.port,
             nodePort: REGISTRY_CONFIG.nodePort,
             protocol: 'TCP',
           },
@@ -317,10 +320,10 @@ class RegistryService {
     };
 
     await withRetry(
-      () => this.coreV1Api.createNamespacedService(
-        REGISTRY_CONFIG.namespace,
-        service
-      ),
+      () => this.coreV1Api.createNamespacedService({
+        namespace: REGISTRY_CONFIG.namespace,
+        body: service,
+      }),
       { operationName: 'createRegistryService' }
     );
 
@@ -403,12 +406,12 @@ class RegistryService {
 
     try {
       // Delete deployment
-      await this.appsV1Api.deleteNamespacedDeployment(
-        REGISTRY_CONFIG.name,
-        REGISTRY_CONFIG.namespace
-      );
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+      await this.appsV1Api.deleteNamespacedDeployment({
+        name: REGISTRY_CONFIG.name,
+        namespace: REGISTRY_CONFIG.namespace,
+      });
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode !== 404) {
         throw error;
       }
@@ -416,12 +419,12 @@ class RegistryService {
 
     try {
       // Delete service
-      await this.coreV1Api.deleteNamespacedService(
-        REGISTRY_CONFIG.name,
-        REGISTRY_CONFIG.namespace
-      );
-    } catch (error: any) {
-      const statusCode = error?.statusCode || error?.response?.statusCode;
+      await this.coreV1Api.deleteNamespacedService({
+        name: REGISTRY_CONFIG.name,
+        namespace: REGISTRY_CONFIG.namespace,
+      });
+    } catch (error) {
+      const statusCode = getK8sErrorStatusCode(error);
       if (statusCode !== 404) {
         throw error;
       }
