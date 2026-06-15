@@ -1189,16 +1189,6 @@ class KubernetesService {
         break;
     }
 
-    if (statusReady) {
-      return {
-        installed: true,
-        crdFound: true,
-        operatorRunning: true,
-        requiresCRD: true,
-        message: `${displayName} is installed and running`,
-      };
-    }
-
     const crds = normalizeHealthCrds(health);
     const operatorPods = normalizeHealthOperatorPods(health);
 
@@ -1209,6 +1199,16 @@ class KubernetesService {
         crds,
         operatorPods,
       );
+    }
+
+    if (statusReady) {
+      return {
+        installed: true,
+        crdFound: true,
+        operatorRunning: true,
+        requiresCRD: true,
+        message: `${displayName} is installed and running`,
+      };
     }
 
     return {

@@ -124,20 +124,24 @@ app.use('*', async (c, next) => {
 // Auth Middleware
 // ============================================================================
 
-// Routes that don't require authentication
-// Keep this list minimal — only routes needed before login
-const PUBLIC_ROUTES = [
-  '/api/cluster/status',
-  '/api/settings',       // Settings is public (read-only auth config needed by frontend)
-  '/api/providers',      // Provider discovery aliases mirror public settings provider endpoints
-  '/api/oauth',          // OAuth routes must be public for initial authentication
-];
-
-// Public routes that must match exactly (no sub-path matching)
+// Routes that don't require authentication. Keep this list minimal — only
+// routes needed before login, and avoid prefix-whitelisting provider detail
+// endpoints because they include install metadata and chart values.
 const PUBLIC_ROUTES_EXACT = [
   '/api/health',
   '/api/health/',
   '/api/health/version',
+  '/api/cluster/status',
+  '/api/settings',
+  '/api/settings/',
+  '/api/settings/providers',
+  '/api/settings/providers/',
+  '/api/providers',
+  '/api/providers/',
+];
+
+const PUBLIC_ROUTE_PREFIXES = [
+  '/api/oauth', // OAuth routes must be public for initial authentication
 ];
 
 // Auth middleware for protected API routes
@@ -153,8 +157,8 @@ app.use('/api/*', async (c, next) => {
     return next();
   }
 
-  // Skip auth for prefix-match public routes (cluster/status, settings, oauth)
-  if (PUBLIC_ROUTES.some(route => path === route || path.startsWith(route + '/'))) {
+  // Skip auth for prefix-match public routes (OAuth callback/token flow).
+  if (PUBLIC_ROUTE_PREFIXES.some(route => path === route || path.startsWith(route + '/'))) {
     return next();
   }
 

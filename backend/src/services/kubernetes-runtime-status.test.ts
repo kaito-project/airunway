@@ -250,13 +250,14 @@ describe('KubernetesService - Runtime Status', () => {
   });
 
   test('honors explicit requiresCRD metadata for custom-named CRD-less runtime entries', async () => {
+    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
     const customVllmConfig = {
       ...mockInferenceProviderConfig,
       metadata: {
         ...mockInferenceProviderConfig.metadata,
         name: 'custom-vllm-registration',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          ...annotationsWithoutHealth,
           'airunway.ai/provider-name': 'vLLM',
         },
       },
@@ -407,6 +408,26 @@ describe('KubernetesService - Runtime Status', () => {
     expect(llmd?.requiresCRD).toBe(false);
     expect(llmd?.version).toBe('0.1.0');
     expect(llmd?.message).toBe('Provider is registered but not ready yet.');
+  });
+
+  test('runs annotation health probes even when provider status is ready', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async () => false),
+    );
+
+    const status = await kubernetesService.checkProviderInstallationStatus(
+      'custom-provider',
+      { ready: true },
+      'Custom Provider',
+      { crds: [{ name: 'customproviders.example.com', displayName: 'Custom Provider CRD' }] },
+      true,
+    );
+
+    expect(status.installed).toBe(false);
+    expect(status.crdFound).toBe(false);
+    expect(status.operatorRunning).toBe(false);
+    expect(status.requiresCRD).toBe(true);
+    expect(status.message).toBe('Custom Provider CRD not found');
   });
 
   test('reports KAITO as not fully installed when the CRD exists but no ready operator pod is found', async () => {

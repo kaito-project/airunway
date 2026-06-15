@@ -169,6 +169,7 @@ describe('Installation Provider Routes', () => {
 
   function createCustomNamedNoCrdProviderConfigWithExplicitRequiresCrd() {
     const config = createNoCrdProviderConfigWithHelmMetadata();
+    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = config.metadata.annotations;
 
     return {
       ...config,
@@ -176,7 +177,7 @@ describe('Installation Provider Routes', () => {
         ...config.metadata,
         name: 'custom-llmd-registration',
         annotations: {
-          ...config.metadata.annotations,
+          ...annotationsWithoutHealth,
           'airunway.io/provider-name': 'LLM-D',
         },
       },
