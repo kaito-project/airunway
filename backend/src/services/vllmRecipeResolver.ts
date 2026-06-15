@@ -108,18 +108,6 @@ function toStringRecord(value: unknown, warnings: string[], label: string): Reco
   return result;
 }
 
-function findRecordAtPath(root: JsonRecord, path: string[]): JsonRecord | undefined {
-  let current: unknown = root;
-  for (const segment of path) {
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-
-  return isRecord(current) ? current : undefined;
-}
-
 function findStringAtPaths(root: JsonRecord, paths: string[][]): string | undefined {
   for (const path of paths) {
     let current: unknown = root;
@@ -613,7 +601,7 @@ function applyExplicitFeatureSelection(
     }
   }
 
-  let result = removeArgsByKeys(tokens, keysToRemove);
+  const result = removeArgsByKeys(tokens, keysToRemove);
   let selectedFeatureTokens: string[] = [];
 
   const recipeFeatures = getRecipeFeatures(recipe);

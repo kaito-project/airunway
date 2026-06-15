@@ -138,7 +138,7 @@ describe('DeploymentForm', () => {
     )
 
     const vllmCard = screen
-      .getByText('High-throughput inference with the native vLLM provider')
+      .getByText('Direct vLLM provider for newest model support and configurable launch images')
       .closest('[role="radio"]') as HTMLElement
 
     expect(vllmCard).toBeInTheDocument()
@@ -173,7 +173,7 @@ describe('DeploymentForm', () => {
     )
 
     const vllmCard = screen
-      .getByText('High-throughput inference with the native vLLM provider')
+      .getByText('Direct vLLM provider for newest model support and configurable launch images')
       .closest('[role="radio"]') as HTMLElement
     fireEvent.click(vllmCard)
 
@@ -234,7 +234,7 @@ describe('DeploymentForm', () => {
     )
 
     const vllmCard = screen
-      .getByText('High-throughput inference with the native vLLM provider')
+      .getByText('Direct vLLM provider for newest model support and configurable launch images')
       .closest('[role="radio"]') as HTMLElement
 
     expect(vllmCard).toBeInTheDocument()

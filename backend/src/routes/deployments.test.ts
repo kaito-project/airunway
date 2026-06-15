@@ -1064,7 +1064,7 @@ describe('Deployment Routes', () => {
     });
 
     test('passes env through create schema to Kubernetes service', async () => {
-      let capturedConfig: any;
+      let capturedConfig: DeploymentConfig | undefined;
 
       restores.push(
         mockServiceMethod(kubernetesService, 'createDeployment', async (config) => {
