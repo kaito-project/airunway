@@ -319,7 +319,9 @@ verify-versions:
 	    echo "❌ shared/types/versions.generated.ts is stale — run 'cd shared && bun run generate-versions' and commit the result"; \
 	    exit 1; \
 	  }
-	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION), KAITO_VERSION=$(KAITO_VERSION))"
+	@# Print the versions straight from versions.env so this summary stays in
+	@# sync automatically as keys are added (no hardcoded list to maintain).
+	@printf '✅ versions in sync (%s)\n' "$$(awk -F= '/^[A-Z][A-Z0-9_]*=/ { printf "%s%s=%s", sep, $$1, $$2; sep=", " }' versions.env)"
 
 # Test the verify-versions guard itself by deliberately breaking each
 # input it inspects and asserting the target exits non-zero.
