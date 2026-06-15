@@ -202,17 +202,16 @@ type ModelBinding struct {
 
 // AgentSecuritySpec captures security/isolation policy for the agent.
 //
-// Most users should leave this unset and rely on the catalog entry's
-// recommendedSecurity defaults shipped by the framework provider.
-// Setting fields here is an escape hatch for deployments that need to
-// diverge from the recipe defaults (e.g. flipping
-// readOnlyRootFilesystem off for a framework that writes to disk).
-//
-// The shape lives in the API contract from day one so that provider
-// implementations can converge on a consistent model. Individual
-// framework providers ship recommended defaults in their
-// AgentProviderConfig catalog entries; users can override here per
-// AgentDeployment.
+// This is provider-owned configuration: framework providers ship a
+// known-good baseline as the recommendedSecurity of each
+// AgentProviderConfig catalog entry, and apply it when rendering the
+// agent workload. It is intentionally NOT exposed on AgentDeployment —
+// an AgentDeployment declares intent ("which agent, bound to which
+// models"), while how the agent runs (security posture, isolation) is
+// the provider's responsibility, mirroring how ModelDeployment keeps
+// pod-level runtime details out of the user-facing spec. If a concrete
+// per-deployment need emerges, this can be reintroduced later as
+// intent-level fields rather than raw pass-throughs.
 //
 // Two SecurityContext shapes are exposed because Kubernetes splits
 // security settings between the pod and the container:
@@ -224,16 +223,6 @@ type ModelBinding struct {
 //
 // Frameworks such as OpenClaw need readOnlyRootFilesystem=false (a
 // container-scoped field), so both shapes must be representable.
-//
-// Validation note: these fields are raw pass-throughs with no defaulting
-// or admission-time validation in v1alpha1 — there is no validating
-// webhook for AgentDeployment, so a hand-written CR can set permissive
-// values (e.g. a privileged pod security standard or
-// allowPrivilegeEscalation=true). Safety currently relies on the
-// framework provider and the catalog's recommendedSecurity defaults.
-// Hardening (a validating webhook or required PSA label that rejects
-// privileged/escalation unless allow-listed) is intentionally deferred
-// to a follow-up before GA.
 type AgentSecuritySpec struct {
 	// podSecurityStandard names the Kubernetes Pod Security Standard the
 	// rendered pod should comply with. Providers translate this into
@@ -329,11 +318,6 @@ type AgentDeploymentSpec struct {
 	// fields on a native CR).
 	// +optional
 	Resources *AgentResourceSpec `json:"resources,omitempty"`
-
-	// security captures security/isolation policy for the rendered
-	// workload. See AgentSecuritySpec for layering semantics.
-	// +optional
-	Security *AgentSecuritySpec `json:"security,omitempty"`
 
 	// observability configures observability emission (OTLP export).
 	// +optional

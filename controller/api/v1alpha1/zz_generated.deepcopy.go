@@ -136,11 +136,6 @@ func (in *AgentDeploymentSpec) DeepCopyInto(out *AgentDeploymentSpec) {
 		*out = new(AgentResourceSpec)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Security != nil {
-		in, out := &in.Security, &out.Security
-		*out = new(AgentSecuritySpec)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.Observability != nil {
 		in, out := &in.Observability, &out.Observability
 		*out = new(AgentObservabilitySpec)

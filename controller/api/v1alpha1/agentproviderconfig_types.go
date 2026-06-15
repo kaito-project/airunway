@@ -125,9 +125,9 @@ type AgentCatalogItem struct {
 	Image string `json:"image,omitempty"`
 
 	// recommendedSecurity ships sensible security defaults for this
-	// recipe. The user can override them per AgentDeployment via
-	// spec.security, but a known-good baseline here means most users
-	// never have to. Per-recipe defaults are required because agent
+	// recipe, applied by the framework provider when it renders the
+	// agent workload. Security posture is provider-owned rather than set
+	// per AgentDeployment. Per-recipe defaults are required because agent
 	// frameworks have legitimately different requirements (e.g.
 	// OpenClaw writes the local file system, so it cannot run with
 	// readOnlyRootFilesystem=true).

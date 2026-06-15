@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -27,9 +26,6 @@ import (
 // DeepCopy methods produce an independent object. Catches accidental
 // shallow copies introduced by hand-edited zz_generated files.
 func TestAgentDeployment_DeepCopy(t *testing.T) {
-	runAsNonRoot := true
-	readOnlyRootFS := true
-	noPrivEsc := false
 	orig := &AgentDeployment{
 		Spec: AgentDeploymentSpec{
 			Framework: AgentFrameworkRef{Name: "kagent"},
@@ -40,16 +36,6 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 				},
 			},
 			Config: &runtime.RawExtension{Raw: []byte(`{"systemPrompt":"hi"}`)},
-			Security: &AgentSecuritySpec{
-				PodSecurityStandard: PodSecurityStandardRestricted,
-				SecurityContext: &corev1.PodSecurityContext{
-					RunAsNonRoot: &runAsNonRoot,
-				},
-				ContainerSecurityContext: &corev1.SecurityContext{
-					ReadOnlyRootFilesystem:   &readOnlyRootFS,
-					AllowPrivilegeEscalation: &noPrivEsc,
-				},
-			},
 		},
 	}
 	cp := orig.DeepCopy()
@@ -64,16 +50,6 @@ func TestAgentDeployment_DeepCopy(t *testing.T) {
 	}
 	if cp.Spec.Config == orig.Spec.Config {
 		t.Error("Config RawExtension should be a fresh allocation, not shared")
-	}
-	if cp.Spec.Security == orig.Spec.Security {
-		t.Error("Security should be a fresh allocation, not shared")
-	}
-	if cp.Spec.Security.ContainerSecurityContext == orig.Spec.Security.ContainerSecurityContext {
-		t.Error("ContainerSecurityContext should be a fresh allocation, not shared")
-	}
-	if cp.Spec.Security.ContainerSecurityContext.ReadOnlyRootFilesystem ==
-		orig.Spec.Security.ContainerSecurityContext.ReadOnlyRootFilesystem {
-		t.Error("ContainerSecurityContext.ReadOnlyRootFilesystem pointer should be a fresh allocation, not shared")
 	}
 
 	// Mutating the copy must not affect the original.

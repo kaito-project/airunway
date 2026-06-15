@@ -26,12 +26,6 @@ spec:
     limits:
       cpu: "1"
       memory: "1Gi"
-  security:
-    podSecurityStandard: restricted
-    securityContext:
-      runAsNonRoot: true
-      seccompProfile:
-        type: RuntimeDefault
 ---
 # Example: bind OpenClaw to an external OpenAI-compatible API.
 apiVersion: airunway.ai/v1alpha1
@@ -57,12 +51,7 @@ spec:
     requests:
       cpu: "200m"
       memory: "256Mi"
-  # OpenClaw writes to its working directory, so the catalog's
-  # recommendedSecurity sets containerSecurityContext.readOnlyRootFilesystem=false.
-  # Override here only when the deployment needs to differ from the recipe;
-  # for example, to mount an emptyDir at the writable path and re-enable a
-  # read-only root FS:
-  #
-  # security:
-  #   containerSecurityContext:
-  #     readOnlyRootFilesystem: true
+  # OpenClaw writes to its working directory, so the openclaw
+  # AgentProviderConfig catalog entry ships a recommendedSecurity with
+  # containerSecurityContext.readOnlyRootFilesystem=false. Security posture
+  # is owned by the provider/catalog, not set per AgentDeployment.
