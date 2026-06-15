@@ -224,6 +224,16 @@ type ModelBinding struct {
 //
 // Frameworks such as OpenClaw need readOnlyRootFilesystem=false (a
 // container-scoped field), so both shapes must be representable.
+//
+// Validation note: these fields are raw pass-throughs with no defaulting
+// or admission-time validation in v1alpha1 — there is no validating
+// webhook for AgentDeployment, so a hand-written CR can set permissive
+// values (e.g. a privileged pod security standard or
+// allowPrivilegeEscalation=true). Safety currently relies on the
+// framework provider and the catalog's recommendedSecurity defaults.
+// Hardening (a validating webhook or required PSA label that rejects
+// privileged/escalation unless allow-listed) is intentionally deferred
+// to a follow-up before GA.
 type AgentSecuritySpec struct {
 	// podSecurityStandard names the Kubernetes Pod Security Standard the
 	// rendered pod should comply with. Providers translate this into
