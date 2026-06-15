@@ -26,7 +26,6 @@ jobs:
           set +a
           echo "GAIE_VERSION=${GAIE_VERSION}" >> "$GITHUB_ENV"
           echo "KAITO_VERSION=${KAITO_VERSION}" >> "$GITHUB_ENV"
-          echo "KAITO_WORKSPACE_IMAGE_TAG=0.10.0-20260615" >> "$GITHUB_ENV"
 
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -81,7 +80,7 @@ jobs:
             --version "${KAITO_VERSION}" \
             --set featureGates.disableNodeAutoProvisioning=true \
             --set image.repository=ghcr.io/kaito-project/kaito/workspace \
-            --set image.tag="${KAITO_WORKSPACE_IMAGE_TAG}" \
+            --set image.tag="${KAITO_VERSION}" \
             --set image.pullPolicy=IfNotPresent \
             --set nvidiaDevicePlugin.enabled=false \
             --set localCSIDriver.useLocalCSIDriver=false \
