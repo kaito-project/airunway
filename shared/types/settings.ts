@@ -2,8 +2,18 @@
  * Settings and Provider types
  */
 
+export interface ProviderEngineCapability {
+  name: string;
+  servingModes?: string[];
+  gpuSupport?: boolean;
+  cpuSupport?: boolean;
+  requiresCRD?: boolean;
+  gateway?: Record<string, unknown>;
+}
+
 export interface ProviderCapabilities {
   engines: string[];
+  engineCapabilities?: ProviderEngineCapability[];
   modes: string[];
   modelSources: string[];
   routerModes: string[];

@@ -386,6 +386,50 @@ describe('Deployment Routes', () => {
       const data = await res.json();
       expect(data.error.message).toContain('does not support mode "disaggregated"');
     });
+
+    test('POST /api/deployments/preview rejects modes unsupported by the selected provider engine', async () => {
+      const capabilities = {
+        engines: [
+          { name: 'vllm', servingModes: ['aggregated', 'disaggregated'], gpuSupport: true },
+          { name: 'trtllm', servingModes: ['aggregated'], gpuSupport: true },
+        ],
+      };
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => {
+          const baseConfig = permissiveProviderConfig(providerId);
+          return {
+            ...baseConfig,
+            metadata: {
+              ...baseConfig.metadata,
+              annotations: {
+                ...baseConfig.metadata.annotations,
+                'airunway.ai/capabilities': JSON.stringify(capabilities),
+              },
+            },
+            spec: {
+              ...baseConfig.spec,
+              capabilities,
+            },
+          };
+        }),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'dynamo',
+          engine: 'trtllm',
+          mode: 'disaggregated',
+        }),
+      });
+
+      expect(res.status).toBe(422);
+      const data = await res.json();
+      expect(data.error.message).toContain('does not support mode for engine trtllm "disaggregated"');
+    });
   });
 
   describe('POST /api/deployments - storage validation', () => {

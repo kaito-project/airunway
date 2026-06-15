@@ -370,6 +370,21 @@ function validateSupportedCapability(
   }
 }
 
+function getSupportedModesForEngine(
+  capabilities: NonNullable<ReturnType<typeof extractProviderDetails>['capabilities']>,
+  engine: string | undefined,
+): string[] | undefined {
+  if (!engine) return undefined;
+
+  const matchingEngineModes = capabilities.engineCapabilities
+    ?.filter((engineCapability) => engineCapability.name === engine)
+    .flatMap((engineCapability) => engineCapability.servingModes || []);
+
+  return matchingEngineModes && matchingEngineModes.length > 0
+    ? Array.from(new Set(matchingEngineModes))
+    : undefined;
+}
+
 async function validateProviderCapabilities(config: DeploymentConfig): Promise<void> {
   if (!config.provider) {
     return;
@@ -386,10 +401,17 @@ async function validateProviderCapabilities(config: DeploymentConfig): Promise<v
     modes: [],
     modelSources: [],
     routerModes: [],
+    features: {},
   };
 
   validateSupportedCapability(config.provider, 'engine', config.engine, capabilities.engines);
-  validateSupportedCapability(config.provider, 'mode', config.mode, capabilities.modes);
+  const supportedModesForEngine = getSupportedModesForEngine(capabilities, config.engine);
+  validateSupportedCapability(
+    config.provider,
+    supportedModesForEngine && config.engine ? `mode for engine ${config.engine}` : 'mode',
+    config.mode,
+    supportedModesForEngine ?? capabilities.modes,
+  );
   validateSupportedCapability(config.provider, 'model source', config.modelSource, capabilities.modelSources);
   validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
 }

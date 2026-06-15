@@ -945,7 +945,7 @@ class KubernetesService {
           const status = item.status || {};
           const annotations = item.metadata?.annotations;
           const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
-          const requiresCRD = providerRequiresRuntimeCRD(
+          const requiresCRD = providerInfo.requiresCRD ?? providerRequiresRuntimeCRD(
             providerInfo.id,
             aggregateRequiresCRDFromCapabilities(item.spec?.capabilities),
             annotatedDisplayName,
@@ -985,7 +985,7 @@ class KubernetesService {
             healthy: runtimeStatus.operatorRunning ?? false,
             crdFound: runtimeStatus.crdFound ?? runtimeStatus.installed,
             operatorRunning: runtimeStatus.operatorRunning ?? false,
-            requiresCRD: runtimeStatus.requiresCRD ?? providerInfo.requiresCRD ?? requiresCRD,
+            requiresCRD: runtimeStatus.requiresCRD ?? requiresCRD,
             version: status.version,
             message,
           };

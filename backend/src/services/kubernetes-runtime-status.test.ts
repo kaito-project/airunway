@@ -340,6 +340,47 @@ describe('KubernetesService - Runtime Status', () => {
     expect(custom?.message).toBe('Runtime is ready to use.');
   });
 
+  test('honors annotation-derived requiresCRD when spec capabilities are absent', async () => {
+    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
+    const customConfig = {
+      ...mockInferenceProviderConfig,
+      metadata: {
+        ...mockInferenceProviderConfig.metadata,
+        name: 'annotation-native-runtime',
+        annotations: {
+          ...annotationsWithoutHealth,
+          'airunway.ai/provider-name': 'Annotation Native Runtime',
+          'airunway.ai/capabilities': JSON.stringify({
+            engines: [
+              { name: 'vllm', servingModes: ['aggregated'], gpuSupport: true, requiresCRD: false },
+            ],
+          }),
+        },
+      },
+      spec: {},
+      status: {
+        ready: false,
+        version: '0.1.0',
+      },
+    };
+
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDInstallation', async () => ({ installed: true })),
+    );
+    mockProviderConfigs([customConfig]);
+
+    const runtimes = await kubernetesService.getRuntimesStatus();
+    const custom = runtimes.find((runtime) => runtime.id === 'annotation-native-runtime');
+
+    expect(custom).toBeDefined();
+    expect(custom?.name).toBe('Annotation Native Runtime');
+    expect(custom?.installed).toBe(false);
+    expect(custom?.requiresCRD).toBe(false);
+    expect(custom?.crdFound).toBe(true);
+    expect(custom?.operatorRunning).toBe(false);
+    expect(custom?.message).toBe('Provider is registered but not ready yet.');
+  });
+
   test('reports ready providers that do not require runtime CRDs as installed without probing an operator', async () => {
     const llmdConfig = {
       ...mockInferenceProviderConfig,

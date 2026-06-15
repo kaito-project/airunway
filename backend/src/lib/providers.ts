@@ -5,6 +5,7 @@ import type {
   InstallationStep,
   ProviderCapabilities,
   ProviderDeploymentDefaults,
+  ProviderEngineCapability,
   ProviderDetails,
   ProviderHealthConfig,
   ProviderInfo,
@@ -135,21 +136,33 @@ function normalizeCapabilities(raw: unknown, warnings: string[]): ProviderCapabi
 
   const value = raw as Record<string, unknown>;
   const engineEntries = Array.isArray(value.engines) ? value.engines : [];
-  const engines = Array.from(new Set(engineEntries.flatMap((engine): string[] => {
+  const engineCapabilities: ProviderEngineCapability[] = engineEntries.flatMap((engine): ProviderEngineCapability[] => {
     if (typeof engine === 'string' && engine.trim().length > 0) {
-      return [engine.trim()];
+      return [{ name: engine.trim() }];
     }
-    if (engine && typeof engine === 'object' && !Array.isArray(engine)) {
-      const name = nonEmptyString((engine as Record<string, unknown>).name);
-      return name ? [name] : [];
+    if (!engine || typeof engine !== 'object' || Array.isArray(engine)) {
+      return [];
     }
-    return [];
-  })));
 
-  const perEngineModes = engineEntries.flatMap((engine): string[] => {
-    if (!engine || typeof engine !== 'object' || Array.isArray(engine)) return [];
-    return stringArray((engine as Record<string, unknown>).servingModes);
+    const rawEngine = engine as Record<string, unknown>;
+    const name = nonEmptyString(rawEngine.name);
+    if (!name) return [];
+
+    const gateway = rawEngine.gateway && typeof rawEngine.gateway === 'object' && !Array.isArray(rawEngine.gateway)
+      ? rawEngine.gateway as Record<string, unknown>
+      : undefined;
+
+    return [{
+      name,
+      servingModes: stringArray(rawEngine.servingModes),
+      gpuSupport: typeof rawEngine.gpuSupport === 'boolean' ? rawEngine.gpuSupport : undefined,
+      cpuSupport: typeof rawEngine.cpuSupport === 'boolean' ? rawEngine.cpuSupport : undefined,
+      requiresCRD: typeof rawEngine.requiresCRD === 'boolean' ? rawEngine.requiresCRD : undefined,
+      gateway,
+    }];
   });
+  const engines = Array.from(new Set(engineCapabilities.map((engine) => engine.name)));
+  const perEngineModes = engineCapabilities.flatMap((engine) => engine.servingModes || []);
 
   const features = value.features && typeof value.features === 'object' && !Array.isArray(value.features)
     ? Object.fromEntries(
@@ -169,6 +182,7 @@ function normalizeCapabilities(raw: unknown, warnings: string[]): ProviderCapabi
 
   return {
     engines,
+    engineCapabilities,
     modes: stringArray(value.modes ?? value.servingModes).length > 0
       ? stringArray(value.modes ?? value.servingModes)
       : Array.from(new Set(perEngineModes)),
