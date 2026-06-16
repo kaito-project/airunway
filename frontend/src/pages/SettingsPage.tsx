@@ -41,17 +41,15 @@ import {
   Layers,
   Download,
   RefreshCw,
-  Copy,
   Zap,
-  Trash2,
   Globe,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RuntimeSummaryCard } from './RuntimeSummaryCard'
+import { RuntimeInstallationPanel } from './RuntimeInstallationPanel'
 import { useSearchParams } from 'react-router-dom'
 import {
   crdLessRuntimeReadinessMessage,
-  crdLessRuntimeStateLabel,
   runtimeIdsMatch,
   runtimeRequiresCRD,
   selectDefaultRuntimeId,
@@ -473,166 +471,7 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Selected Runtime Installation Details */}
-          {runtimes.length > 0 && (
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-            <div className="mb-4">
-              <h3 className="font-heading text-lg font-semibold flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {selectedRuntimeRequiresCRD ? (
-                    <Download className="h-5 w-5" />
-                  ) : (
-                    <Server className="h-5 w-5" />
-                  )}
-                  {installationStatus?.providerName || currentRuntime?.name || 'Runtime'} {selectedRuntimeRequiresCRD ? 'Installation' : 'Status'}
-                </div>
-                {!selectedRuntimeRequiresCRD ? (
-                  isInstalled ? (
-                    <Badge variant="success" className="shrink-0">
-                      <CheckCircle className="h-4 w-4" />
-                      {crdLessRuntimeStateLabel(true)}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground text-sm flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      {crdLessRuntimeStateLabel(false)}
-                    </span>
-                  )
-                ) : isInstalled ? (
-                  <Badge variant="success" className="shrink-0">
-                    <CheckCircle className="h-4 w-4" />
-                    Installed
-                  </Badge>
-                ) : isWaitingForInstall ? (
-                  <span className="text-cyan-400 text-sm flex items-center gap-1">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Starting
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-sm flex items-center gap-1">
-                    <XCircle className="h-4 w-4 text-red-500" />
-                    Not Installed
-                  </span>
-                )}
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {selectedRuntimeMessage}
-              </p>
-            </div>
-            <div className="space-y-4">
-              {installationLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <>
-                  {selectedRuntimeRequiresCRD ? (
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>CRD Installed</span>
-                        {installationStatus?.crdFound ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>Operator Running</span>
-                        {installationStatus?.operatorRunning ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                      {isInstalled ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      )}
-                      <span>{crdLessRuntimeReadinessMessage(isInstalled)}</span>
-                    </div>
-                  )}
 
-                  {selectedRuntimeRequiresCRD && (
-                    <div className="flex gap-3">
-                      {!isInstalled && (
-                        <Button
-                          onClick={() => handleInstall(effectiveRuntime)}
-                          disabled={isInstalling || isWaitingForInstall || !helmAvailable || !clusterStatus?.connected}
-                          className="flex items-center gap-2"
-                        >
-                          {isInstalling ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Installing...
-                            </>
-                          ) : isWaitingForInstall ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Checking runtime...
-                            </>
-                          ) : (
-                            <>
-                              <Download className="h-4 w-4" />
-                              Install {currentRuntime?.name || 'Runtime'}
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      {isInstalled && (
-                        <Button
-                          variant="destructive"
-                          onClick={() => setShowUninstallDialog(true)}
-                          disabled={isUninstalling || !helmAvailable || !clusterStatus?.connected}
-                          className="flex items-center gap-2"
-                        >
-                          {isUninstalling ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Uninstalling...
-                            </>
-                          ) : (
-                            <>
-                              <Trash2 className="h-4 w-4" />
-                              Uninstall
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          refetchInstallation()
-                          refetchRuntimesStatus()
-                        }}
-                        disabled={installationLoading}
-                      >
-                        <RefreshCw className={cn('h-4 w-4', installationLoading && 'animate-spin')} />
-                      </Button>
-                    </div>
-                  )}
-
-                  {selectedRuntimeRequiresCRD && !helmAvailable && (
-                    <div className="flex items-start gap-2 rounded-lg bg-yellow-50 p-4 text-sm text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
-                      <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium">Helm CLI not available</p>
-                        <p className="mt-1">
-                          Automatic installation requires Helm. You can install the runtime manually using the commands below.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          )}
 
           {runtimes.length === 0 && !runtimesLoading && (
             <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
@@ -645,37 +484,30 @@ export function SettingsPage() {
             </div>
           )}
 
-          {/* Installation Steps */}
-          {installationStatus?.installationSteps && installationStatus.installationSteps.length > 0 && (
-            <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <div className="mb-4">
-                <h3 className="font-heading text-lg font-semibold">Manual Installation Steps</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Detailed steps for installing {installationStatus.providerName}
-                </p>
-              </div>
-              <div className="space-y-4">
-                {installationStatus.installationSteps.map((step, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                        {index + 1}
-                      </span>
-                      <span className="font-medium">{step.title}</span>
-                    </div>
-                    <p className="ml-8 text-sm text-muted-foreground">{step.description}</p>
-                    {step.command && (
-                      <div className="ml-8 flex items-center gap-2">
-                        <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono">{step.command}</code>
-                        <Button variant="ghost" size="sm" onClick={() => copyToClipboard(step.command!)}>
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+          {/* Selected Runtime Installation Details */}
+          {runtimes.length > 0 && (
+            <RuntimeInstallationPanel
+              installationStatus={installationStatus}
+              currentRuntimeName={currentRuntime?.name}
+              requiresCRD={selectedRuntimeRequiresCRD}
+              isInstalled={isInstalled}
+              isWaitingForInstall={isWaitingForInstall}
+              message={selectedRuntimeMessage}
+              loading={installationLoading}
+              effectiveRuntime={effectiveRuntime}
+              isInstalling={isInstalling}
+              isUninstalling={isUninstalling}
+              helmAvailable={helmAvailable}
+              clusterConnected={clusterStatus?.connected}
+              installationLoading={installationLoading}
+              onInstall={handleInstall}
+              onShowUninstall={() => setShowUninstallDialog(true)}
+              onRefresh={() => {
+                refetchInstallation()
+                refetchRuntimesStatus()
+              }}
+              onCopyCommand={copyToClipboard}
+            />
           )}
         </div>
       )}

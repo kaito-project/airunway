@@ -335,6 +335,18 @@ describe('SettingsPage', () => {
     }
   })
 
+  it('shows an empty state when no inference providers are registered', async () => {
+    mockRuntimes = []
+
+    render(
+      <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
+        <SettingsPage />
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('No inference providers are registered. Deploy an InferenceProviderConfig to get started.')).toBeInTheDocument()
+  })
+
   it('keeps uninstalled runtime surfaces neutral while showing red X icons', () => {
     const { container } = render(
       <MemoryRouter initialEntries={['/settings?tab=runtimes']}>
