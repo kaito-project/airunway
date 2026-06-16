@@ -31,6 +31,17 @@ import {
 } from './clusterGpuCapacity';
 export type { ClusterGpuCapacity, NodeGpuInfo } from './clusterGpuCapacity';
 import {
+  createService as createServiceWithAdapter,
+  deleteCRD as deleteCRDWithAdapter,
+  deleteInferenceProviderConfig as deleteInferenceProviderConfigWithAdapter,
+  deleteNamespace as deleteNamespaceWithAdapter,
+  deleteService as deleteServiceWithAdapter,
+  listPVCs as listPVCsWithAdapter,
+  type ClusterAdministrationAdapter,
+  type PersistentVolumeClaimInfo,
+} from './clusterAdministration';
+export type { PersistentVolumeClaimInfo } from './clusterAdministration';
+import {
   proxyServiceGet as proxyServiceGetWithAdapter,
   proxyServicePostStream as proxyServicePostStreamWithAdapter,
   type ProxyServiceGetOptions,
@@ -68,13 +79,6 @@ const MODEL_DEPLOYMENT_CRD = {
   plural: 'modeldeployments',
   kind: 'ModelDeployment',
 };
-
-export interface PersistentVolumeClaimInfo {
-  name: string;
-  status: string;
-  storageClass: string;
-  capacity: string;
-}
 
 /**
  * Extract the first non-empty version annotation from a Kubernetes CRD object or
@@ -793,69 +797,20 @@ class KubernetesService {
     targetPort: number,
     selector: Record<string, string>
   ): Promise<void> {
-    const service: k8s.V1Service = {
-      apiVersion: 'v1',
-      kind: 'Service',
-      metadata: {
-        name: `${name}-vllm`,
-        namespace,
-        labels: {
-          'app.kubernetes.io/name': 'airunway',
-          'app.kubernetes.io/instance': name,
-          'app.kubernetes.io/managed-by': 'airunway',
-          'airunway.ai/service-type': 'vllm',
-        },
-      },
-      spec: {
-        type: 'ClusterIP',
-        ports: [
-          {
-            port,
-            targetPort: targetPort as unknown as k8s.IntOrString,
-            protocol: 'TCP',
-            name: 'http',
-          },
-        ],
-        selector,
-      },
-    };
-
-    try {
-      await withRetry(
-        () => this.coreV1Api.createNamespacedService({ namespace, body: service }),
-        { operationName: 'createService' }
-      );
-      logger.info({ name: `${name}-vllm`, namespace, port, targetPort }, 'Created vLLM service');
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode === 409) {
-        // Service already exists, that's fine
-        logger.debug({ name: `${name}-vllm`, namespace }, 'Service already exists');
-        return;
-      }
-      throw error;
-    }
+    return createServiceWithAdapter(this.createClusterAdministrationAdapter(), {
+      name,
+      namespace,
+      port,
+      targetPort,
+      selector,
+    });
   }
 
   /**
    * Delete a Kubernetes Service
    */
   async deleteService(name: string, namespace: string): Promise<void> {
-    try {
-      await withRetry(
-        () => this.coreV1Api.deleteNamespacedService({ name, namespace }),
-        { operationName: 'deleteService' }
-      );
-      logger.info({ name, namespace }, 'Deleted service');
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode === 404) {
-        // Service doesn't exist, that's fine
-        logger.debug({ name, namespace }, 'Service not found (already deleted)');
-        return;
-      }
-      throw error;
-    }
+    return deleteServiceWithAdapter(this.createClusterAdministrationAdapter(), name, namespace);
   }
 
   /**
@@ -864,23 +819,7 @@ class KubernetesService {
    * @returns true if deleted or not found, false on error
    */
   async deleteCRD(crdName: string): Promise<{ success: boolean; message: string }> {
-    try {
-      logger.info({ crdName }, 'Deleting CRD');
-      await withRetry(
-        () => this.apiExtensionsApi.deleteCustomResourceDefinition({ name: crdName }),
-        { operationName: 'deleteCRD', maxRetries: 2 }
-      );
-      logger.info({ crdName }, 'CRD deleted successfully');
-      return { success: true, message: `CRD ${crdName} deleted` };
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode === 404) {
-        logger.debug({ crdName }, 'CRD not found (already deleted)');
-        return { success: true, message: `CRD ${crdName} not found (already deleted)` };
-      }
-      logger.error({ error, crdName }, 'Error deleting CRD');
-      return { success: false, message: `Failed to delete CRD ${crdName}: ${getK8sErrorMessage(error)}` };
-    }
+    return deleteCRDWithAdapter(this.createClusterAdministrationAdapter(), crdName);
   }
 
   /**
@@ -888,28 +827,15 @@ class KubernetesService {
    * @param name - The name of the InferenceProviderConfig to delete
    */
   async deleteInferenceProviderConfig(name: string): Promise<{ success: boolean; message: string }> {
-    try {
-      logger.info({ name }, 'Deleting InferenceProviderConfig');
-      await withRetry(
-        () => this.customObjectsApi.deleteClusterCustomObject({
-          group: MODEL_DEPLOYMENT_CRD.apiGroup,
-          version: MODEL_DEPLOYMENT_CRD.apiVersion,
-          plural: 'inferenceproviderconfigs',
-          name,
-        }),
-        { operationName: `deleteInferenceProviderConfig:${name}`, maxRetries: 2 }
-      );
-      logger.info({ name }, 'InferenceProviderConfig deleted successfully');
-      return { success: true, message: `InferenceProviderConfig ${name} deleted` };
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode === 404) {
-        logger.debug({ name }, 'InferenceProviderConfig not found (already deleted)');
-        return { success: true, message: `InferenceProviderConfig ${name} not found (already deleted)` };
-      }
-      logger.error({ error, name }, 'Error deleting InferenceProviderConfig');
-      return { success: false, message: `Failed to delete InferenceProviderConfig ${name}: ${getK8sErrorMessage(error)}` };
-    }
+    return deleteInferenceProviderConfigWithAdapter(
+      this.createClusterAdministrationAdapter(),
+      {
+        group: MODEL_DEPLOYMENT_CRD.apiGroup,
+        version: MODEL_DEPLOYMENT_CRD.apiVersion,
+        plural: 'inferenceproviderconfigs',
+      },
+      name
+    );
   }
 
   /**
@@ -918,30 +844,30 @@ class KubernetesService {
    * @returns true if deleted or not found, false on error
    */
   async deleteNamespace(namespace: string): Promise<{ success: boolean; message: string }> {
-    // Protect critical namespaces
-    const protectedNamespaces = ['default', 'kube-system', 'kube-public', 'kube-node-lease'];
-    if (protectedNamespaces.includes(namespace)) {
-      logger.warn({ namespace }, 'Attempted to delete protected namespace');
-      return { success: false, message: `Cannot delete protected namespace: ${namespace}` };
-    }
+    return deleteNamespaceWithAdapter(this.createClusterAdministrationAdapter(), namespace);
+  }
 
-    try {
-      logger.info({ namespace }, 'Deleting namespace');
-      await withRetry(
-        () => this.coreV1Api.deleteNamespace({ name: namespace }),
-        { operationName: 'deleteNamespace', maxRetries: 2 }
-      );
-      logger.info({ namespace }, 'Namespace deletion initiated');
-      return { success: true, message: `Namespace ${namespace} deletion initiated` };
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode === 404) {
-        logger.debug({ namespace }, 'Namespace not found (already deleted)');
-        return { success: true, message: `Namespace ${namespace} not found (already deleted)` };
-      }
-      logger.error({ error, namespace }, 'Error deleting namespace');
-      return { success: false, message: `Failed to delete namespace ${namespace}: ${getK8sErrorMessage(error)}` };
-    }
+  private createClusterAdministrationAdapter(userToken?: string): ClusterAdministrationAdapter {
+    const coreApi = this.getCoreV1Api(userToken);
+    return {
+      createNamespacedService: (namespace, body) => coreApi.createNamespacedService({ namespace, body }),
+      deleteNamespacedService: (name, namespace) => coreApi.deleteNamespacedService({ name, namespace }),
+      deleteCustomResourceDefinition: (name) => this.apiExtensionsApi.deleteCustomResourceDefinition({ name }),
+      deleteClusterCustomObject: ({ group, version, plural, name }) => this.customObjectsApi.deleteClusterCustomObject({
+        group,
+        version,
+        plural,
+        name,
+      }),
+      deleteNamespace: (name) => coreApi.deleteNamespace({ name }),
+      listNamespacedPersistentVolumeClaim: (namespace) => coreApi.listNamespacedPersistentVolumeClaim({ namespace }),
+      getK8sStatusCode,
+      getK8sErrorMessage,
+      logInfo: (context, message) => logger.info(context, message),
+      logDebug: (context, message) => logger.debug(context, message),
+      logWarn: (context, message) => logger.warn(context, message),
+      logError: (context, message) => logger.error(context, message),
+    };
   }
 
   /**
@@ -1061,25 +987,7 @@ class KubernetesService {
    * List PersistentVolumeClaims in a namespace
    */
   async listPVCs(namespace: string, userToken?: string): Promise<PersistentVolumeClaimInfo[]> {
-    const api = this.getCoreV1Api(userToken);
-    const response = await withRetry(
-      () => api.listNamespacedPersistentVolumeClaim({ namespace }),
-      { operationName: 'listPVCs', maxRetries: 1 }
-    );
-
-    return (response.items || []).flatMap((pvc) => {
-      const name = pvc.metadata?.name;
-      if (!name) {
-        return [];
-      }
-
-      return [{
-        name,
-        status: pvc.status?.phase || 'Unknown',
-        storageClass: pvc.spec?.storageClassName || '',
-        capacity: pvc.status?.capacity?.['storage'] || pvc.spec?.resources?.requests?.['storage'] || '',
-      }];
-    });
+    return listPVCsWithAdapter(this.createClusterAdministrationAdapter(userToken), namespace);
   }
 }
 
