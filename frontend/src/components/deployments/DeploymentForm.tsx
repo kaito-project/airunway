@@ -13,7 +13,7 @@ import { usePremadeModels } from '@/hooks/useAikit'
 import { useGatewayStatus } from '@/hooks/useGateway'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
-import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, type Engine, type KaitoResourceType } from '@/lib/api'
+import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, type KaitoResourceType } from '@/lib/api'
 import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles, AlertTriangle, Server, Box, HardDrive } from 'lucide-react'
 import { CapacityWarning } from './CapacityWarning'
 import { AIConfiguratorPanel } from './AIConfiguratorPanel'
@@ -23,6 +23,7 @@ import { StorageVolumesSection } from './StorageVolumesSection'
 import { GpuPerReplicaField } from './GpuPerReplicaField'
 import { KaitoModelConfiguration } from './KaitoModelConfiguration'
 import { KaitoResourceTypeSelector } from './KaitoResourceTypeSelector'
+import { EngineSelectionPanel } from './EngineSelectionPanel'
 import { calculateGpuRecommendation, calculateMultiNode } from '@/lib/gpu-recommendations'
 import {
   FP8_ARG_ENGINES,
@@ -807,83 +808,19 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
       {/* Engine Selection - show for non-KAITO runtimes OR KAITO with vLLM models */}
       {(selectedRuntime !== 'kaito' || isVllmModel) && (
-      <div className="glass-panel">
-        <h3 className="text-lg font-semibold mb-4">Inference Engine</h3>
-        <div>
-          {selectedRuntime === 'kaito' && isVllmModel ? (
-            // KAITO vLLM - only vLLM option
-            <RadioGroup value="vllm" className="flex gap-4">
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="vllm" id="engine-vllm" />
-                <Label htmlFor="engine-vllm" className="cursor-pointer">
-                  vLLM
-                </Label>
-              </div>
-            </RadioGroup>
-          ) : availableEngines.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No compatible engines available for this model with {RUNTIME_INFO[selectedRuntime].name}.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <RadioGroup
-                value={config.engine}
-                onValueChange={(value) => {
-                  // Only allow changing to supported backends if AI Configurator has set restrictions
-                  if (!aiConfigSupportedBackends || aiConfigSupportedBackends.includes(value)) {
-                    setTopologyManagedByAIConfig(false)
-                    updateConfig('engine', value as Engine)
-                  }
-                }}
-                className="grid gap-4 sm:grid-cols-3"
-              >
-                {availableEngines.map((engine) => {
-                  const isUnavailable = aiConfigSupportedBackends !== null && !aiConfigSupportedBackends.includes(engine)
-                  const isRecommended = aiConfigRecommendedBackend === engine
-
-                  return (
-                    <div
-                      key={engine}
-                      className={cn(
-                        "flex items-center space-x-2",
-                        isUnavailable && "opacity-50"
-                      )}
-                    >
-                      <RadioGroupItem
-                        value={engine}
-                        id={engine}
-                        disabled={isUnavailable}
-                      />
-                      <Label
-                        htmlFor={engine}
-                        className={cn(
-                          isUnavailable ? "cursor-not-allowed" : "cursor-pointer",
-                          "flex items-center gap-2"
-                        )}
-                      >
-                        {engine === 'vllm' && 'vLLM'}
-                        {engine === 'sglang' && 'SGLang'}
-                        {engine === 'trtllm' && 'TensorRT-LLM'}
-                        {isRecommended && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                            <Sparkles className="h-3 w-3" />
-                            Optimized
-                          </span>
-                        )}
-                      </Label>
-                    </div>
-                  )
-                })}
-              </RadioGroup>
-              {aiConfigSupportedBackends && aiConfigSupportedBackends.length < availableEngines.length && (
-                <p className="text-xs text-muted-foreground">
-                  Some engines are unavailable based on your GPU type. AI Configurator recommends {aiConfigRecommendedBackend?.toUpperCase()}.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+        <EngineSelectionPanel
+          selectedRuntime={selectedRuntime}
+          isVllmModel={isVllmModel}
+          runtimeName={RUNTIME_INFO[selectedRuntime].name}
+          availableEngines={availableEngines}
+          engine={config.engine}
+          aiConfigSupportedBackends={aiConfigSupportedBackends}
+          aiConfigRecommendedBackend={aiConfigRecommendedBackend}
+          onEngineChange={(engine) => {
+            setTopologyManagedByAIConfig(false)
+            updateConfig('engine', engine)
+          }}
+        />
       )}
 
       {/* KAITO Resource Type Selection - show for KAITO runtime with vLLM models */}
