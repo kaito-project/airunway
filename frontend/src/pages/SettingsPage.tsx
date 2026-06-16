@@ -47,12 +47,11 @@ import {
   Globe,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RuntimeSummaryCard } from './RuntimeSummaryCard'
 import { useSearchParams } from 'react-router-dom'
 import {
-  canonicalizeRuntimeId,
   crdLessRuntimeReadinessMessage,
   crdLessRuntimeStateLabel,
-  runtimeDescription,
   runtimeIdsMatch,
   runtimeRequiresCRD,
   selectDefaultRuntimeId,
@@ -463,92 +462,13 @@ export function SettingsPage() {
             <h2 className="text-xl font-heading font-semibold mb-4">Available Runtimes</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {runtimes.map((runtime) => (
-                <div
+                <RuntimeSummaryCard
                   key={runtime.id}
-                  className={cn(
-                    'bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm transition-all cursor-pointer',
-                    runtimeIdsMatch(effectiveRuntime, runtime.id)
-                      ? 'ring-2 ring-cyan-400'
-                      : 'hover:border-white/10'
-                  )}
-                  onClick={() => setSelectedRuntime(canonicalizeRuntimeId(runtime.id))}
-                >
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-heading font-bold">{runtime.name}</span>
-                      {!runtimeRequiresCRD(runtime) ? (
-                        runtime.installed || runtime.healthy ? (
-                          <Badge variant="success" className="shrink-0">
-                            <CheckCircle className="h-4 w-4" />
-                            {crdLessRuntimeStateLabel(true)}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm flex items-center gap-1">
-                            <AlertCircle className="h-4 w-4 text-yellow-500" />
-                            {crdLessRuntimeStateLabel(false)}
-                          </span>
-                        )
-                      ) : runtime.installed ? (
-                        <Badge variant="success" className="shrink-0">
-                          <CheckCircle className="h-4 w-4" />
-                          Installed
-                        </Badge>
-                      ) : runtimeIdsMatch(pendingInstallRuntime, runtime.id) ? (
-                        <span className="text-cyan-400 text-sm flex items-center gap-1">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Starting
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-sm flex items-center gap-1">
-                          <XCircle className="h-4 w-4 text-red-500" />
-                          Not Installed
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {runtimeDescription(runtime.id, runtime.name)}
-                    </p>
-                  </div>
-                  <div>
-                    <div className="space-y-2 text-sm">
-                      {!runtimeRequiresCRD(runtime) ? (
-                        <div className="flex items-center gap-2 rounded-lg bg-muted/60 p-3 text-muted-foreground">
-                          {runtime.installed || runtime.healthy ? (
-                            <CheckCircle className="h-4 w-4 text-green-400" />
-                          ) : (
-                            <AlertCircle className="h-4 w-4 text-yellow-500" />
-                          )}
-                          <span>{crdLessRuntimeReadinessMessage(runtime.installed || runtime.healthy)}</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">CRD</span>
-                            {runtime.crdFound ?? runtime.installed ? (
-                              <CheckCircle className="h-4 w-4 text-green-400" />
-                            ) : (
-                              <XCircle className="h-4 w-4 text-red-500" />
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Operator</span>
-                            {runtime.operatorRunning ?? runtime.healthy ? (
-                              <CheckCircle className="h-4 w-4 text-green-400" />
-                            ) : (
-                              <XCircle className="h-4 w-4 text-red-500" />
-                            )}
-                          </div>
-                        </>
-                      )}
-                      {runtime.version && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Version</span>
-                          <span className="font-mono text-xs">{runtime.version}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  runtime={runtime}
+                  effectiveRuntime={effectiveRuntime}
+                  pendingInstallRuntime={pendingInstallRuntime}
+                  onSelect={setSelectedRuntime}
+                />
               ))}
             </div>
           </div>
