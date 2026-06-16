@@ -68,6 +68,7 @@ const DEFAULT_GPU_SYSTEM: GpuSystem = 'h100_sxm';
 
 // Cache TTL for status check (5 minutes)
 const STATUS_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLI_STATUS_TIMEOUT_MS = 2_000;
 
 /**
  * AI Configurator Service
@@ -111,6 +112,8 @@ class AIConfiguratorService {
       const proc = Bun.spawn([this.CLI_COMMAND, 'version'], {
         stdout: 'pipe',
         stderr: 'pipe',
+        timeout: CLI_STATUS_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
       });
 
       const [exitCode, stdout, stderr] = await Promise.all([
@@ -134,9 +137,13 @@ class AIConfiguratorService {
         return status;
       }
 
+      const wasTerminated = proc.signalCode !== null;
+      const unavailableReason = wasTerminated
+        ? `AI Configurator CLI not found or timed out after ${CLI_STATUS_TIMEOUT_MS}ms (signal ${proc.signalCode})`
+        : `AI Configurator CLI not found or unavailable (exit code ${proc.exitCode ?? exitCode}: ${stderr.trim()})`;
       const status: AIConfiguratorStatus = {
         available: false,
-        error: `AI Configurator exited with code ${exitCode}: ${stderr}`,
+        error: unavailableReason,
       };
       // Cache negative result too (but it will be refreshed on next call after TTL)
       this.cachedStatus = status;

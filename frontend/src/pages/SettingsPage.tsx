@@ -15,8 +15,6 @@ import { useHuggingFaceStatus, useHuggingFaceOAuth, useDeleteHuggingFaceSecret }
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
@@ -31,123 +29,31 @@ import { useToast } from '@/hooks/useToast'
 import {
   CheckCircle,
   XCircle,
-  AlertCircle,
   AlertTriangle,
   Loader2,
   Server,
-  Cpu,
   Key,
   Cog,
   Layers,
   Download,
-  RefreshCw,
-  Copy,
   Zap,
-  Trash2,
-  Globe,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RuntimeSummaryCard } from './RuntimeSummaryCard'
+import { RuntimeInstallationPanel } from './RuntimeInstallationPanel'
+import { GatewayApiPanel } from './GatewayApiPanel'
+import { HuggingFaceTokenPanel } from './HuggingFaceTokenPanel'
+import { GpuOperatorPanel } from './GpuOperatorPanel'
 import { useSearchParams } from 'react-router-dom'
+import {
+  crdLessRuntimeReadinessMessage,
+  runtimeIdsMatch,
+  runtimeRequiresCRD,
+  selectDefaultRuntimeId,
+  type RuntimeId,
+} from './settingsPageModel'
 
 type SettingsTab = 'general' | 'runtimes' | 'integrations'
-type RuntimeId = string
-
-type RuntimeCrdMetadata = {
-  id?: string | null
-  name?: string | null
-  requiresCRD?: boolean | null
-}
-
-type RuntimeSelectionMetadata = RuntimeCrdMetadata & {
-  installed?: boolean | null
-}
-
-const KNOWN_RUNTIME_IDS = new Set(['dynamo', 'kuberay', 'kaito', 'llmd', 'vllm'])
-const CRD_LESS_RUNTIME_IDS = new Set(['llmd', 'vllm'])
-const CRD_LESS_RUNTIME_DISPLAY_NAMES = new Set(['LLM-D', 'vLLM'])
-
-const normalizeRuntimeId = (id: string | null | undefined) => String(id ?? '').toLowerCase()
-const isLlmdRuntimeId = (id: string | null | undefined) => normalizeRuntimeId(id) === 'llmd'
-const isVllmRuntimeId = (id: string | null | undefined) => normalizeRuntimeId(id) === 'vllm'
-const isLlmdRuntimeDisplayName = (name: string | null | undefined) => String(name ?? '').trim() === 'LLM-D'
-const isVllmRuntimeDisplayName = (name: string | null | undefined) => String(name ?? '').trim() === 'vLLM'
-const isCrdLessRuntimeId = (id: string | null | undefined) => CRD_LESS_RUNTIME_IDS.has(normalizeRuntimeId(id))
-const isCrdLessRuntimeDisplayName = (name: string | null | undefined) => CRD_LESS_RUNTIME_DISPLAY_NAMES.has(String(name ?? '').trim())
-const canonicalizeRuntimeId = (id: string) => {
-  const normalized = normalizeRuntimeId(id)
-  return KNOWN_RUNTIME_IDS.has(normalized) ? normalized : id
-}
-const runtimeIdsMatch = (left: string | null | undefined, right: string | null | undefined) =>
-  normalizeRuntimeId(left) === normalizeRuntimeId(right)
-
-const runtimeRequiresCRD = (runtime: RuntimeCrdMetadata | null | undefined, fallbackId?: string | null) => {
-  if (typeof runtime?.requiresCRD === 'boolean') {
-    return runtime.requiresCRD
-  }
-
-  if (
-    isCrdLessRuntimeId(runtime?.id) ||
-    isCrdLessRuntimeDisplayName(runtime?.name) ||
-    isCrdLessRuntimeId(fallbackId)
-  ) {
-    return false
-  }
-
-  return true
-}
-
-const runtimeDescription = (id: string, name?: string | null) => {
-  if (isLlmdRuntimeId(id) || isLlmdRuntimeDisplayName(name)) {
-    return 'LLM-D for distributed inference'
-  }
-
-  if (isVllmRuntimeId(id) || isVllmRuntimeDisplayName(name)) {
-    return 'vLLM for high-throughput inference'
-  }
-
-  switch (normalizeRuntimeId(id)) {
-    case 'kaito':
-      return 'KAITO for simplified model deployment'
-    case 'dynamo':
-      return 'NVIDIA Dynamo for high-performance GPU inference'
-    case 'kuberay':
-      return 'Ray Serve via KubeRay for distributed Ray-based model serving with vLLM'
-    default:
-      return 'Inference runtime provider'
-  }
-}
-
-const crdLessRuntimeReadinessMessage = (ready: boolean | null | undefined) => (
-  ready ? 'Runtime is ready to use.' : 'Provider is registered but not ready yet.'
-)
-
-const crdLessRuntimeStateLabel = (ready: boolean | null | undefined) => (
-  ready ? 'Ready' : 'Registered'
-)
-
-const selectDefaultRuntimeId = (runtimes: RuntimeSelectionMetadata[] | undefined): RuntimeId | null => {
-  if (!runtimes) {
-    return null
-  }
-
-  const installedRuntime = runtimes.find(r => r.installed && r.id)
-  if (installedRuntime?.id) {
-    return canonicalizeRuntimeId(installedRuntime.id)
-  }
-
-  const dynamoRuntime = runtimes.find(r => runtimeIdsMatch(r.id, 'dynamo') && r.id)
-  if (dynamoRuntime?.id) {
-    return canonicalizeRuntimeId(dynamoRuntime.id)
-  }
-
-  const firstRegisteredRuntime = runtimes.find(r => r.id)
-  if (firstRegisteredRuntime?.id) {
-    return canonicalizeRuntimeId(firstRegisteredRuntime.id)
-  }
-
-  return 'dynamo'
-}
-
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { isLoading: settingsLoading } = useSettings()
@@ -551,256 +457,18 @@ export function SettingsPage() {
             <h2 className="text-xl font-heading font-semibold mb-4">Available Runtimes</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {runtimes.map((runtime) => (
-                <div
+                <RuntimeSummaryCard
                   key={runtime.id}
-                  className={cn(
-                    'bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm transition-all cursor-pointer',
-                    runtimeIdsMatch(effectiveRuntime, runtime.id)
-                      ? 'ring-2 ring-cyan-400'
-                      : 'hover:border-white/10'
-                  )}
-                  onClick={() => setSelectedRuntime(canonicalizeRuntimeId(runtime.id))}
-                >
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-heading font-bold">{runtime.name}</span>
-                      {!runtimeRequiresCRD(runtime) ? (
-                        runtime.installed || runtime.healthy ? (
-                          <Badge variant="success" className="shrink-0">
-                            <CheckCircle className="h-4 w-4" />
-                            {crdLessRuntimeStateLabel(true)}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm flex items-center gap-1">
-                            <AlertCircle className="h-4 w-4 text-yellow-500" />
-                            {crdLessRuntimeStateLabel(false)}
-                          </span>
-                        )
-                      ) : runtime.installed ? (
-                        <Badge variant="success" className="shrink-0">
-                          <CheckCircle className="h-4 w-4" />
-                          Installed
-                        </Badge>
-                      ) : runtimeIdsMatch(pendingInstallRuntime, runtime.id) ? (
-                        <span className="text-cyan-400 text-sm flex items-center gap-1">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Starting
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-sm flex items-center gap-1">
-                          <XCircle className="h-4 w-4 text-red-500" />
-                          Not Installed
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {runtimeDescription(runtime.id, runtime.name)}
-                    </p>
-                  </div>
-                  <div>
-                    <div className="space-y-2 text-sm">
-                      {!runtimeRequiresCRD(runtime) ? (
-                        <div className="flex items-center gap-2 rounded-lg bg-muted/60 p-3 text-muted-foreground">
-                          {runtime.installed || runtime.healthy ? (
-                            <CheckCircle className="h-4 w-4 text-green-400" />
-                          ) : (
-                            <AlertCircle className="h-4 w-4 text-yellow-500" />
-                          )}
-                          <span>{crdLessRuntimeReadinessMessage(runtime.installed || runtime.healthy)}</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">CRD</span>
-                            {runtime.crdFound ?? runtime.installed ? (
-                              <CheckCircle className="h-4 w-4 text-green-400" />
-                            ) : (
-                              <XCircle className="h-4 w-4 text-red-500" />
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Operator</span>
-                            {runtime.operatorRunning ?? runtime.healthy ? (
-                              <CheckCircle className="h-4 w-4 text-green-400" />
-                            ) : (
-                              <XCircle className="h-4 w-4 text-red-500" />
-                            )}
-                          </div>
-                        </>
-                      )}
-                      {runtime.version && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Version</span>
-                          <span className="font-mono text-xs">{runtime.version}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  runtime={runtime}
+                  effectiveRuntime={effectiveRuntime}
+                  pendingInstallRuntime={pendingInstallRuntime}
+                  onSelect={setSelectedRuntime}
+                />
               ))}
             </div>
           </div>
 
-          {/* Selected Runtime Installation Details */}
-          {runtimes.length > 0 && (
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-            <div className="mb-4">
-              <h3 className="font-heading text-lg font-semibold flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {selectedRuntimeRequiresCRD ? (
-                    <Download className="h-5 w-5" />
-                  ) : (
-                    <Server className="h-5 w-5" />
-                  )}
-                  {installationStatus?.providerName || currentRuntime?.name || 'Runtime'} {selectedRuntimeRequiresCRD ? 'Installation' : 'Status'}
-                </div>
-                {!selectedRuntimeRequiresCRD ? (
-                  isInstalled ? (
-                    <Badge variant="success" className="shrink-0">
-                      <CheckCircle className="h-4 w-4" />
-                      {crdLessRuntimeStateLabel(true)}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground text-sm flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      {crdLessRuntimeStateLabel(false)}
-                    </span>
-                  )
-                ) : isInstalled ? (
-                  <Badge variant="success" className="shrink-0">
-                    <CheckCircle className="h-4 w-4" />
-                    Installed
-                  </Badge>
-                ) : isWaitingForInstall ? (
-                  <span className="text-cyan-400 text-sm flex items-center gap-1">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Starting
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-sm flex items-center gap-1">
-                    <XCircle className="h-4 w-4 text-red-500" />
-                    Not Installed
-                  </span>
-                )}
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {selectedRuntimeMessage}
-              </p>
-            </div>
-            <div className="space-y-4">
-              {installationLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <>
-                  {selectedRuntimeRequiresCRD ? (
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>CRD Installed</span>
-                        {installationStatus?.crdFound ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>Operator Running</span>
-                        {installationStatus?.operatorRunning ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                      {isInstalled ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      )}
-                      <span>{crdLessRuntimeReadinessMessage(isInstalled)}</span>
-                    </div>
-                  )}
 
-                  {selectedRuntimeRequiresCRD && (
-                    <div className="flex gap-3">
-                      {!isInstalled && (
-                        <Button
-                          onClick={() => handleInstall(effectiveRuntime)}
-                          disabled={isInstalling || isWaitingForInstall || !helmAvailable || !clusterStatus?.connected}
-                          className="flex items-center gap-2"
-                        >
-                          {isInstalling ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Installing...
-                            </>
-                          ) : isWaitingForInstall ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Checking runtime...
-                            </>
-                          ) : (
-                            <>
-                              <Download className="h-4 w-4" />
-                              Install {currentRuntime?.name || 'Runtime'}
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      {isInstalled && (
-                        <Button
-                          variant="destructive"
-                          onClick={() => setShowUninstallDialog(true)}
-                          disabled={isUninstalling || !helmAvailable || !clusterStatus?.connected}
-                          className="flex items-center gap-2"
-                        >
-                          {isUninstalling ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Uninstalling...
-                            </>
-                          ) : (
-                            <>
-                              <Trash2 className="h-4 w-4" />
-                              Uninstall
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          refetchInstallation()
-                          refetchRuntimesStatus()
-                        }}
-                        disabled={installationLoading}
-                      >
-                        <RefreshCw className={cn('h-4 w-4', installationLoading && 'animate-spin')} />
-                      </Button>
-                    </div>
-                  )}
-
-                  {selectedRuntimeRequiresCRD && !helmAvailable && (
-                    <div className="flex items-start gap-2 rounded-lg bg-yellow-50 p-4 text-sm text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
-                      <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium">Helm CLI not available</p>
-                        <p className="mt-1">
-                          Automatic installation requires Helm. You can install the runtime manually using the commands below.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          )}
 
           {runtimes.length === 0 && !runtimesLoading && (
             <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
@@ -813,37 +481,30 @@ export function SettingsPage() {
             </div>
           )}
 
-          {/* Installation Steps */}
-          {installationStatus?.installationSteps && installationStatus.installationSteps.length > 0 && (
-            <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-              <div className="mb-4">
-                <h3 className="font-heading text-lg font-semibold">Manual Installation Steps</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Detailed steps for installing {installationStatus.providerName}
-                </p>
-              </div>
-              <div className="space-y-4">
-                {installationStatus.installationSteps.map((step, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                        {index + 1}
-                      </span>
-                      <span className="font-medium">{step.title}</span>
-                    </div>
-                    <p className="ml-8 text-sm text-muted-foreground">{step.description}</p>
-                    {step.command && (
-                      <div className="ml-8 flex items-center gap-2">
-                        <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono">{step.command}</code>
-                        <Button variant="ghost" size="sm" onClick={() => copyToClipboard(step.command!)}>
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+          {/* Selected Runtime Installation Details */}
+          {runtimes.length > 0 && (
+            <RuntimeInstallationPanel
+              installationStatus={installationStatus}
+              currentRuntimeName={currentRuntime?.name}
+              requiresCRD={selectedRuntimeRequiresCRD}
+              isInstalled={isInstalled}
+              isWaitingForInstall={isWaitingForInstall}
+              message={selectedRuntimeMessage}
+              loading={installationLoading}
+              effectiveRuntime={effectiveRuntime}
+              isInstalling={isInstalling}
+              isUninstalling={isUninstalling}
+              helmAvailable={helmAvailable}
+              clusterConnected={clusterStatus?.connected}
+              installationLoading={installationLoading}
+              onInstall={handleInstall}
+              onShowUninstall={() => setShowUninstallDialog(true)}
+              onRefresh={() => {
+                refetchInstallation()
+                refetchRuntimesStatus()
+              }}
+              onCopyCommand={copyToClipboard}
+            />
           )}
         </div>
       )}
@@ -852,465 +513,116 @@ export function SettingsPage() {
       {activeTab === 'integrations' && (
         <div className="space-y-6 animate-slide-up">
           {/* GPU Operator */}
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-            <div className="mb-4">
-              <h3 className="font-heading text-lg font-semibold flex items-center gap-2">
-                <Cpu className="h-5 w-5" />
-                NVIDIA GPU Operator
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Install the NVIDIA GPU Operator to enable GPU support
-              </p>
-            </div>
-            <div className="space-y-4">
-              {/* Prerequisites check */}
-              {(!clusterStatus?.connected || !helmStatus?.available) && (
-                <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 p-3 text-sm text-yellow-800 dark:text-yellow-200">
-                  <div className="flex items-center gap-2 mb-2">
-                    <AlertCircle className="h-4 w-4" />
-                    <span className="font-medium">Prerequisites not met</span>
-                  </div>
-                  <ul className="list-disc list-inside space-y-1 ml-2">
-                    {!clusterStatus?.connected && (
-                      <li>Not connected</li>
-                    )}
-                    {!helmStatus?.available && (
-                      <li>Helm CLI not available</li>
-                    )}
-                  </ul>
-                </div>
-              )}
-
-              {/* GPU Status Display */}
-              {gpuStatusLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Checking GPU status...</span>
-                </div>
-              ) : gpuOperatorStatus?.gpusAvailable ? (
-                // GPUs are already available
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">GPU Status</span>
-                    <Badge variant="success">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      GPUs Enabled
-                    </Badge>
-                  </div>
-                  <div className="rounded-lg bg-green-50 dark:bg-green-950 p-3 text-sm text-green-800 dark:text-green-200">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4" />
-                      <span>{gpuOperatorStatus.message}</span>
-                    </div>
-                    {gpuOperatorStatus.gpuNodes.length > 0 && (
-                      <div className="mt-2 text-xs">
-                        Nodes: {gpuOperatorStatus.gpuNodes.join(', ')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : gpuOperatorStatus?.installed ? (
-                // Operator installed but no GPUs detected
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">GPU Status</span>
-                    <Badge variant="secondary">
-                      <AlertCircle className="h-3 w-3 mr-1" />
-                      Operator Installed
-                    </Badge>
-                  </div>
-                  <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 p-3 text-sm text-yellow-800 dark:text-yellow-200">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4" />
-                      <span>{gpuOperatorStatus.message}</span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                // Not installed - show install option
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="gpu-operator-switch">Enable GPU Operator</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Automatically installs the NVIDIA GPU Operator via Helm
-                      </p>
-                    </div>
-                    <Switch
-                      id="gpu-operator-switch"
-                      checked={false}
-                      disabled={!clusterStatus?.connected || !helmStatus?.available || isInstallingGpu}
-                      onCheckedChange={async (checked) => {
-                        if (checked) {
-                          setIsInstallingGpu(true)
-                          try {
-                            const result = await installGpuOperator.mutateAsync()
-                            if (result.success) {
-                              toast({
-                                title: 'GPU Operator Installed',
-                                description: result.message,
-                              })
-                              refetchGpuStatus()
-                            }
-                          } catch (error) {
-                            toast({
-                              title: 'Installation Failed',
-                              description: error instanceof Error ? error.message : 'Unknown error',
-                              variant: 'destructive',
-                            })
-                          } finally {
-                            setIsInstallingGpu(false)
-                          }
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {isInstallingGpu && (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="text-sm">Installing GPU Operator... This may take several minutes.</span>
-                    </div>
-                  )}
-
-                  {/* Manual installation commands */}
-                  {gpuOperatorStatus?.helmCommands && gpuOperatorStatus.helmCommands.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="text-sm font-medium">Manual Installation</span>
-                      <div className="space-y-1">
-                        {gpuOperatorStatus.helmCommands.map((cmd, index) => (
-                          <div key={index} className="flex items-center gap-2">
-                            <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono">
-                              {cmd}
-                            </code>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                navigator.clipboard.writeText(cmd)
-                                toast({
-                                  title: 'Copied',
-                                  description: 'Command copied to clipboard',
-                                })
-                              }}
-                            >
-                              Copy
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <GpuOperatorPanel
+            status={gpuOperatorStatus}
+            loading={gpuStatusLoading}
+            installing={isInstallingGpu}
+            clusterConnected={clusterStatus?.connected}
+            helmAvailable={helmStatus?.available}
+            onInstall={async () => {
+              setIsInstallingGpu(true)
+              try {
+                const result = await installGpuOperator.mutateAsync()
+                if (result.success) {
+                  toast({
+                    title: 'GPU Operator Installed',
+                    description: result.message,
+                  })
+                  refetchGpuStatus()
+                }
+              } catch (error) {
+                toast({
+                  title: 'Installation Failed',
+                  description: error instanceof Error ? error.message : 'Unknown error',
+                  variant: 'destructive',
+                })
+              } finally {
+                setIsInstallingGpu(false)
+              }
+            }}
+            onCopyCommand={(command) => {
+              navigator.clipboard.writeText(command)
+              toast({
+                title: 'Copied',
+                description: 'Command copied to clipboard',
+              })
+            }}
+          />
 
           {/* Gateway API */}
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-            <div className="mb-4">
-              <h3 className="font-heading text-lg font-semibold flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Globe className="h-5 w-5" />
-                  Gateway API
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => refetchGatewayStatus()}
-                  disabled={gatewayStatusLoading}
-                >
-                  <RefreshCw className={cn('h-4 w-4', gatewayStatusLoading && 'animate-spin')} />
-                </Button>
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Install Gateway API and Inference Extension CRDs for unified model access
-              </p>
-            </div>
-            <div className="space-y-4">
-              {gatewayStatusLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Checking gateway CRD status...</span>
-                </div>
-              ) : (
-                <>
-                  {/* CRD Status */}
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                      <span>Gateway API CRDs</span>
-                      {gatewayCRDStatus?.gatewayApiInstalled ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-500" />
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                      <div className="flex items-center gap-1">
-                        <span>Inference Extension</span>
-                        {gatewayCRDStatus?.inferenceExtInstalled && gatewayCRDStatus?.inferenceExtVersion && (
-                          <span className="text-xs text-muted-foreground">({gatewayCRDStatus.inferenceExtVersion})</span>
-                        )}
-                      </div>
-                      {gatewayCRDStatus?.inferenceExtInstalled ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-500" />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Gateway Status */}
-                  {gatewayCRDStatus?.gatewayApiInstalled && gatewayCRDStatus?.inferenceExtInstalled && (
-                    <div className="flex items-center justify-between rounded-lg bg-muted p-3 text-sm">
-                      <span>Gateway</span>
-                      <div className="flex items-center gap-2">
-                        {gatewayCRDStatus.gatewayAvailable ? (
-                          <>
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                            <span className="text-green-600 dark:text-green-400">
-                              {gatewayCRDStatus.gatewayEndpoint || 'Available'}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle className="h-4 w-4 text-yellow-500" />
-                            <span className="text-muted-foreground">Not detected</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Status Message */}
-                  {gatewayCRDStatus?.message && (
-                    <div className={cn(
-                      'rounded-lg p-3 text-sm',
-                      gatewayCRDStatus.gatewayApiInstalled && gatewayCRDStatus.inferenceExtInstalled
-                        ? gatewayCRDStatus.gatewayAvailable
-                          ? 'bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200'
-                          : 'bg-yellow-50 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200'
-                        : 'bg-muted text-muted-foreground'
-                    )}>
-                      {gatewayCRDStatus.message}
-                    </div>
-                  )}
-
-                  {/* Install Button */}
-                  {(!gatewayCRDStatus?.gatewayApiInstalled || !gatewayCRDStatus?.inferenceExtInstalled) && (
-                    <Button
-                      onClick={async () => {
-                        setIsInstallingGateway(true)
-                        try {
-                          const result = await installGatewayCRDs.mutateAsync()
-                          if (result.success) {
-                            toast({
-                              title: 'CRDs Installed',
-                              description: result.message,
-                            })
-                            refetchGatewayStatus()
-                          }
-                        } catch (error) {
-                          toast({
-                            title: 'Installation Failed',
-                            description: error instanceof Error ? error.message : 'Unknown error',
-                            variant: 'destructive',
-                          })
-                        } finally {
-                          setIsInstallingGateway(false)
-                        }
-                      }}
-                      disabled={isInstallingGateway || !clusterStatus?.connected}
-                      className="flex items-center gap-2"
-                    >
-                      {isInstallingGateway ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Installing CRDs...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="h-4 w-4" />
-                          Install CRDs
-                        </>
-                      )}
-                    </Button>
-                  )}
-
-                  {/* Manual Installation Commands */}
-                  {gatewayCRDStatus?.installCommands && gatewayCRDStatus.installCommands.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="text-sm font-medium">Manual Installation</span>
-                      <div className="space-y-1">
-                        {gatewayCRDStatus.installCommands.map((cmd, index) => (
-                          <div key={index} className="flex items-center gap-2">
-                            <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono overflow-x-auto">
-                              {cmd}
-                            </code>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                navigator.clipboard.writeText(cmd)
-                                toast({
-                                  title: 'Copied',
-                                  description: 'Command copied to clipboard',
-                                })
-                              }}
-                            >
-                              Copy
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          <GatewayApiPanel
+            status={gatewayCRDStatus}
+            loading={gatewayStatusLoading}
+            installing={isInstallingGateway}
+            clusterConnected={clusterStatus?.connected}
+            onRefresh={() => refetchGatewayStatus()}
+            onInstall={async () => {
+              setIsInstallingGateway(true)
+              try {
+                const result = await installGatewayCRDs.mutateAsync()
+                if (result.success) {
+                  toast({
+                    title: 'CRDs Installed',
+                    description: result.message,
+                  })
+                  refetchGatewayStatus()
+                }
+              } catch (error) {
+                toast({
+                  title: 'Installation Failed',
+                  description: error instanceof Error ? error.message : 'Unknown error',
+                  variant: 'destructive',
+                })
+              } finally {
+                setIsInstallingGateway(false)
+              }
+            }}
+            onCopyCommand={(cmd) => {
+              navigator.clipboard.writeText(cmd)
+              toast({
+                title: 'Copied',
+                description: 'Command copied to clipboard',
+              })
+            }}
+          />
 
           {/* HuggingFace Token */}
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
-            <div className="mb-4">
-              <h3 className="font-heading text-lg font-semibold flex items-center gap-2">
-                <Key className="h-5 w-5" />
-                HuggingFace Token
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Connect your HuggingFace account to access gated models like Llama
-              </p>
-            </div>
-            <div className="space-y-4">
-              {hfStatusLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Checking HuggingFace connection...</span>
-                </div>
-              ) : hfStatus?.configured ? (
-                // Connected state - token exists in K8s secrets
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {hfStatus.user?.avatarUrl ? (
-                        <img
-                          src={hfStatus.user.avatarUrl}
-                          alt={hfStatus.user.name}
-                          className="h-10 w-10 rounded-full"
-                        />
-                      ) : (
-                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                          <Key className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div>
-                        {hfStatus.user ? (
-                          <>
-                            <div className="font-medium">{hfStatus.user.fullname || hfStatus.user.name}</div>
-                            <div className="text-sm text-muted-foreground">@{hfStatus.user.name}</div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="font-medium">HuggingFace Token</div>
-                            <div className="text-sm text-muted-foreground">Token configured</div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <Badge variant="success">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Connected
-                    </Badge>
-                  </div>
-
-                  <div className="rounded-lg bg-green-50 dark:bg-green-950 p-3 text-sm text-green-800 dark:text-green-200">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4" />
-                      <span>Token saved successfully</span>
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await deleteHfSecret.mutateAsync()
-                        toast({
-                          title: 'Disconnected',
-                          description: 'HuggingFace token has been removed',
-                        })
-                        refetchHfStatus()
-                      } catch (error) {
-                        toast({
-                          title: 'Error',
-                          description: error instanceof Error ? error.message : 'Failed to disconnect',
-                          variant: 'destructive',
-                        })
-                      }
-                    }}
-                    disabled={deleteHfSecret.isPending}
-                  >
-                    {deleteHfSecret.isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Disconnecting...
-                      </>
-                    ) : (
-                      'Disconnect HuggingFace'
-                    )}
-                  </Button>
-                </div>
-              ) : (
-                // Not connected state
-                <div className="space-y-4">
-                  <div className="text-sm text-muted-foreground">
-                    Sign in with HuggingFace to automatically configure your token for accessing gated models.
-                    The token will be securely stored.
-                  </div>
-
-                  <Button
-                    onClick={async () => {
-                      setIsConnectingHf(true)
-                      try {
-                        await startOAuth()
-                      } catch (error) {
-                        toast({
-                          title: 'Error',
-                          description: error instanceof Error ? error.message : 'Failed to start OAuth',
-                          variant: 'destructive',
-                        })
-                        setIsConnectingHf(false)
-                      }
-                    }}
-                    disabled={isConnectingHf}
-                    className="bg-[#FFD21E] hover:bg-[#FFD21E]/90 text-black"
-                  >
-                    {isConnectingHf ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Redirecting...
-                      </>
-                    ) : (
-                      <>
-                        <span aria-hidden="true" className="mr-2 text-base leading-none">🤗</span>
-                        Sign in with Hugging Face
-                      </>
-                    )}
-                  </Button>
-
-                  {hfStatus?.configured && !hfStatus.user && (
-                    <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 p-3 text-sm text-yellow-800 dark:text-yellow-200">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />
-                        <span>Token exists but could not be validated. Try reconnecting.</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <HuggingFaceTokenPanel
+            loading={hfStatusLoading}
+            configured={hfStatus?.configured}
+            user={hfStatus?.user}
+            connecting={isConnectingHf}
+            disconnecting={deleteHfSecret.isPending}
+            onConnect={async () => {
+              setIsConnectingHf(true)
+              try {
+                await startOAuth()
+              } catch (error) {
+                toast({
+                  title: 'Error',
+                  description: error instanceof Error ? error.message : 'Failed to start OAuth',
+                  variant: 'destructive',
+                })
+                setIsConnectingHf(false)
+              }
+            }}
+            onDisconnect={async () => {
+              try {
+                await deleteHfSecret.mutateAsync()
+                toast({
+                  title: 'Disconnected',
+                  description: 'HuggingFace token has been removed',
+                })
+                refetchHfStatus()
+              } catch (error) {
+                toast({
+                  title: 'Error',
+                  description: error instanceof Error ? error.message : 'Failed to disconnect',
+                  variant: 'destructive',
+                })
+              }
+            }}
+          />
         </div>
       )}
 

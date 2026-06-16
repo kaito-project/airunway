@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DetailedClusterCapacity, Model, RuntimeStatus } from '@/lib/api'
-import { DeploymentForm, setFp8PrecisionEngineArgs } from './DeploymentForm'
+import { DeploymentForm } from './DeploymentForm'
+import { setFp8PrecisionEngineArgs } from './deploymentFormModel'
 
 const mutateAsync = vi.fn()
 const toast = vi.fn()

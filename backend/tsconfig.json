@@ -10,7 +10,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": false
+    "declaration": false,
+    "types": [
+      "bun"
+    ],
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src/**/*"
