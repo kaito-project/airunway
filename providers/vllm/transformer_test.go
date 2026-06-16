@@ -1251,6 +1251,54 @@ func TestBuildVLLMArgsTensorParallelDedupViaExtraArgs(t *testing.T) {
 	}
 }
 
+// Setting the SAME launch flag in both spec.engine.args (the structured map) and
+// spec.engine.extraArgs (raw tokens) is a contradiction: engine.args renders
+// first and extraArgs is appended verbatim, so both would reach vLLM and its
+// last-wins argparse would silently honor the extraArgs value — defeating the
+// engine.args one. The transformer must reject this instead of emitting two
+// conflicting copies. Regression for the --tensor-parallel-size 4-vs-2 bug.
+func TestBuildVLLMArgsRejectsArgsExtraArgsConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		extraArg string
+	}{
+		{name: "inline value form", extraArg: "--tensor-parallel-size=2"},
+		{name: "two-token form", extraArg: "--tensor-parallel-size"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer()
+			md := newTestMD("test-model", "default")
+			md.Spec.Engine.Args = map[string]string{
+				"tensor-parallel-size": "4",
+			}
+			md.Spec.Engine.ExtraArgs = []string{tc.extraArg}
+
+			_, err := tr.buildVLLMArgs(md, "", 0)
+			if err == nil {
+				t.Fatalf("expected an error for a flag set in both engine.args and extraArgs")
+			}
+			for _, want := range []string{"tensor-parallel-size", "spec.engine.args", "spec.engine.extraArgs"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// A flag that is present ONLY in extraArgs (not also in engine.args) is a valid,
+// legitimately-repeatable override and must NOT be rejected by the duplicate
+// guard — only the cross-source contradiction is an error.
+func TestBuildVLLMArgsAllowsExtraArgsOnlyFlag(t *testing.T) {
+	tr := NewTransformer()
+	md := newTestMD("test-model", "default")
+	md.Spec.Engine.ExtraArgs = []string{"--tensor-parallel-size=2"}
+
+	if _, err := tr.buildVLLMArgs(md, "", 0); err != nil {
+		t.Fatalf("unexpected error for an extraArgs-only flag: %v", err)
+	}
+}
+
 // The same dedup must hold for the other derived flags so an explicit engine.args
 // entry is never duplicated by the structured-field renderer.
 func TestBuildVLLMArgsDerivedFlagDedup(t *testing.T) {

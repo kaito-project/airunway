@@ -397,6 +397,10 @@ func (t *Transformer) buildVLLMArgs(md *airunwayv1alpha1.ModelDeployment, kvTran
 		return nil, err
 	}
 
+	if err := validateDuplicateVLLMArgKeys(md.Spec.Engine.Args, md.Spec.Engine.ExtraArgs); err != nil {
+		return nil, err
+	}
+
 	// A flag we derive from structured spec fields (e.g. --tensor-parallel-size
 	// from the GPU count) must yield to an explicit override of the same key,
 	// whether it is provided via spec.engine.args (map) or spec.engine.extraArgs
@@ -506,6 +510,33 @@ func validateReservedVLLMServerArgs(engineArgs map[string]string, extraArgs []st
 		}
 	}
 
+	return nil
+}
+
+// validateDuplicateVLLMArgKeys rejects a launch flag that is set in BOTH
+// spec.engine.args (the structured map) and spec.engine.extraArgs (raw tokens).
+// engine.args is a map, so a key can appear there at most once; finding the same
+// key again in extraArgs is an unambiguous contradiction. We render engine.args
+// first and then append extraArgs verbatim, so without this guard the rendered
+// command would carry two conflicting copies of the flag (e.g.
+// "--tensor-parallel-size 4 … --tensor-parallel-size=2"). vLLM's argparse is
+// last-wins, so it would silently honor the extraArgs value and defeat the
+// engine.args one. Surface the conflict as a clear error instead of guessing a
+// winner; the user removes one of the two settings. Flags that legitimately
+// repeat live only in extraArgs and are untouched by this check.
+func validateDuplicateVLLMArgKeys(engineArgs map[string]string, extraArgs []string) error {
+	if len(engineArgs) == 0 {
+		return nil
+	}
+	for _, arg := range extraArgs {
+		key, ok := extraArgKey(arg)
+		if !ok {
+			continue
+		}
+		if _, dup := engineArgs[key]; dup {
+			return fmt.Errorf("launch flag %q is set in both spec.engine.args and spec.engine.extraArgs (%q); set it in exactly one place so vLLM does not receive conflicting values", key, arg)
+		}
+	}
 	return nil
 }
 
