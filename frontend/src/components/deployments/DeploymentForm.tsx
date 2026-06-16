@@ -30,6 +30,7 @@ import {
   RUNTIME_INFO,
   TENSOR_PARALLEL_SIZE_ARG,
   applyRuntimeChangeToConfig,
+  buildDeploymentFormConfig,
   buildDynamoMultiNodeOverrides,
   applyAIConfiguratorResultToConfig,
   getAIConfigRecommendedValues,
@@ -462,98 +463,62 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     e.preventDefault()
 
     try {
-      // Build the deployment config, adding KAITO-specific fields if needed
-      let deployConfig = normalizeGatewayAvailability(config, gatewayInfo?.available)
+      let imageRef: string | undefined
 
-      if (selectedRuntime === 'kaito') {
-        // Add kaitoResourceType to all KAITO deployments
-        deployConfig = { ...deployConfig, kaitoResourceType }
+      if (selectedRuntime === 'kaito' && isHuggingFaceGgufModel && ggufRunMode === 'build') {
+        // Build mode - requires Docker and building an image
+        toast({
+          title: 'Checking Build Infrastructure',
+          description: 'Verifying Docker and build tools are available...',
+        })
 
-        if (isHuggingFaceGgufModel) {
-          if (ggufRunMode === 'direct') {
-            // Direct run mode - no Docker/build required
-            // The runner image will download the model at runtime using huggingface:// URI
-            deployConfig = {
-              ...deployConfig,
-              modelSource: 'huggingface',
-              modelId: model.id,
-              ggufFile: ggufFile,
-              ggufRunMode: 'direct',
-              computeType: kaitoComputeType,
-            }
-          } else {
-            // Build mode - requires Docker and building an image
-
-            // Check if build infrastructure (Docker) is available
-            toast({
-              title: 'Checking Build Infrastructure',
-              description: 'Verifying Docker and build tools are available...',
-            })
-
-            const infraStatus = await aikitApi.getInfrastructureStatus()
-            if (!infraStatus.ready) {
-              const errorMsg = infraStatus.error ||
-                (!infraStatus.builder.running ? 'Docker is not running. Please start Docker and try again.' :
-                  !infraStatus.registry.ready ? 'Container registry is not available.' :
-                 'Build infrastructure is not ready.')
-              throw new Error(errorMsg)
-            }
-
-            // Build the image first
-            toast({
-              title: 'Building Image',
-              description: `Building GGUF model image for ${model.id}. This may take a few minutes...`,
-            })
-
-            const buildResult = await aikitApi.build({
-              modelSource: 'huggingface',
-              modelId: model.id,
-              ggufFile: ggufFile,
-            })
-
-            if (!buildResult.success || !buildResult.imageRef) {
-              throw new Error(buildResult.error || 'Failed to build model image')
-            }
-
-            toast({
-              title: 'Image Built Successfully',
-              description: `Image: ${buildResult.imageRef}`,
-              variant: 'success',
-            })
-
-            // Use the built image in the deployment config
-            deployConfig = {
-              ...deployConfig,
-              modelSource: 'huggingface',
-              modelId: model.id,
-              ggufFile: ggufFile,
-              ggufRunMode: 'build',
-              imageRef: buildResult.imageRef,
-              computeType: kaitoComputeType,
-            }
-          }
-        } else if (isVllmModel) {
-          // vLLM model via KAITO - GPU always required
-          const gpuCount = config.resources?.gpu || 1;
-          deployConfig = {
-            ...deployConfig,
-            modelSource: 'vllm',
-            modelId: model.id,
-            computeType: 'gpu',  // vLLM always requires GPU
-            resources: { gpu: gpuCount },
-            ...(maxModelLen && { maxModelLen }),
-            ...(config.hfTokenSecret && { hfTokenSecret: config.hfTokenSecret }),
-          }
-        } else {
-          // Premade model
-          deployConfig = {
-            ...deployConfig,
-            modelSource: 'premade',
-            computeType: kaitoComputeType,
-            premadeModel: selectedPremadeModel?.id,
-          }
+        const infraStatus = await aikitApi.getInfrastructureStatus()
+        if (!infraStatus.ready) {
+          const errorMsg = infraStatus.error ||
+            (!infraStatus.builder.running ? 'Docker is not running. Please start Docker and try again.' :
+              !infraStatus.registry.ready ? 'Container registry is not available.' :
+             'Build infrastructure is not ready.')
+          throw new Error(errorMsg)
         }
+
+        // Build the image first
+        toast({
+          title: 'Building Image',
+          description: `Building GGUF model image for ${model.id}. This may take a few minutes...`,
+        })
+
+        const buildResult = await aikitApi.build({
+          modelSource: 'huggingface',
+          modelId: model.id,
+          ggufFile: ggufFile,
+        })
+
+        if (!buildResult.success || !buildResult.imageRef) {
+          throw new Error(buildResult.error || 'Failed to build model image')
+        }
+
+        toast({
+          title: 'Image Built Successfully',
+          description: `Image: ${buildResult.imageRef}`,
+          variant: 'success',
+        })
+        imageRef = buildResult.imageRef
       }
+
+      const deployConfig = buildDeploymentFormConfig(config, {
+        selectedRuntime,
+        gatewayAvailable: gatewayInfo?.available,
+        kaitoResourceType,
+        isHuggingFaceGgufModel,
+        isVllmModel,
+        modelId: model.id,
+        ggufFile,
+        ggufRunMode,
+        kaitoComputeType,
+        selectedPremadeModelId: selectedPremadeModel?.id,
+        maxModelLen,
+        imageRef,
+      })
 
       await createDeployment.mutateAsync(deployConfig)
 
@@ -1631,38 +1596,19 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         {/* Manifest Preview - build config with KAITO-specific fields */}
         {(() => {
           // Build preview config with all necessary fields
-          let previewConfig = normalizeGatewayAvailability(config, gatewayInfo?.available);
-
-          if (selectedRuntime === 'kaito') {
-            // Always include kaitoResourceType for KAITO deployments
-            previewConfig = { ...previewConfig, kaitoResourceType };
-
-            if (isHuggingFaceGgufModel) {
-              previewConfig = {
-                ...previewConfig,
-                modelSource: 'huggingface' as const,
-                modelId: model.id,
-                ggufFile: ggufFile,
-                ggufRunMode: ggufRunMode,
-                computeType: kaitoComputeType,
-              };
-            } else if (isVllmModel) {
-              previewConfig = {
-                ...previewConfig,
-                modelSource: 'vllm' as const,
-                modelId: model.id,
-                computeType: 'gpu' as const,
-                ...(maxModelLen && { maxModelLen }),
-              };
-            } else if (selectedPremadeModel) {
-              previewConfig = {
-                ...previewConfig,
-                modelSource: 'premade' as const,
-                computeType: kaitoComputeType,
-                premadeModel: selectedPremadeModel.id,
-              };
-            }
-          }
+          const previewConfig = buildDeploymentFormConfig(config, {
+            selectedRuntime,
+            gatewayAvailable: gatewayInfo?.available,
+            kaitoResourceType,
+            isHuggingFaceGgufModel,
+            isVllmModel,
+            modelId: model.id,
+            ggufFile,
+            ggufRunMode,
+            kaitoComputeType,
+            selectedPremadeModelId: selectedPremadeModel?.id,
+            maxModelLen,
+          })
 
           return (
             <ManifestViewer

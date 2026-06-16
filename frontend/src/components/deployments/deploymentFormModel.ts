@@ -1,5 +1,5 @@
 import type { DeploymentConfig } from '@/hooks/useDeployments'
-import type { AIConfiguratorResult, Engine } from '@/lib/api'
+import type { AIConfiguratorResult, Engine, KaitoResourceType } from '@/lib/api'
 import { calculateMultiNode, type MultiNodeRecommendation } from '@/lib/gpu-recommendations'
 
 // Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
@@ -235,6 +235,67 @@ export function setDynamoParallelismEngineArgs(
   return Object.keys(nextEngineArgs).length > 0 ? nextEngineArgs : undefined
 }
 
+
+
+export interface DeploymentFormConfigBuildOptions {
+  selectedRuntime: RuntimeId
+  gatewayAvailable?: boolean
+  kaitoResourceType: KaitoResourceType
+  isHuggingFaceGgufModel: boolean
+  isVllmModel: boolean
+  modelId: string
+  ggufFile: string
+  ggufRunMode: GgufRunMode
+  kaitoComputeType: KaitoComputeType
+  selectedPremadeModelId?: string
+  maxModelLen?: number
+  imageRef?: string
+}
+
+export function buildDeploymentFormConfig(
+  config: DeploymentConfig,
+  options: DeploymentFormConfigBuildOptions
+): DeploymentConfig {
+  let deploymentConfig = normalizeGatewayAvailability(config, options.gatewayAvailable)
+
+  if (options.selectedRuntime !== 'kaito') {
+    return deploymentConfig
+  }
+
+  deploymentConfig = { ...deploymentConfig, kaitoResourceType: options.kaitoResourceType }
+
+  if (options.isHuggingFaceGgufModel) {
+    return {
+      ...deploymentConfig,
+      modelSource: 'huggingface',
+      modelId: options.modelId,
+      ggufFile: options.ggufFile,
+      ggufRunMode: options.ggufRunMode,
+      computeType: options.kaitoComputeType,
+      ...(options.imageRef ? { imageRef: options.imageRef } : {}),
+    }
+  }
+
+  if (options.isVllmModel) {
+    const gpuCount = config.resources?.gpu || 1
+    return {
+      ...deploymentConfig,
+      modelSource: 'vllm',
+      modelId: options.modelId,
+      computeType: 'gpu',
+      resources: { gpu: gpuCount },
+      ...(options.maxModelLen && { maxModelLen: options.maxModelLen }),
+      ...(config.hfTokenSecret && { hfTokenSecret: config.hfTokenSecret }),
+    }
+  }
+
+  return {
+    ...deploymentConfig,
+    modelSource: 'premade',
+    computeType: options.kaitoComputeType,
+    premadeModel: options.selectedPremadeModelId,
+  }
+}
 
 export interface AIConfigRecommendedValues {
   prefillReplicas?: number

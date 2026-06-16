@@ -6,6 +6,7 @@ import {
   PIPELINE_PARALLEL_SIZE_ARG,
   TENSOR_PARALLEL_SIZE_ARG,
   applyAIConfiguratorResultToConfig,
+  buildDeploymentFormConfig,
   applyRuntimeChangeToConfig,
   getAIConfigRecommendedValues,
   getAIConfiguratorAppliedToastDescription,
@@ -178,6 +179,116 @@ describe('deploymentFormModel', () => {
       prefillGpus: 4,
       decodeGpus: 1,
       gpuPerReplica: 2,
+    })
+  })
+
+
+  it('builds non-KAITO submit configs by only normalizing unavailable gateway routing', () => {
+    const next = buildDeploymentFormConfig(baseConfig({ gatewayEnabled: true }), {
+      selectedRuntime: 'dynamo',
+      gatewayAvailable: false,
+      kaitoResourceType: 'workspace',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: false,
+      modelId: 'Qwen/Qwen3-0.6B',
+      ggufFile: '',
+      ggufRunMode: 'direct',
+      kaitoComputeType: 'gpu',
+    })
+
+    expect(next.gatewayEnabled).toBeUndefined()
+    expect(next.provider).toBe('dynamo')
+  })
+
+  it('builds KAITO HuggingFace GGUF direct and built-image configs', () => {
+    const direct = buildDeploymentFormConfig(baseConfig({ provider: 'kaito' }), {
+      selectedRuntime: 'kaito',
+      gatewayAvailable: true,
+      kaitoResourceType: 'workspace',
+      isHuggingFaceGgufModel: true,
+      isVllmModel: false,
+      modelId: 'org/model-gguf',
+      ggufFile: 'model.Q4_K_M.gguf',
+      ggufRunMode: 'direct',
+      kaitoComputeType: 'cpu',
+    })
+
+    expect(direct).toMatchObject({
+      kaitoResourceType: 'workspace',
+      modelSource: 'huggingface',
+      modelId: 'org/model-gguf',
+      ggufFile: 'model.Q4_K_M.gguf',
+      ggufRunMode: 'direct',
+      computeType: 'cpu',
+    })
+    expect(direct.imageRef).toBeUndefined()
+
+    const built = buildDeploymentFormConfig(baseConfig({ provider: 'kaito' }), {
+      selectedRuntime: 'kaito',
+      gatewayAvailable: true,
+      kaitoResourceType: 'inferenceset',
+      isHuggingFaceGgufModel: true,
+      isVllmModel: false,
+      modelId: 'org/model-gguf',
+      ggufFile: 'model.Q4_K_M.gguf',
+      ggufRunMode: 'build',
+      kaitoComputeType: 'gpu',
+      imageRef: 'registry.local/model:tag',
+    })
+
+    expect(built).toMatchObject({
+      kaitoResourceType: 'inferenceset',
+      modelSource: 'huggingface',
+      ggufRunMode: 'build',
+      computeType: 'gpu',
+      imageRef: 'registry.local/model:tag',
+    })
+  })
+
+  it('builds KAITO vLLM and premade configs', () => {
+    const vllm = buildDeploymentFormConfig(baseConfig({
+      provider: 'kaito',
+      resources: { gpu: 2 },
+      hfTokenSecret: 'hf-token-secret',
+    }), {
+      selectedRuntime: 'kaito',
+      gatewayAvailable: true,
+      kaitoResourceType: 'workspace',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: true,
+      modelId: 'meta-llama/Llama-3.1-8B-Instruct',
+      ggufFile: '',
+      ggufRunMode: 'direct',
+      kaitoComputeType: 'gpu',
+      maxModelLen: 8192,
+    })
+
+    expect(vllm).toMatchObject({
+      modelSource: 'vllm',
+      modelId: 'meta-llama/Llama-3.1-8B-Instruct',
+      computeType: 'gpu',
+      resources: { gpu: 2 },
+      maxModelLen: 8192,
+      hfTokenSecret: 'hf-token-secret',
+    })
+
+    const premade = buildDeploymentFormConfig(baseConfig({ provider: 'kaito' }), {
+      selectedRuntime: 'kaito',
+      gatewayAvailable: true,
+      kaitoResourceType: 'workspace',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: false,
+      modelId: 'kaito/llama3.2-1b',
+      ggufFile: '',
+      ggufRunMode: 'direct',
+      kaitoComputeType: 'cpu',
+      selectedPremadeModelId: 'llama3.2:1b',
+    })
+
+    expect(premade).toMatchObject({
+      modelSource: 'premade',
+      computeType: 'cpu',
+      premadeModel: 'llama3.2:1b',
     })
   })
 
