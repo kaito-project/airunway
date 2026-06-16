@@ -18,6 +18,7 @@ import {
   getDefaultRuntimeForModel,
   getNodeCountFromOverrides,
   isKaitoConfigValid,
+  selectPreferredGgufFile,
 } from './deploymentFormModel'
 
 function baseConfig(overrides: Partial<DeploymentConfig> = {}): DeploymentConfig {
@@ -369,6 +370,14 @@ describe('deploymentFormModel', () => {
       gpuCount: 0,
       hasSelectedPremadeModel: true,
     })).toBe(true)
+  })
+
+
+  it('selects the preferred GGUF file without overriding an existing choice', () => {
+    expect(selectPreferredGgufFile([], '')).toBe('')
+    expect(selectPreferredGgufFile(['model.Q5_K_M.gguf', 'model.Q4_K_M.gguf'], '')).toBe('model.Q4_K_M.gguf')
+    expect(selectPreferredGgufFile(['model.Q5_K_M.gguf', 'model.Q8_0.gguf'], '')).toBe('model.Q5_K_M.gguf')
+    expect(selectPreferredGgufFile(['model.Q4_K_M.gguf'], 'custom.gguf')).toBe('custom.gguf')
   })
 
 })

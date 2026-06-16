@@ -47,6 +47,7 @@ import {
   isKaitoConfigValid,
   isRuntimeCompatible,
   normalizeGatewayAvailability,
+  selectPreferredGgufFile,
   setDynamoParallelismEngineArgs,
   setFp8PrecisionEngineArgs,
   type DeploymentMode,
@@ -150,18 +151,11 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // Auto-select Q4_K_M file if available, otherwise first file
   useEffect(() => {
-    const files = ggufFilesData?.files || [];
-    if (files.length > 0 && !ggufFile) {
-      // Look for Q4_K_M variant (case-insensitive)
-      const q4kmFile = files.find(f => /q4_k_m/i.test(f));
-      if (q4kmFile) {
-        setGgufFile(q4kmFile);
-      } else {
-        // Fallback to first file
-        setGgufFile(files[0]);
-      }
+    const nextGgufFile = selectPreferredGgufFile(ggufFilesData?.files || [], ggufFile)
+    if (nextGgufFile !== ggufFile) {
+      setGgufFile(nextGgufFile)
     }
-  }, [ggufFilesData, ggufFile]);
+  }, [ggufFilesData, ggufFile])
 
   // Get supported engines for the selected runtime, filtered by model support
   const availableEngines = getAvailableEnginesForRuntime(selectedRuntime, model.supportedEngines)

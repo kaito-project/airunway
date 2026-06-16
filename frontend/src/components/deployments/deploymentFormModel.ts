@@ -238,6 +238,15 @@ export function setDynamoParallelismEngineArgs(
 
 
 
+
+export function selectPreferredGgufFile(files: string[], currentSelection = ''): string {
+  if (currentSelection || files.length === 0) {
+    return currentSelection
+  }
+
+  return files.find(file => /q4_k_m/i.test(file)) || files[0]
+}
+
 export function calculateSelectedGpus(
   config: DeploymentConfig,
   recommendedGpus: number,
