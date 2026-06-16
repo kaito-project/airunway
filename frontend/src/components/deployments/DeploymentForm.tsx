@@ -20,10 +20,10 @@ import { AIConfiguratorPanel } from './AIConfiguratorPanel'
 import { ManifestViewer } from './ManifestViewer'
 import { CostEstimate } from './CostEstimate'
 import { StorageVolumesSection } from './StorageVolumesSection'
-import { GpuPerReplicaField } from './GpuPerReplicaField'
 import { KaitoModelConfiguration } from './KaitoModelConfiguration'
 import { KaitoResourceTypeSelector } from './KaitoResourceTypeSelector'
 import { EngineSelectionPanel } from './EngineSelectionPanel'
+import { DeploymentOptionsPanel } from './DeploymentOptionsPanel'
 import { calculateGpuRecommendation, calculateMultiNode } from '@/lib/gpu-recommendations'
 import {
   FP8_ARG_ENGINES,
@@ -55,7 +55,6 @@ import {
   type DeploymentMode,
   type GgufRunMode,
   type KaitoComputeType,
-  type RouterMode,
   type RuntimeId,
   type TraditionalEngine,
 } from './deploymentFormModel'
@@ -933,188 +932,51 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       </div>
       )}
 
-      {/* Deployment Options - show for all runtimes with vLLM/GPU */}
-      {(selectedRuntime !== 'kaito' || isVllmModel || kaitoComputeType === 'gpu') && (
-      <div className="glass-panel">
-        <h3 className="text-lg font-semibold mb-4">Deployment Options</h3>
-        <div className="space-y-4">
-          {config.mode === 'aggregated' || selectedRuntime === 'kaito' ? (
-            /* Aggregated mode: single replica count (KAITO always uses aggregated) */
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="replicas">Worker Replicas</Label>
-                <Input
-                  id="replicas"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={config.replicas}
-                  onChange={(e) => updateConfig('replicas', parseInt(e.target.value) || 1)}
-                />
-              </div>
+      <DeploymentOptionsPanel
+        config={config}
+        selectedRuntime={selectedRuntime}
+        isVllmModel={isVllmModel}
+        kaitoComputeType={kaitoComputeType}
+        detailedCapacity={detailedCapacity}
+        gpuRecommendation={gpuRecommendation}
+        aiConfigRecommendedValues={aiConfigRecommendedValues}
+        currentMultiNode={currentMultiNode}
+        onReplicasChange={(value) => updateConfig('replicas', value)}
+        onGpuPerReplicaChange={(value) => {
+          setTopologyManagedByAIConfig(false)
+          const estimatedMem = gpuRecommendation.estimatedMemoryGb
+          const gpuMem = detailedCapacity?.totalMemoryGb
 
-              {/* GPU per Replica with recommendation */}
-              <GpuPerReplicaField
-                id="gpusPerReplica"
-                value={config.resources?.gpu || gpuRecommendation.recommendedGpus}
-                onChange={(value) => {
-                  setTopologyManagedByAIConfig(false)
-                  // Recalculate multi-node when GPU count changes (Dynamo + vLLM only)
-                  const estimatedMem = gpuRecommendation.estimatedMemoryGb;
-                  const gpuMem = detailedCapacity?.totalMemoryGb;
-
-                  if (selectedRuntime === 'dynamo' && config.engine === 'vllm' && estimatedMem && gpuMem) {
-                    const multiNodeResult = calculateMultiNode(estimatedMem, gpuMem, value);
-                    if (multiNodeResult) {
-                      // Model needs multi-node
-                      setConfig(prev => ({
-                        ...prev,
-                        resources: { ...prev.resources, gpu: value },
-                        providerOverrides: buildDynamoMultiNodeOverrides(multiNodeResult.nodeCount),
-                        engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, multiNodeResult),
-                      }))
-                    } else {
-                      // Model fits on a single node - clear multi-node overrides and Dynamo parallel args.
-                      setConfig(prev => {
-                        return {
-                          ...prev,
-                          resources: { ...prev.resources, gpu: value },
-                          providerOverrides: undefined,
-                          engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
-                        };
-                      })
-                    }
-                  } else {
-                    setConfig(prev => ({
-                      ...prev,
-                      resources: { ...prev.resources, gpu: value }
-                    }))
-                  }
-                }}
-                maxGpus={detailedCapacity?.maxNodeGpuCapacity || 8}
-                recommendation={gpuRecommendation}
-                aiConfigRecommended={aiConfigRecommendedValues?.gpuPerReplica}
-                multiNode={currentMultiNode}
-              />
-
-              {/* Router Mode is only applicable to Dynamo provider */}
-              {selectedRuntime === 'dynamo' && (
-                <div className="space-y-2">
-                  <Label>Router Mode</Label>
-                  <RadioGroup
-                    value={config.routerMode}
-                    onValueChange={(value) => updateConfig('routerMode', value as RouterMode)}
-                    className="flex gap-4"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="default" id="router-default" />
-                      <Label htmlFor="router-default" className="cursor-pointer">Default</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="kv" id="router-kv" />
-                      <Label htmlFor="router-kv" className="cursor-pointer">KV-Aware</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="round-robin" id="router-rr" />
-                      <Label htmlFor="router-rr" className="cursor-pointer">Round Robin</Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Disaggregated mode: separate prefill/decode configuration */
-            <div className="space-y-6">
-              {/* Prefill Workers */}
-              <div className="space-y-3">
-                <h4 className="font-medium text-sm">Prefill Workers</h4>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="prefillReplicas" className="flex items-center gap-2">
-                      Replicas
-                      {aiConfigRecommendedValues?.prefillReplicas === config.prefillReplicas && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                          <Sparkles className="h-2.5 w-2.5" />
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      id="prefillReplicas"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={config.prefillReplicas || 1}
-                      onChange={(e) => updateConfig('prefillReplicas', parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="prefillGpus" className="flex items-center gap-2">
-                      GPUs per Worker
-                      {aiConfigRecommendedValues?.prefillGpus === config.prefillGpus && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                          <Sparkles className="h-2.5 w-2.5" />
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      id="prefillGpus"
-                      type="number"
-                      min={1}
-                      max={8}
-                      value={config.prefillGpus || 1}
-                      onChange={(e) => updateConfig('prefillGpus', parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Decode Workers */}
-              <div className="space-y-3">
-                <h4 className="font-medium text-sm">Decode Workers</h4>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="decodeReplicas" className="flex items-center gap-2">
-                      Replicas
-                      {aiConfigRecommendedValues?.decodeReplicas === config.decodeReplicas && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                          <Sparkles className="h-2.5 w-2.5" />
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      id="decodeReplicas"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={config.decodeReplicas || 1}
-                      onChange={(e) => updateConfig('decodeReplicas', parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="decodeGpus" className="flex items-center gap-2">
-                      GPUs per Worker
-                      {aiConfigRecommendedValues?.decodeGpus === config.decodeGpus && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                          <Sparkles className="h-2.5 w-2.5" />
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      id="decodeGpus"
-                      type="number"
-                      min={1}
-                      max={8}
-                      value={config.decodeGpus || 1}
-                      onChange={(e) => updateConfig('decodeGpus', parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-      )}
+          if (selectedRuntime === 'dynamo' && config.engine === 'vllm' && estimatedMem && gpuMem) {
+            const multiNodeResult = calculateMultiNode(estimatedMem, gpuMem, value)
+            if (multiNodeResult) {
+              setConfig(prev => ({
+                ...prev,
+                resources: { ...prev.resources, gpu: value },
+                providerOverrides: buildDynamoMultiNodeOverrides(multiNodeResult.nodeCount),
+                engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, multiNodeResult),
+              }))
+            } else {
+              setConfig(prev => ({
+                ...prev,
+                resources: { ...prev.resources, gpu: value },
+                providerOverrides: undefined,
+                engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
+              }))
+            }
+          } else {
+            setConfig(prev => ({
+              ...prev,
+              resources: { ...prev.resources, gpu: value },
+            }))
+          }
+        }}
+        onRouterModeChange={(value) => updateConfig('routerMode', value)}
+        onPrefillReplicasChange={(value) => updateConfig('prefillReplicas', value)}
+        onPrefillGpusChange={(value) => updateConfig('prefillGpus', value)}
+        onDecodeReplicasChange={(value) => updateConfig('decodeReplicas', value)}
+        onDecodeGpusChange={(value) => updateConfig('decodeGpus', value)}
+      />
 
       {/* Storage Volumes - only shown for Dynamo runtime */}
       {selectedRuntime === 'dynamo' && (
