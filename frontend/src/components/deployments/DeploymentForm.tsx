@@ -11,7 +11,7 @@ import { usePremadeModels } from '@/hooks/useAikit'
 import { useGatewayStatus } from '@/hooks/useGateway'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
-import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, type KaitoResourceType } from '@/lib/api'
+import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, aikitApi, type KaitoResourceType } from '@/lib/api'
 import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Box, HardDrive } from 'lucide-react'
 import { CapacityWarning } from './CapacityWarning'
 import { AIConfiguratorPanel } from './AIConfiguratorPanel'
@@ -23,6 +23,7 @@ import { KaitoResourceTypeSelector } from './KaitoResourceTypeSelector'
 import { EngineSelectionPanel } from './EngineSelectionPanel'
 import { DeploymentOptionsPanel } from './DeploymentOptionsPanel'
 import { RuntimeSelectionPanel } from './RuntimeSelectionPanel'
+import { useDeploymentAIConfiguratorState } from './useDeploymentAIConfiguratorState'
 import { DeploymentModePanel } from './DeploymentModePanel'
 import { prepareGgufImageRef } from './deploymentFormSubmit'
 import { calculateGpuRecommendation } from '@/lib/gpu-recommendations'
@@ -38,9 +39,6 @@ import {
   applyGpuPerReplicaChangeToConfig,
   buildDeploymentFormConfig,
   buildDynamoMultiNodeOverrides,
-  applyAIConfiguratorResultToConfig,
-  getAIConfigRecommendedValues,
-  getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
   getDefaultRuntimeForModel,
   getDeploymentModelFacts,
@@ -53,7 +51,6 @@ import {
   selectPreferredGgufFile,
   setDynamoParallelismEngineArgs,
   setFp8PrecisionEngineArgs,
-  type DeploymentMode,
   type GgufRunMode,
   type KaitoComputeType,
   type RuntimeId,
@@ -111,20 +108,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   const isSelectedCrdLessRuntimeNotReady = isSelectedCrdLessRuntime && !selectedRuntimeStatus?.installed
   const isRuntimeInstalled = selectedRuntimeStatus?.installed ?? false
 
-  // AI Configurator state - tracks supported backends and recommended mode
-  const [aiConfigSupportedBackends, setAiConfigSupportedBackends] = useState<string[] | null>(null)
-  const [aiConfigRecommendedBackend, setAiConfigRecommendedBackend] = useState<string | null>(null)
-  const [aiConfigRecommendedMode, setAiConfigRecommendedMode] = useState<DeploymentMode | null>(null)
-  const [topologyManagedByAIConfig, setTopologyManagedByAIConfig] = useState(false)
-  // Track AI Configurator recommended values for disaggregated mode
-  const [aiConfigRecommendedValues, setAiConfigRecommendedValues] = useState<{
-    prefillReplicas?: number
-    decodeReplicas?: number
-    prefillGpus?: number
-    decodeGpus?: number
-    gpuPerReplica?: number
-  } | null>(null)
-
   // KAITO-specific state
   const [kaitoComputeType, setKaitoComputeType] = useState<KaitoComputeType>('cpu')
   const [kaitoResourceType, setKaitoResourceType] = useState<KaitoResourceType>('workspace')
@@ -163,6 +146,12 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   const [config, setConfig] = useState<DeploymentConfig>(() =>
     createInitialDeploymentConfig({ model, runtime: defaultRuntime })
   )
+
+  const aiConfigurator = useDeploymentAIConfiguratorState({
+    selectedRuntime,
+    setConfig,
+    toast,
+  })
 
   // Fetch PVCs for the selected namespace (for existing disk selection)
   const { data: availablePVCs } = usePVCs(
@@ -215,7 +204,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       config.mode === 'aggregated' &&
       config.engine === 'vllm';
 
-    if (topologyManagedByAIConfig) {
+    if (aiConfigurator.topologyManagedByAIConfig) {
       return;
     }
 
@@ -278,7 +267,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     selectedRuntime,
     config.engine,
     config.mode,
-    topologyManagedByAIConfig,
+    aiConfigurator.topologyManagedByAIConfig,
   ])
 
   // Apply (or strip) FP8 precision engine args based on the Deploy page's
@@ -322,7 +311,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // Handle runtime change - update namespace and engine
   const handleRuntimeChange = (runtime: RuntimeId) => {
-    setTopologyManagedByAIConfig(false)
+    aiConfigurator.resetForRuntime(runtime)
     setSelectedRuntime(runtime)
     setConfig(prev => applyRuntimeChangeToConfig(prev, {
       runtime,
@@ -338,13 +327,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       setKaitoComputeType('cpu')
     }
 
-    // Reset AI Configurator state when switching away from Dynamo
-    // This ensures optimization badges are cleared when changing providers
     if (runtime !== 'dynamo') {
-      setAiConfigSupportedBackends(null)
-      setAiConfigRecommendedBackend(null)
-      setAiConfigRecommendedMode(null)
-      setAiConfigRecommendedValues(null)
       // Clear storage config (storage volumes are only for Dynamo)
       setConfig(prev => ({ ...prev, storage: undefined }))
     }
@@ -441,29 +424,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     setConfig((prev) => ({ ...prev, [key]: value }))
   }
 
-  // Handler for applying AI Configurator recommendations
-  const handleApplyAIConfig = useCallback((result: AIConfiguratorResult) => {
-    // Store supported backends info for engine selection UI
-    if (result.supportedBackends) {
-      setAiConfigSupportedBackends(result.supportedBackends)
-    }
-    if (result.backend) {
-      setAiConfigRecommendedBackend(result.backend)
-    }
-
-    // Store recommended mode and values for badges
-    setAiConfigRecommendedMode(result.mode)
-    setAiConfigRecommendedValues(getAIConfigRecommendedValues(result))
-    setTopologyManagedByAIConfig(true)
-    setConfig(prev => applyAIConfiguratorResultToConfig(prev, result, selectedRuntime))
-
-    toast({
-      title: 'Configuration Applied',
-      description: getAIConfiguratorAppliedToastDescription(result),
-      variant: 'success',
-    })
-  }, [selectedRuntime, toast])
-
   const { selectedGpus, currentMultiNode, maxGpusPerPod } = getDeploymentResourceSummary({
     config,
     recommendedGpus: gpuRecommendation.recommendedGpus,
@@ -554,15 +514,8 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         <AIConfiguratorPanel
           modelId={model.id}
           detailedCapacity={detailedCapacity}
-          onApplyConfig={handleApplyAIConfig}
-          onDiscard={() => {
-            // Clear AI Configurator state when discarding
-            setTopologyManagedByAIConfig(false)
-            setAiConfigSupportedBackends(null)
-            setAiConfigRecommendedBackend(null)
-            setAiConfigRecommendedMode(null)
-            setAiConfigRecommendedValues(null)
-          }}
+          onApplyConfig={aiConfigurator.applyConfig}
+          onDiscard={aiConfigurator.discard}
         />
       )}
 
@@ -629,10 +582,10 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
           runtimeName={RUNTIME_INFO[selectedRuntime].name}
           availableEngines={availableEngines}
           engine={config.engine}
-          aiConfigSupportedBackends={aiConfigSupportedBackends}
-          aiConfigRecommendedBackend={aiConfigRecommendedBackend}
+          aiConfigSupportedBackends={aiConfigurator.supportedBackends}
+          aiConfigRecommendedBackend={aiConfigurator.recommendedBackend}
           onEngineChange={(engine) => {
-            setTopologyManagedByAIConfig(false)
+            aiConfigurator.markTopologyManuallyEdited()
             updateConfig('engine', engine)
           }}
         />
@@ -675,9 +628,9 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         <DeploymentModePanel
           mode={config.mode}
           selectedRuntime={selectedRuntime}
-          aiConfigRecommendedMode={aiConfigRecommendedMode}
+          aiConfigRecommendedMode={aiConfigurator.recommendedMode}
           onModeChange={(mode) => {
-            setTopologyManagedByAIConfig(false)
+            aiConfigurator.markTopologyManuallyEdited()
             setConfig(prev => applyDeploymentModeChangeToConfig(prev, mode))
           }}
         />
@@ -690,11 +643,11 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         kaitoComputeType={kaitoComputeType}
         detailedCapacity={detailedCapacity}
         gpuRecommendation={gpuRecommendation}
-        aiConfigRecommendedValues={aiConfigRecommendedValues}
+        aiConfigRecommendedValues={aiConfigurator.recommendedValues}
         currentMultiNode={currentMultiNode}
         onReplicasChange={(value) => updateConfig('replicas', value)}
         onGpuPerReplicaChange={(value) => {
-          setTopologyManagedByAIConfig(false)
+          aiConfigurator.markTopologyManuallyEdited()
           setConfig(prev => applyGpuPerReplicaChangeToConfig(prev, {
             selectedRuntime,
             gpuCount: value,
