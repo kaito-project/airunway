@@ -340,6 +340,116 @@ export function getMaxGpusPerPod(config: DeploymentConfig, recommendedGpus: numb
     : (config.resources?.gpu || recommendedGpus || 1)
 }
 
+export interface DeploymentResourceSummary {
+  selectedGpus: number
+  currentMultiNode: MultiNodeRecommendation | null
+  maxGpusPerPod: number
+}
+
+export function getDeploymentResourceSummary(options: {
+  config: DeploymentConfig
+  recommendedGpus: number
+  currentNodeCount: number
+  currentPipelineParallel?: number
+}): DeploymentResourceSummary {
+  return {
+    selectedGpus: calculateSelectedGpus(options.config, options.recommendedGpus, options.currentNodeCount),
+    currentMultiNode: getCurrentMultiNode(
+      options.config,
+      options.recommendedGpus,
+      options.currentNodeCount,
+      options.currentPipelineParallel
+    ),
+    maxGpusPerPod: getMaxGpusPerPod(options.config, options.recommendedGpus),
+  }
+}
+
+export type DeploymentSubmitStatus = 'idle' | 'validating' | 'submitting' | 'success' | string
+
+export type DeploymentSubmitButtonKind =
+  | 'hf-auth-required'
+  | 'fp8-blocked'
+  | 'runtime-not-ready'
+  | 'runtime-not-installed'
+  | 'select-kaito-model'
+  | 'select-gguf-file'
+  | 'configure-kaito-gpus'
+  | 'validating'
+  | 'submitting'
+  | 'success'
+  | 'ready'
+
+export interface DeploymentSubmitButtonState {
+  disabled: boolean
+  label: string
+  kind: DeploymentSubmitButtonKind
+  kaitoConfigValid: boolean
+}
+
+export function getDeploymentSubmitButtonState(options: {
+  isProcessing: boolean
+  submitStatus: DeploymentSubmitStatus
+  needsHfAuth: boolean
+  fp8Blocked: boolean
+  isRuntimeInstalled: boolean
+  isSelectedCrdLessRuntimeNotReady: boolean
+  selectedRuntime: RuntimeId
+  isHuggingFaceGgufModel: boolean
+  isVllmModel: boolean
+  ggufFile: string
+  gpuCount: number
+  hasSelectedPremadeModel: boolean
+}): DeploymentSubmitButtonState {
+  const kaitoConfigValid = isKaitoConfigValid({
+    selectedRuntime: options.selectedRuntime,
+    isHuggingFaceGgufModel: options.isHuggingFaceGgufModel,
+    isVllmModel: options.isVllmModel,
+    ggufFile: options.ggufFile,
+    gpuCount: options.gpuCount,
+    hasSelectedPremadeModel: options.hasSelectedPremadeModel,
+  })
+
+  if (options.needsHfAuth) {
+    return { disabled: true, label: 'HuggingFace Auth Required', kind: 'hf-auth-required', kaitoConfigValid }
+  }
+
+  if (options.fp8Blocked) {
+    return { disabled: true, label: 'FP8 Not Supported on This GPU', kind: 'fp8-blocked', kaitoConfigValid }
+  }
+
+  if (!options.isRuntimeInstalled) {
+    return {
+      disabled: true,
+      label: options.isSelectedCrdLessRuntimeNotReady ? 'Runtime Not Ready' : 'Runtime Not Installed',
+      kind: options.isSelectedCrdLessRuntimeNotReady ? 'runtime-not-ready' : 'runtime-not-installed',
+      kaitoConfigValid,
+    }
+  }
+
+  if (options.selectedRuntime === 'kaito' && !options.isHuggingFaceGgufModel && !options.isVllmModel && !options.hasSelectedPremadeModel) {
+    return { disabled: true, label: 'Select a Model', kind: 'select-kaito-model', kaitoConfigValid }
+  }
+
+  if (options.selectedRuntime === 'kaito' && options.isHuggingFaceGgufModel && !options.ggufFile.endsWith('.gguf')) {
+    return { disabled: true, label: 'Select GGUF File', kind: 'select-gguf-file', kaitoConfigValid }
+  }
+
+  if (options.selectedRuntime === 'kaito' && options.isVllmModel && options.gpuCount < 1) {
+    return { disabled: true, label: 'Configure GPUs', kind: 'configure-kaito-gpus', kaitoConfigValid }
+  }
+
+  switch (options.submitStatus) {
+    case 'validating':
+      return { disabled: options.isProcessing, label: 'Validating...', kind: 'validating', kaitoConfigValid }
+    case 'submitting':
+      return { disabled: options.isProcessing, label: 'Deploying...', kind: 'submitting', kaitoConfigValid }
+    case 'success':
+      return { disabled: options.isProcessing, label: 'Deployed!', kind: 'success', kaitoConfigValid }
+    default:
+      return { disabled: options.isProcessing, label: 'Deploy Model', kind: 'ready', kaitoConfigValid }
+  }
+}
+
 export function isKaitoConfigValid(options: {
   selectedRuntime: RuntimeId
   isHuggingFaceGgufModel: boolean

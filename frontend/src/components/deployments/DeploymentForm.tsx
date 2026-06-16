@@ -35,20 +35,18 @@ import {
   TENSOR_PARALLEL_SIZE_ARG,
   applyRuntimeChangeToConfig,
   buildDeploymentFormConfig,
-  calculateSelectedGpus,
   buildDynamoMultiNodeOverrides,
   applyAIConfiguratorResultToConfig,
   getAIConfigRecommendedValues,
   getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
-  getCurrentMultiNode,
-  getMaxGpusPerPod,
   getDefaultRuntimeForModel,
   getDeploymentModelFacts,
   createInitialDeploymentConfig,
   getNodeCountFromOverrides,
   getNumericEngineArg,
-  isKaitoConfigValid,
+  getDeploymentResourceSummary,
+  getDeploymentSubmitButtonState,
   normalizeGatewayAvailability,
   selectPreferredGgufFile,
   setDynamoParallelismEngineArgs,
@@ -464,15 +462,19 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     })
   }, [selectedRuntime, toast])
 
-  const selectedGpus = calculateSelectedGpus(config, gpuRecommendation.recommendedGpus, currentNodeCount)
-  const currentMultiNode = getCurrentMultiNode(
+  const { selectedGpus, currentMultiNode, maxGpusPerPod } = getDeploymentResourceSummary({
     config,
-    gpuRecommendation.recommendedGpus,
+    recommendedGpus: gpuRecommendation.recommendedGpus,
     currentNodeCount,
-    currentPipelineParallel
-  )
-  const maxGpusPerPod = getMaxGpusPerPod(config, gpuRecommendation.recommendedGpus)
-  const kaitoConfigValid = isKaitoConfigValid({
+    currentPipelineParallel,
+  })
+  const submitButtonState = getDeploymentSubmitButtonState({
+    isProcessing: createDeployment.isProcessing,
+    submitStatus: createDeployment.status,
+    needsHfAuth,
+    fp8Blocked,
+    isRuntimeInstalled,
+    isSelectedCrdLessRuntimeNotReady,
     selectedRuntime,
     isHuggingFaceGgufModel,
     isVllmModel,
@@ -480,56 +482,30 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     gpuCount: config.resources?.gpu || 0,
     hasSelectedPremadeModel: selectedPremadeModel !== null,
   })
-
   // Status-aware button content
   const getButtonContent = () => {
-    if (needsHfAuth) {
-      return 'HuggingFace Auth Required'
+    if (submitButtonState.kind === 'success') {
+      return (
+        <>
+          <CheckCircle2 className="h-4 w-4" />
+          {submitButtonState.label}
+        </>
+      )
     }
 
-    if (fp8Blocked) {
-      return 'FP8 Not Supported on This GPU'
+    if (submitButtonState.kind === 'ready') {
+      return (
+        <>
+          <Rocket className="h-4 w-4" />
+          {submitButtonState.label}
+          <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-primary-foreground/20 rounded">
+            ⌘↵
+          </kbd>
+        </>
+      )
     }
 
-    if (!isRuntimeInstalled) {
-      return isSelectedCrdLessRuntimeNotReady ? 'Runtime Not Ready' : 'Runtime Not Installed'
-    }
-
-    if (selectedRuntime === 'kaito' && !isHuggingFaceGgufModel && !isVllmModel && !selectedPremadeModel) {
-      return 'Select a Model'
-    }
-
-    if (selectedRuntime === 'kaito' && isHuggingFaceGgufModel && !ggufFile.endsWith('.gguf')) {
-      return 'Select GGUF File'
-    }
-
-    if (selectedRuntime === 'kaito' && isVllmModel && (config.resources?.gpu || 0) < 1) {
-      return 'Configure GPUs'
-    }
-
-    switch (createDeployment.status) {
-      case 'validating':
-        return 'Validating...'
-      case 'submitting':
-        return 'Deploying...'
-      case 'success':
-        return (
-          <>
-            <CheckCircle2 className="h-4 w-4" />
-            Deployed!
-          </>
-        )
-      default:
-        return (
-          <>
-            <Rocket className="h-4 w-4" />
-            Deploy Model
-            <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-primary-foreground/20 rounded">
-              ⌘↵
-            </kbd>
-          </>
-        )
-    }
+    return submitButtonState.label
   }
 
   return (
@@ -1014,7 +990,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         </Button>
         <Button
           type="submit"
-          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled || !kaitoConfigValid || fp8Blocked}
+          disabled={submitButtonState.disabled}
           loading={createDeployment.isProcessing}
           className={cn(
             "flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold shadow-glow-button gap-2",

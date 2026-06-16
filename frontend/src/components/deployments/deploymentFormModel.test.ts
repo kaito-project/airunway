@@ -18,6 +18,8 @@ import {
   getMaxGpusPerPod,
   getDefaultRuntimeForModel,
   getDeploymentModelFacts,
+  getDeploymentResourceSummary,
+  getDeploymentSubmitButtonState,
   getNodeCountFromOverrides,
   isKaitoConfigValid,
   selectPreferredGgufFile,
@@ -373,6 +375,123 @@ describe('deploymentFormModel', () => {
     })
     expect(calculateSelectedGpus(disaggregated, 1, 1)).toBe(10)
     expect(getMaxGpusPerPod(disaggregated, 1)).toBe(3)
+  })
+
+  it('collects deployment resource summary behind one interface', () => {
+    const aggregated = baseConfig({
+      replicas: 2,
+      resources: { gpu: 4 },
+      providerOverrides: { spec: { services: { VllmWorker: { multinode: { nodeCount: 3 } } } } },
+      engineArgs: { [PIPELINE_PARALLEL_SIZE_ARG]: '3' },
+    })
+
+    expect(getDeploymentResourceSummary({
+      config: aggregated,
+      recommendedGpus: 1,
+      currentNodeCount: getNodeCountFromOverrides(aggregated.providerOverrides),
+      currentPipelineParallel: 3,
+    })).toEqual({
+      selectedGpus: 24,
+      currentMultiNode: {
+        nodeCount: 3,
+        gpusPerNode: 4,
+        totalGpus: 12,
+        pipelineParallelSize: 3,
+      },
+      maxGpusPerPod: 4,
+    })
+  })
+
+  it('derives submit button state from auth, runtime, KAITO, and mutation status rules', () => {
+    const base = {
+      isProcessing: false,
+      submitStatus: 'idle',
+      needsHfAuth: false,
+      fp8Blocked: false,
+      isRuntimeInstalled: true,
+      isSelectedCrdLessRuntimeNotReady: false,
+      selectedRuntime: 'dynamo' as const,
+      isHuggingFaceGgufModel: false,
+      isVllmModel: true,
+      ggufFile: '',
+      gpuCount: 1,
+      hasSelectedPremadeModel: false,
+    }
+
+    expect(getDeploymentSubmitButtonState(base)).toMatchObject({
+      disabled: false,
+      label: 'Deploy Model',
+      kind: 'ready',
+      kaitoConfigValid: true,
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, needsHfAuth: true })).toMatchObject({
+      disabled: true,
+      label: 'HuggingFace Auth Required',
+      kind: 'hf-auth-required',
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, fp8Blocked: true })).toMatchObject({
+      disabled: true,
+      label: 'FP8 Not Supported on This GPU',
+      kind: 'fp8-blocked',
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, isRuntimeInstalled: false, isSelectedCrdLessRuntimeNotReady: true })).toMatchObject({
+      disabled: true,
+      label: 'Runtime Not Ready',
+      kind: 'runtime-not-ready',
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, submitStatus: 'submitting', isProcessing: true })).toMatchObject({
+      disabled: true,
+      label: 'Deploying...',
+      kind: 'submitting',
+    })
+  })
+
+  it('derives KAITO-specific submit button blocks', () => {
+    const base = {
+      isProcessing: false,
+      submitStatus: 'idle',
+      needsHfAuth: false,
+      fp8Blocked: false,
+      isRuntimeInstalled: true,
+      isSelectedCrdLessRuntimeNotReady: false,
+      selectedRuntime: 'kaito' as const,
+      isHuggingFaceGgufModel: false,
+      isVllmModel: false,
+      ggufFile: '',
+      gpuCount: 0,
+      hasSelectedPremadeModel: false,
+    }
+
+    expect(getDeploymentSubmitButtonState(base)).toMatchObject({
+      disabled: true,
+      label: 'Select a Model',
+      kind: 'select-kaito-model',
+      kaitoConfigValid: false,
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, isHuggingFaceGgufModel: true })).toMatchObject({
+      disabled: true,
+      label: 'Select GGUF File',
+      kind: 'select-gguf-file',
+      kaitoConfigValid: false,
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, isHuggingFaceGgufModel: true, ggufFile: 'model.gguf' })).toMatchObject({
+      disabled: false,
+      label: 'Deploy Model',
+      kind: 'ready',
+      kaitoConfigValid: true,
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, isVllmModel: true })).toMatchObject({
+      disabled: true,
+      label: 'Configure GPUs',
+      kind: 'configure-kaito-gpus',
+      kaitoConfigValid: false,
+    })
+    expect(getDeploymentSubmitButtonState({ ...base, hasSelectedPremadeModel: true })).toMatchObject({
+      disabled: false,
+      label: 'Deploy Model',
+      kind: 'ready',
+      kaitoConfigValid: true,
+    })
   })
 
   it('validates KAITO source-specific requirements', () => {
