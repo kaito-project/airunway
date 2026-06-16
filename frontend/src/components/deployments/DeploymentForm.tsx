@@ -27,10 +27,13 @@ import {
   KV_CACHE_DTYPE_ARG,
   PIPELINE_PARALLEL_SIZE_ARG,
   QUANTIZATION_ARG,
-  RUNTIME_ENGINES,
   RUNTIME_INFO,
   TENSOR_PARALLEL_SIZE_ARG,
+  applyRuntimeChangeToConfig,
   buildDynamoMultiNodeOverrides,
+  getAvailableEnginesForRuntime,
+  getDefaultEngineForRuntime,
+  getDefaultRuntimeForModel,
   getNodeCountFromOverrides,
   getNumericEngineArg,
   isRuntimeCompatible,
@@ -144,31 +147,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   const needsHfAuth = isGatedModel && !hfStatus?.configured
 
   // Determine default runtime: prefer compatible and installed runtime
-  const getDefaultRuntime = (): RuntimeId => {
-    if (!runtimes || runtimes.length === 0) {
-      // Fallback based on model engines
-      return model.supportedEngines.includes('llamacpp') ? 'kaito' : 'dynamo'
-    }
-
-    // Find first compatible and installed runtime
-    const compatibleRuntimes: RuntimeId[] = ['dynamo', 'kuberay', 'kaito', 'llmd', 'vllm']
-    for (const rtId of compatibleRuntimes) {
-      const rt = runtimes.find(r => r.id === rtId)
-      if (rt?.installed && isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId
-      }
-    }
-
-    // If no compatible installed runtime, return the first compatible runtime that is available to select
-    for (const rtId of compatibleRuntimes) {
-      const rt = runtimes.find(r => r.id === rtId)
-      if (rt && isRuntimeCompatible(rtId, model.supportedEngines)) {
-        return rtId
-      }
-    }
-
-    return 'dynamo'
-  }
+  const getDefaultRuntime = (): RuntimeId => getDefaultRuntimeForModel(model.supportedEngines, runtimes)
 
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId>(getDefaultRuntime)
   const selectedRuntimeStatus = runtimes?.find(r => r.id === selectedRuntime)
@@ -232,25 +211,8 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   }, [ggufFilesData, ggufFile]);
 
   // Get supported engines for the selected runtime, filtered by model support
-  const getAvailableEngines = (): TraditionalEngine[] => {
-    const runtimeEngines = RUNTIME_ENGINES[selectedRuntime]
-    // Filter model engines to only those supported by the runtime (excluding llamacpp)
-    return model.supportedEngines.filter(
-      (e): e is TraditionalEngine => runtimeEngines.includes(e as TraditionalEngine)
-    )
-  }
-  const availableEngines = getAvailableEngines()
+  const availableEngines = getAvailableEnginesForRuntime(selectedRuntime, model.supportedEngines)
 
-  const getDefaultEngineForRuntime = (runtime: RuntimeId): Engine => {
-    if (model.supportedEngines.length === 1) {
-      return model.supportedEngines[0]
-    }
-
-    const runtimeEngines = RUNTIME_ENGINES[runtime]
-    return model.supportedEngines.find(
-      (e): e is TraditionalEngine => runtimeEngines.includes(e as TraditionalEngine)
-    ) || model.supportedEngines[0] || 'vllm'
-  }
 
   const defaultRuntime = getDefaultRuntime()
 
@@ -259,7 +221,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     name: generateDeploymentName(model.id),
     namespace: RUNTIME_INFO[defaultRuntime].defaultNamespace,
     modelId: model.id,
-    engine: getDefaultEngineForRuntime(defaultRuntime),
+    engine: getDefaultEngineForRuntime(defaultRuntime, model.supportedEngines),
     mode: 'aggregated',
     provider: defaultRuntime,
     routerMode: 'default',
@@ -439,52 +401,13 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   const handleRuntimeChange = (runtime: RuntimeId) => {
     setTopologyManagedByAIConfig(false)
     setSelectedRuntime(runtime)
-    const newAvailableEngines = model.supportedEngines.filter(
-      (e): e is TraditionalEngine => RUNTIME_ENGINES[runtime].includes(e as TraditionalEngine)
-    )
-    const currentEngineSupported = newAvailableEngines.includes(config.engine as TraditionalEngine)
-
-    setConfig(prev => {
-      const nextEngine = currentEngineSupported ? prev.engine : getDefaultEngineForRuntime(runtime)
-      const shouldManageDynamoParallelism =
-        runtime === 'dynamo' &&
-        prev.mode === 'aggregated' &&
-        nextEngine === 'vllm'
-
-      let newEngineArgs = setDynamoParallelismEngineArgs(prev.engineArgs, null)
-      let newProviderOverrides = shouldManageDynamoParallelism ? prev.providerOverrides : undefined
-
-      // When switching TO Dynamo + vLLM, recalculate multi-node from current GPU config.
-      if (shouldManageDynamoParallelism) {
-        const estimatedMem = gpuRecommendation.estimatedMemoryGb;
-        const gpuMem = detailedCapacity?.totalMemoryGb;
-        const currentGpu = prev.resources?.gpu || gpuRecommendation.recommendedGpus || 1;
-
-        if (estimatedMem && gpuMem) {
-          const multiNodeResult = calculateMultiNode(estimatedMem, gpuMem, currentGpu);
-          if (multiNodeResult) {
-            newProviderOverrides = buildDynamoMultiNodeOverrides(multiNodeResult.nodeCount)
-            newEngineArgs = setDynamoParallelismEngineArgs(newEngineArgs, multiNodeResult)
-          } else {
-            newProviderOverrides = undefined;
-          }
-        }
-      }
-
-      return {
-        ...prev,
-        provider: runtime,
-        namespace: RUNTIME_INFO[runtime].defaultNamespace,
-        // Reset engine if current one isn't supported by new runtime
-        engine: nextEngine,
-        // Reset router mode if switching away from Dynamo
-        routerMode: runtime === 'dynamo' ? prev.routerMode : 'default',
-        // Reset to aggregated mode if switching to KAITO (disaggregated not supported)
-        mode: runtime === 'kaito' ? 'aggregated' : prev.mode,
-        providerOverrides: newProviderOverrides,
-        engineArgs: newEngineArgs,
-      }
-    })
+    setConfig(prev => applyRuntimeChangeToConfig(prev, {
+      runtime,
+      modelEngines: model.supportedEngines,
+      recommendedGpus: gpuRecommendation.recommendedGpus,
+      estimatedMemoryGb: gpuRecommendation.estimatedMemoryGb,
+      gpuMemoryGb: detailedCapacity?.totalMemoryGb,
+    }))
 
     // Reset KAITO-specific state when switching away from KAITO
     if (runtime !== 'kaito') {

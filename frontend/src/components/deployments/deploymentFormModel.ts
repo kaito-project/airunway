@@ -1,6 +1,6 @@
 import type { DeploymentConfig } from '@/hooks/useDeployments'
 import type { Engine } from '@/lib/api'
-import type { MultiNodeRecommendation } from '@/lib/gpu-recommendations'
+import { calculateMultiNode, type MultiNodeRecommendation } from '@/lib/gpu-recommendations'
 
 // Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
 export type TraditionalEngine = 'vllm' | 'sglang' | 'trtllm'
@@ -85,6 +85,105 @@ export function isRuntimeCompatible(runtimeId: RuntimeId, modelEngines: Engine[]
 }
 
 // Extract nodeCount from providerOverrides structure
+
+const RUNTIME_PREFERENCE: RuntimeId[] = ['dynamo', 'kuberay', 'kaito', 'llmd', 'vllm']
+
+export function getDefaultRuntimeForModel(
+  modelEngines: Engine[],
+  runtimes?: Array<{ id: string; installed?: boolean }>
+): RuntimeId {
+  if (!runtimes || runtimes.length === 0) {
+    return modelEngines.includes('llamacpp') ? 'kaito' : 'dynamo'
+  }
+
+  // Find first compatible and installed runtime
+  for (const rtId of RUNTIME_PREFERENCE) {
+    const rt = runtimes.find(r => r.id === rtId)
+    if (rt?.installed && isRuntimeCompatible(rtId, modelEngines)) {
+      return rtId
+    }
+  }
+
+  // If no compatible installed runtime, return the first compatible runtime that is available to select
+  for (const rtId of RUNTIME_PREFERENCE) {
+    const rt = runtimes.find(r => r.id === rtId)
+    if (rt && isRuntimeCompatible(rtId, modelEngines)) {
+      return rtId
+    }
+  }
+
+  return 'dynamo'
+}
+
+export function getAvailableEnginesForRuntime(runtime: RuntimeId, modelEngines: Engine[]): TraditionalEngine[] {
+  const runtimeEngines = RUNTIME_ENGINES[runtime]
+  // Filter model engines to only those supported by the runtime (excluding llamacpp)
+  return modelEngines.filter(
+    (e): e is TraditionalEngine => runtimeEngines.includes(e as TraditionalEngine)
+  )
+}
+
+export function getDefaultEngineForRuntime(runtime: RuntimeId, modelEngines: Engine[]): Engine {
+  if (modelEngines.length === 1) {
+    return modelEngines[0]
+  }
+
+  return getAvailableEnginesForRuntime(runtime, modelEngines)[0] || modelEngines[0] || 'vllm'
+}
+
+export function applyRuntimeChangeToConfig(
+  prev: DeploymentConfig,
+  options: {
+    runtime: RuntimeId
+    modelEngines: Engine[]
+    recommendedGpus: number
+    estimatedMemoryGb?: number
+    gpuMemoryGb?: number
+  }
+): DeploymentConfig {
+  const newAvailableEngines = getAvailableEnginesForRuntime(options.runtime, options.modelEngines)
+  const currentEngineSupported = newAvailableEngines.includes(prev.engine as TraditionalEngine)
+  const nextEngine = currentEngineSupported
+    ? prev.engine
+    : getDefaultEngineForRuntime(options.runtime, options.modelEngines)
+  const shouldManageDynamoParallelism =
+    options.runtime === 'dynamo' &&
+    prev.mode === 'aggregated' &&
+    nextEngine === 'vllm'
+
+  let newEngineArgs = setDynamoParallelismEngineArgs(prev.engineArgs, null)
+  let newProviderOverrides = shouldManageDynamoParallelism ? prev.providerOverrides : undefined
+
+  // When switching TO Dynamo + vLLM, recalculate multi-node from current GPU config.
+  if (shouldManageDynamoParallelism) {
+    const currentGpu = prev.resources?.gpu || options.recommendedGpus || 1
+
+    if (options.estimatedMemoryGb && options.gpuMemoryGb) {
+      const multiNodeResult = calculateMultiNode(options.estimatedMemoryGb, options.gpuMemoryGb, currentGpu)
+      if (multiNodeResult) {
+        newProviderOverrides = buildDynamoMultiNodeOverrides(multiNodeResult.nodeCount)
+        newEngineArgs = setDynamoParallelismEngineArgs(newEngineArgs, multiNodeResult)
+      } else {
+        newProviderOverrides = undefined
+      }
+    }
+  }
+
+  return {
+    ...prev,
+    provider: options.runtime,
+    namespace: RUNTIME_INFO[options.runtime].defaultNamespace,
+    // Reset engine if current one isn't supported by new runtime
+    engine: nextEngine,
+    // Reset router mode if switching away from Dynamo
+    routerMode: options.runtime === 'dynamo' ? prev.routerMode : 'default',
+    // Reset to aggregated mode if switching to KAITO (disaggregated not supported)
+    mode: options.runtime === 'kaito' ? 'aggregated' : prev.mode,
+    providerOverrides: newProviderOverrides,
+    engineArgs: newEngineArgs,
+  }
+}
+
 export function getNodeCountFromOverrides(overrides?: Record<string, unknown>): number {
   if (!overrides) return 1
   const spec = overrides.spec as Record<string, unknown> | undefined
