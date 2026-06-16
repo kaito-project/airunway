@@ -7,13 +7,17 @@ import {
   TENSOR_PARALLEL_SIZE_ARG,
   applyAIConfiguratorResultToConfig,
   buildDeploymentFormConfig,
+  calculateSelectedGpus,
   applyRuntimeChangeToConfig,
   getAIConfigRecommendedValues,
   getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
+  getCurrentMultiNode,
   getDefaultEngineForRuntime,
+  getMaxGpusPerPod,
   getDefaultRuntimeForModel,
   getNodeCountFromOverrides,
+  isKaitoConfigValid,
 } from './deploymentFormModel'
 
 function baseConfig(overrides: Partial<DeploymentConfig> = {}): DeploymentConfig {
@@ -290,6 +294,81 @@ describe('deploymentFormModel', () => {
       computeType: 'cpu',
       premadeModel: 'llama3.2:1b',
     })
+  })
+
+
+  it('derives selected GPU totals, current multi-node state, and max GPUs per pod', () => {
+    const aggregated = baseConfig({
+      replicas: 2,
+      resources: { gpu: 4 },
+      providerOverrides: { spec: { services: { VllmWorker: { multinode: { nodeCount: 3 } } } } },
+      engineArgs: { [PIPELINE_PARALLEL_SIZE_ARG]: '3' },
+    })
+    const nodeCount = getNodeCountFromOverrides(aggregated.providerOverrides)
+
+    expect(calculateSelectedGpus(aggregated, 1, nodeCount)).toBe(24)
+    expect(getCurrentMultiNode(aggregated, 1, nodeCount, 3)).toEqual({
+      nodeCount: 3,
+      gpusPerNode: 4,
+      totalGpus: 12,
+      pipelineParallelSize: 3,
+    })
+    expect(getMaxGpusPerPod(aggregated, 1)).toBe(4)
+
+    const disaggregated = baseConfig({
+      mode: 'disaggregated',
+      prefillReplicas: 2,
+      prefillGpus: 3,
+      decodeReplicas: 4,
+      decodeGpus: 1,
+    })
+    expect(calculateSelectedGpus(disaggregated, 1, 1)).toBe(10)
+    expect(getMaxGpusPerPod(disaggregated, 1)).toBe(3)
+  })
+
+  it('validates KAITO source-specific requirements', () => {
+    expect(isKaitoConfigValid({
+      selectedRuntime: 'dynamo',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: false,
+      ggufFile: '',
+      gpuCount: 0,
+      hasSelectedPremadeModel: false,
+    })).toBe(true)
+
+    expect(isKaitoConfigValid({
+      selectedRuntime: 'kaito',
+      isHuggingFaceGgufModel: true,
+      isVllmModel: false,
+      ggufFile: 'model.gguf',
+      gpuCount: 0,
+      hasSelectedPremadeModel: false,
+    })).toBe(true)
+    expect(isKaitoConfigValid({
+      selectedRuntime: 'kaito',
+      isHuggingFaceGgufModel: true,
+      isVllmModel: false,
+      ggufFile: 'README.md',
+      gpuCount: 0,
+      hasSelectedPremadeModel: false,
+    })).toBe(false)
+
+    expect(isKaitoConfigValid({
+      selectedRuntime: 'kaito',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: true,
+      ggufFile: '',
+      gpuCount: 1,
+      hasSelectedPremadeModel: false,
+    })).toBe(true)
+    expect(isKaitoConfigValid({
+      selectedRuntime: 'kaito',
+      isHuggingFaceGgufModel: false,
+      isVllmModel: false,
+      ggufFile: '',
+      gpuCount: 0,
+      hasSelectedPremadeModel: true,
+    })).toBe(true)
   })
 
 })

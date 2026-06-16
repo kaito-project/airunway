@@ -237,6 +237,67 @@ export function setDynamoParallelismEngineArgs(
 
 
 
+
+export function calculateSelectedGpus(
+  config: DeploymentConfig,
+  recommendedGpus: number,
+  nodeCount: number
+): number {
+  if (config.mode === 'disaggregated') {
+    const prefillTotal = (config.prefillReplicas || 1) * (config.prefillGpus || 1)
+    const decodeTotal = (config.decodeReplicas || 1) * (config.decodeGpus || 1)
+    return prefillTotal + decodeTotal
+  }
+
+  const gpusPerReplica = config.resources?.gpu || recommendedGpus || 1
+  const replicas = config.replicas || 1
+  return gpusPerReplica * replicas * nodeCount
+}
+
+export function getCurrentMultiNode(
+  config: DeploymentConfig,
+  recommendedGpus: number,
+  nodeCount: number,
+  pipelineParallel?: number
+): MultiNodeRecommendation | null {
+  if (nodeCount <= 1) return null
+
+  const gpusPerNode = config.resources?.gpu || recommendedGpus || 1
+  return {
+    nodeCount,
+    gpusPerNode,
+    totalGpus: nodeCount * gpusPerNode,
+    pipelineParallelSize: pipelineParallel || nodeCount,
+  }
+}
+
+export function getMaxGpusPerPod(config: DeploymentConfig, recommendedGpus: number): number {
+  return config.mode === 'disaggregated'
+    ? Math.max(config.prefillGpus || 1, config.decodeGpus || 1)
+    : (config.resources?.gpu || recommendedGpus || 1)
+}
+
+export function isKaitoConfigValid(options: {
+  selectedRuntime: RuntimeId
+  isHuggingFaceGgufModel: boolean
+  isVllmModel: boolean
+  ggufFile: string
+  gpuCount: number
+  hasSelectedPremadeModel: boolean
+}): boolean {
+  if (options.selectedRuntime !== 'kaito') return true
+
+  if (options.isHuggingFaceGgufModel) {
+    return options.ggufFile.endsWith('.gguf')
+  }
+
+  if (options.isVllmModel) {
+    return options.gpuCount >= 1
+  }
+
+  return options.hasSelectedPremadeModel
+}
+
 export interface DeploymentFormConfigBuildOptions {
   selectedRuntime: RuntimeId
   gatewayAvailable?: boolean

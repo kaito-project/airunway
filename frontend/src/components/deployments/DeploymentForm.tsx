@@ -31,15 +31,19 @@ import {
   TENSOR_PARALLEL_SIZE_ARG,
   applyRuntimeChangeToConfig,
   buildDeploymentFormConfig,
+  calculateSelectedGpus,
   buildDynamoMultiNodeOverrides,
   applyAIConfiguratorResultToConfig,
   getAIConfigRecommendedValues,
   getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
+  getCurrentMultiNode,
   getDefaultEngineForRuntime,
+  getMaxGpusPerPod,
   getDefaultRuntimeForModel,
   getNodeCountFromOverrides,
   getNumericEngineArg,
+  isKaitoConfigValid,
   isRuntimeCompatible,
   normalizeGatewayAvailability,
   setDynamoParallelismEngineArgs,
@@ -574,51 +578,22 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     })
   }, [selectedRuntime, toast])
 
-  // Calculate total GPUs needed for the deployment
-  const calculateSelectedGpus = (): number => {
-    if (config.mode === 'disaggregated') {
-      // For disaggregated, calculate total GPUs across all workers
-      const prefillTotal = (config.prefillReplicas || 1) * (config.prefillGpus || 1);
-      const decodeTotal = (config.decodeReplicas || 1) * (config.decodeGpus || 1);
-      return prefillTotal + decodeTotal;
-    }
-    // For aggregated, multiply GPUs per replica by number of replicas
-    const gpusPerReplica = config.resources?.gpu || gpuRecommendation.recommendedGpus || 1;
-    const replicas = config.replicas || 1;
-
-    // Account for multi-node: nodeCount multiplies the per-replica GPU count
-    return gpusPerReplica * replicas * currentNodeCount;
-  }
-
-  const selectedGpus = calculateSelectedGpus()
-
-  // Compute current multi-node state from providerOverrides
-  const currentMultiNode: MultiNodeRecommendation | null = (() => {
-    if (currentNodeCount <= 1) return null;
-    const gpusPerNode = config.resources?.gpu || gpuRecommendation.recommendedGpus || 1;
-    return {
-      nodeCount: currentNodeCount,
-      gpusPerNode,
-      totalGpus: currentNodeCount * gpusPerNode,
-      pipelineParallelSize: currentPipelineParallel || currentNodeCount,
-    };
-  })()
-
-  // Calculate the maximum GPUs per single pod (for node placement constraints)
-  const maxGpusPerPod = config.mode === 'disaggregated'
-    ? Math.max(config.prefillGpus || 1, config.decodeGpus || 1)
-    : (config.resources?.gpu || gpuRecommendation.recommendedGpus || 1);
-
-  // Check if KAITO configuration is valid
-  // For HuggingFace GGUF models, we need a ggufFile for both direct and build modes
-  // For vLLM models, we need at least 1 GPU
-  // For premade, we need a selected model
-  const isKaitoConfigValid = selectedRuntime !== 'kaito' ||
-    (isHuggingFaceGgufModel
-      ? ggufFile.endsWith('.gguf')
-      : isVllmModel
-        ? (config.resources?.gpu || 0) >= 1
-        : selectedPremadeModel !== null)
+  const selectedGpus = calculateSelectedGpus(config, gpuRecommendation.recommendedGpus, currentNodeCount)
+  const currentMultiNode = getCurrentMultiNode(
+    config,
+    gpuRecommendation.recommendedGpus,
+    currentNodeCount,
+    currentPipelineParallel
+  )
+  const maxGpusPerPod = getMaxGpusPerPod(config, gpuRecommendation.recommendedGpus)
+  const kaitoConfigValid = isKaitoConfigValid({
+    selectedRuntime,
+    isHuggingFaceGgufModel,
+    isVllmModel,
+    ggufFile,
+    gpuCount: config.resources?.gpu || 0,
+    hasSelectedPremadeModel: selectedPremadeModel !== null,
+  })
 
   // Status-aware button content
   const getButtonContent = () => {
@@ -1657,7 +1632,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
         </Button>
         <Button
           type="submit"
-          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled || !isKaitoConfigValid || fp8Blocked}
+          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled || !kaitoConfigValid || fp8Blocked}
           loading={createDeployment.isProcessing}
           className={cn(
             "flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold shadow-glow-button gap-2",
