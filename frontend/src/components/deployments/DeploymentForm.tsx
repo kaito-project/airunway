@@ -31,6 +31,9 @@ import {
   TENSOR_PARALLEL_SIZE_ARG,
   applyRuntimeChangeToConfig,
   buildDynamoMultiNodeOverrides,
+  applyAIConfiguratorResultToConfig,
+  getAIConfigRecommendedValues,
+  getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
   getDefaultEngineForRuntime,
   getDefaultRuntimeForModel,
@@ -585,16 +588,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // Handler for applying AI Configurator recommendations
   const handleApplyAIConfig = useCallback((result: AIConfiguratorResult) => {
-    const cfg = result.config
-
-    // Map AI Configurator backend to our engine type
-    const backendToEngine: Record<string, Engine> = {
-      'vllm': 'vllm',
-      'sglang': 'sglang',
-      'trtllm': 'trtllm',
-    }
-    const recommendedEngine = result.backend ? backendToEngine[result.backend] : undefined
-
     // Store supported backends info for engine selection UI
     if (result.supportedBackends) {
       setAiConfigSupportedBackends(result.supportedBackends)
@@ -603,78 +596,15 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       setAiConfigRecommendedBackend(result.backend)
     }
 
-    // Store recommended mode
+    // Store recommended mode and values for badges
     setAiConfigRecommendedMode(result.mode)
-
-    // Store recommended values for badges
-    setAiConfigRecommendedValues({
-      prefillReplicas: cfg.prefillReplicas,
-      decodeReplicas: cfg.decodeReplicas,
-      prefillGpus: cfg.prefillTensorParallel || cfg.tensorParallelDegree,
-      decodeGpus: cfg.decodeTensorParallel || cfg.tensorParallelDegree,
-      gpuPerReplica: cfg.tensorParallelDegree,
-    })
+    setAiConfigRecommendedValues(getAIConfigRecommendedValues(result))
     setTopologyManagedByAIConfig(true)
+    setConfig(prev => applyAIConfiguratorResultToConfig(prev, result, selectedRuntime))
 
-    setConfig(prev => {
-      const nextEngine = recommendedEngine || prev.engine
-      const pipelineParallelDegree = Math.max(1, cfg.pipelineParallelDegree || 1)
-      const shouldApplyDynamoParallelism =
-        selectedRuntime === 'dynamo' &&
-        result.mode === 'aggregated' &&
-        nextEngine === 'vllm' &&
-        pipelineParallelDegree > 1
-
-      const multiNodeConfig: MultiNodeRecommendation | null = shouldApplyDynamoParallelism
-        ? {
-            nodeCount: pipelineParallelDegree,
-            gpusPerNode: cfg.tensorParallelDegree,
-            totalGpus: pipelineParallelDegree * cfg.tensorParallelDegree,
-            pipelineParallelSize: pipelineParallelDegree,
-          }
-        : null
-
-      const engineArgs = setDynamoParallelismEngineArgs(
-        {
-          ...prev.engineArgs,
-          'max-num-batched-tokens': cfg.maxBatchSize,
-          'gpu-memory-utilization': cfg.gpuMemoryUtilization,
-          ...(cfg.maxNumSeqs && { 'max-num-seqs': cfg.maxNumSeqs }),
-        },
-        multiNodeConfig
-      )
-
-      return {
-        ...prev,
-        mode: result.mode,
-        replicas: result.replicas,
-        contextLength: cfg.maxModelLen,
-        // Set engine if AI Configurator recommended one
-        ...(recommendedEngine && { engine: recommendedEngine }),
-        resources: {
-          ...prev.resources,
-          gpu: cfg.tensorParallelDegree,
-        },
-        providerOverrides: multiNodeConfig ? buildDynamoMultiNodeOverrides(multiNodeConfig.nodeCount) : undefined,
-        // Disaggregated mode settings
-        ...(result.mode === 'disaggregated' && {
-          prefillReplicas: cfg.prefillReplicas || 1,
-          decodeReplicas: cfg.decodeReplicas || 1,
-          prefillGpus: cfg.prefillTensorParallel || cfg.tensorParallelDegree,
-          decodeGpus: cfg.decodeTensorParallel || cfg.tensorParallelDegree,
-        }),
-        // Engine args for advanced settings
-        engineArgs,
-      }
-    })
-
-    const engineInfo = recommendedEngine ? `, Engine=${recommendedEngine.toUpperCase()}` : ''
-    const pipelineInfo = cfg.pipelineParallelDegree && cfg.pipelineParallelDegree > 1
-      ? `, PP=${cfg.pipelineParallelDegree}`
-      : ''
     toast({
       title: 'Configuration Applied',
-      description: `AI Configurator recommendations applied. TP=${cfg.tensorParallelDegree}${pipelineInfo}, Context=${cfg.maxModelLen}${engineInfo}`,
+      description: getAIConfiguratorAppliedToastDescription(result),
       variant: 'success',
     })
   }, [selectedRuntime, toast])

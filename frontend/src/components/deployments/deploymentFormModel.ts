@@ -1,5 +1,5 @@
 import type { DeploymentConfig } from '@/hooks/useDeployments'
-import type { Engine } from '@/lib/api'
+import type { AIConfiguratorResult, Engine } from '@/lib/api'
 import { calculateMultiNode, type MultiNodeRecommendation } from '@/lib/gpu-recommendations'
 
 // Subset of Engine type for traditional GPU inference engines (excludes llamacpp which is KAITO-only)
@@ -233,6 +233,104 @@ export function setDynamoParallelismEngineArgs(
   }
 
   return Object.keys(nextEngineArgs).length > 0 ? nextEngineArgs : undefined
+}
+
+
+export interface AIConfigRecommendedValues {
+  prefillReplicas?: number
+  decodeReplicas?: number
+  prefillGpus?: number
+  decodeGpus?: number
+  gpuPerReplica?: number
+}
+
+const AI_CONFIG_BACKEND_TO_ENGINE: Record<string, Engine> = {
+  vllm: 'vllm',
+  sglang: 'sglang',
+  trtllm: 'trtllm',
+}
+
+export function getAIConfigRecommendedEngine(result: AIConfiguratorResult): Engine | undefined {
+  return result.backend ? AI_CONFIG_BACKEND_TO_ENGINE[result.backend] : undefined
+}
+
+export function getAIConfigRecommendedValues(result: AIConfiguratorResult): AIConfigRecommendedValues {
+  const cfg = result.config
+  return {
+    prefillReplicas: cfg.prefillReplicas,
+    decodeReplicas: cfg.decodeReplicas,
+    prefillGpus: cfg.prefillTensorParallel || cfg.tensorParallelDegree,
+    decodeGpus: cfg.decodeTensorParallel || cfg.tensorParallelDegree,
+    gpuPerReplica: cfg.tensorParallelDegree,
+  }
+}
+
+export function applyAIConfiguratorResultToConfig(
+  prev: DeploymentConfig,
+  result: AIConfiguratorResult,
+  selectedRuntime: RuntimeId
+): DeploymentConfig {
+  const cfg = result.config
+  const recommendedEngine = getAIConfigRecommendedEngine(result)
+  const nextEngine = recommendedEngine || prev.engine
+  const pipelineParallelDegree = Math.max(1, cfg.pipelineParallelDegree || 1)
+  const shouldApplyDynamoParallelism =
+    selectedRuntime === 'dynamo' &&
+    result.mode === 'aggregated' &&
+    nextEngine === 'vllm' &&
+    pipelineParallelDegree > 1
+
+  const multiNodeConfig: MultiNodeRecommendation | null = shouldApplyDynamoParallelism
+    ? {
+        nodeCount: pipelineParallelDegree,
+        gpusPerNode: cfg.tensorParallelDegree,
+        totalGpus: pipelineParallelDegree * cfg.tensorParallelDegree,
+        pipelineParallelSize: pipelineParallelDegree,
+      }
+    : null
+
+  const engineArgs = setDynamoParallelismEngineArgs(
+    {
+      ...prev.engineArgs,
+      'max-num-batched-tokens': cfg.maxBatchSize,
+      'gpu-memory-utilization': cfg.gpuMemoryUtilization,
+      ...(cfg.maxNumSeqs && { 'max-num-seqs': cfg.maxNumSeqs }),
+    },
+    multiNodeConfig
+  )
+
+  return {
+    ...prev,
+    mode: result.mode,
+    replicas: result.replicas,
+    contextLength: cfg.maxModelLen,
+    // Set engine if AI Configurator recommended one
+    ...(recommendedEngine && { engine: recommendedEngine }),
+    resources: {
+      ...prev.resources,
+      gpu: cfg.tensorParallelDegree,
+    },
+    providerOverrides: multiNodeConfig ? buildDynamoMultiNodeOverrides(multiNodeConfig.nodeCount) : undefined,
+    // Disaggregated mode settings
+    ...(result.mode === 'disaggregated' && {
+      prefillReplicas: cfg.prefillReplicas || 1,
+      decodeReplicas: cfg.decodeReplicas || 1,
+      prefillGpus: cfg.prefillTensorParallel || cfg.tensorParallelDegree,
+      decodeGpus: cfg.decodeTensorParallel || cfg.tensorParallelDegree,
+    }),
+    // Engine args for advanced settings
+    engineArgs,
+  }
+}
+
+export function getAIConfiguratorAppliedToastDescription(result: AIConfiguratorResult): string {
+  const cfg = result.config
+  const recommendedEngine = getAIConfigRecommendedEngine(result)
+  const engineInfo = recommendedEngine ? `, Engine=${recommendedEngine.toUpperCase()}` : ''
+  const pipelineInfo = cfg.pipelineParallelDegree && cfg.pipelineParallelDegree > 1
+    ? `, PP=${cfg.pipelineParallelDegree}`
+    : ''
+  return `AI Configurator recommendations applied. TP=${cfg.tensorParallelDegree}${pipelineInfo}, Context=${cfg.maxModelLen}${engineInfo}`
 }
 
 /**

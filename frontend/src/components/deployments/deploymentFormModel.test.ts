@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { DeploymentConfig } from '@/hooks/useDeployments'
+import type { AIConfiguratorResult } from '@/lib/api'
 
 import {
   PIPELINE_PARALLEL_SIZE_ARG,
   TENSOR_PARALLEL_SIZE_ARG,
+  applyAIConfiguratorResultToConfig,
   applyRuntimeChangeToConfig,
+  getAIConfigRecommendedValues,
+  getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
   getDefaultEngineForRuntime,
   getDefaultRuntimeForModel,
@@ -99,4 +103,82 @@ describe('deploymentFormModel', () => {
       [PIPELINE_PARALLEL_SIZE_ARG]: '3',
     })
   })
+
+  it('applies aggregated AI Configurator recommendations including Dynamo parallelism', () => {
+    const result: AIConfiguratorResult = {
+      success: true,
+      backend: 'vllm',
+      supportedBackends: ['vllm'],
+      mode: 'aggregated',
+      replicas: 2,
+      config: {
+        tensorParallelDegree: 4,
+        pipelineParallelDegree: 3,
+        maxBatchSize: 8192,
+        maxNumSeqs: 64,
+        gpuMemoryUtilization: 0.92,
+        maxModelLen: 16384,
+      },
+    }
+
+    const next = applyAIConfiguratorResultToConfig(baseConfig({
+      engine: 'sglang',
+      engineArgs: { custom: 'keep' },
+    }), result, 'dynamo')
+
+    expect(next.engine).toBe('vllm')
+    expect(next.mode).toBe('aggregated')
+    expect(next.replicas).toBe(2)
+    expect(next.contextLength).toBe(16384)
+    expect(next.resources?.gpu).toBe(4)
+    expect(getNodeCountFromOverrides(next.providerOverrides)).toBe(3)
+    expect(next.engineArgs).toEqual({
+      custom: 'keep',
+      'max-num-batched-tokens': 8192,
+      'gpu-memory-utilization': 0.92,
+      'max-num-seqs': 64,
+      [TENSOR_PARALLEL_SIZE_ARG]: '4',
+      [PIPELINE_PARALLEL_SIZE_ARG]: '3',
+    })
+    expect(getAIConfiguratorAppliedToastDescription(result)).toBe(
+      'AI Configurator recommendations applied. TP=4, PP=3, Context=16384, Engine=VLLM'
+    )
+  })
+
+  it('applies disaggregated AI Configurator recommendations and exposes badge values', () => {
+    const result: AIConfiguratorResult = {
+      success: true,
+      backend: 'sglang',
+      mode: 'disaggregated',
+      replicas: 1,
+      config: {
+        tensorParallelDegree: 2,
+        maxBatchSize: 4096,
+        gpuMemoryUtilization: 0.85,
+        maxModelLen: 8192,
+        prefillReplicas: 2,
+        decodeReplicas: 3,
+        prefillTensorParallel: 4,
+        decodeTensorParallel: 1,
+      },
+    }
+
+    const next = applyAIConfiguratorResultToConfig(baseConfig(), result, 'dynamo')
+
+    expect(next.engine).toBe('sglang')
+    expect(next.mode).toBe('disaggregated')
+    expect(next.prefillReplicas).toBe(2)
+    expect(next.decodeReplicas).toBe(3)
+    expect(next.prefillGpus).toBe(4)
+    expect(next.decodeGpus).toBe(1)
+    expect(next.providerOverrides).toBeUndefined()
+    expect(getAIConfigRecommendedValues(result)).toEqual({
+      prefillReplicas: 2,
+      decodeReplicas: 3,
+      prefillGpus: 4,
+      decodeGpus: 1,
+      gpuPerReplica: 2,
+    })
+  })
+
 })
