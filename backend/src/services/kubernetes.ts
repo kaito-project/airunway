@@ -52,6 +52,14 @@ import {
   listDeployments as listDeploymentsWithAdapter,
   type ModelDeploymentStoreAdapter,
 } from './modelDeploymentStore';
+import {
+  checkGPUAvailability as checkGPUAvailabilityWithAdapter,
+  checkGPUOperatorStatus as checkGPUOperatorStatusWithAdapter,
+  type GPUAvailability,
+  type GPUOperatorStatus,
+  type GpuOperatorStatusAdapter,
+} from './gpuOperatorStatus';
+export type { GPUAvailability, GPUOperatorStatus } from './gpuOperatorStatus';
 
 // ModelDeployment CRD configuration
 const MODEL_DEPLOYMENT_CRD = {
@@ -60,28 +68,6 @@ const MODEL_DEPLOYMENT_CRD = {
   plural: 'modeldeployments',
   kind: 'ModelDeployment',
 };
-
-/**
- * GPU availability information from cluster nodes
- */
-export interface GPUAvailability {
-  available: boolean;
-  totalGPUs: number;
-  gpuNodes: string[];
-}
-
-/**
- * GPU Operator installation status
- */
-export interface GPUOperatorStatus {
-  installed: boolean;
-  crdFound: boolean;
-  operatorRunning: boolean;
-  gpusAvailable: boolean;
-  totalGPUs: number;
-  gpuNodes: string[];
-  message: string;
-}
 
 export interface PersistentVolumeClaimInfo {
   name: string;
@@ -111,6 +97,7 @@ export function extractCRDVersionFromAnnotations(crdOrResponse: unknown, annotat
 
   return undefined;
 }
+
 
 
 function getK8sStatusCode(error: unknown): number | undefined {
@@ -534,113 +521,29 @@ class KubernetesService {
    * Check if NVIDIA GPUs are available on cluster nodes
    */
   async checkGPUAvailability(): Promise<GPUAvailability> {
-    try {
-      const response = await withRetry(
-        () => this.coreV1Api.listNode(),
-        { operationName: 'checkGPUAvailability' }
-      );
-      const nodes = response.items;
-
-      let totalGPUs = 0;
-      const gpuNodes: string[] = [];
-
-      for (const node of nodes) {
-        // Check allocatable resources for nvidia.com/gpu
-        const gpuCapacity = node.status?.allocatable?.['nvidia.com/gpu'];
-        if (gpuCapacity) {
-          const gpuCount = parseInt(gpuCapacity, 10);
-          if (gpuCount > 0) {
-            totalGPUs += gpuCount;
-            gpuNodes.push(node.metadata?.name || 'unknown');
-          }
-        }
-      }
-
-      return {
-        available: totalGPUs > 0,
-        totalGPUs,
-        gpuNodes,
-      };
-    } catch (error) {
-      logger.error({ error }, 'Error checking GPU availability');
-      return { available: false, totalGPUs: 0, gpuNodes: [] };
-    }
+    return checkGPUAvailabilityWithAdapter(this.createGpuOperatorStatusAdapter());
   }
 
   /**
    * Check if the NVIDIA GPU Operator is installed
    */
   async checkGPUOperatorStatus(): Promise<GPUOperatorStatus> {
-    // Check for GPU availability on nodes
-    const gpuAvailability = await this.checkGPUAvailability();
+    return checkGPUOperatorStatusWithAdapter(this.createGpuOperatorStatusAdapter());
+  }
 
-    // Check for GPU Operator CRD (ClusterPolicy)
-    let crdFound = false;
-    try {
-      await withRetry(
-        () => this.customObjectsApi.listClusterCustomObject({
-          group: 'nvidia.com',
-          version: 'v1',
-          plural: 'clusterpolicies',
-        }),
-        { operationName: 'checkGPUOperatorCRD', maxRetries: 1 }
-      );
-      crdFound = true;
-    } catch (error) {
-      const statusCode = getK8sStatusCode(error);
-      if (statusCode !== 404) {
-        logger.error({ error: getK8sErrorMessage(error) }, 'Error checking GPU Operator CRD');
-      }
-      crdFound = false;
-    }
-
-    // Check for GPU Operator pods in gpu-operator namespace
-    let operatorRunning = false;
-    try {
-      const pods = await withRetry(
-        () => this.coreV1Api.listNamespacedPod({
-          namespace: 'gpu-operator',
-          labelSelector: 'app=gpu-operator',
-        }),
-        { operationName: 'checkGPUOperatorPods', maxRetries: 1 }
-      );
-      operatorRunning = pods.items.some(
-        (pod) => pod.status?.phase === 'Running'
-      );
-
-      // Alternative: check for any running pods in gpu-operator namespace if label didn't match
-      if (!operatorRunning) {
-        const allPods = await this.coreV1Api.listNamespacedPod({ namespace: 'gpu-operator' });
-        operatorRunning = allPods.items.some(
-          (pod) => pod.status?.phase === 'Running'
-        );
-      }
-    } catch {
-      // Namespace might not exist
-      operatorRunning = false;
-    }
-
-    const installed = crdFound && operatorRunning;
-
-    let message: string;
-    if (gpuAvailability.available) {
-      message = `GPUs enabled: ${gpuAvailability.totalGPUs} GPU(s) on ${gpuAvailability.gpuNodes.length} node(s)`;
-    } else if (installed) {
-      message = 'GPU Operator installed but no GPUs detected on nodes';
-    } else if (crdFound) {
-      message = 'GPU Operator CRD found but operator is not running';
-    } else {
-      message = 'GPU Operator not installed';
-    }
-
+  private createGpuOperatorStatusAdapter(): GpuOperatorStatusAdapter {
     return {
-      installed,
-      crdFound,
-      operatorRunning,
-      gpusAvailable: gpuAvailability.available,
-      totalGPUs: gpuAvailability.totalGPUs,
-      gpuNodes: gpuAvailability.gpuNodes,
-      message,
+      listNodes: () => this.coreV1Api.listNode(),
+      listClusterPolicies: () => this.customObjectsApi.listClusterCustomObject({
+        group: 'nvidia.com',
+        version: 'v1',
+        plural: 'clusterpolicies',
+      }),
+      listGpuOperatorPodsByLabel: () => this.coreV1Api.listNamespacedPod({
+        namespace: 'gpu-operator',
+        labelSelector: 'app=gpu-operator',
+      }),
+      listGpuOperatorNamespacePods: () => this.coreV1Api.listNamespacedPod({ namespace: 'gpu-operator' }),
     };
   }
 
