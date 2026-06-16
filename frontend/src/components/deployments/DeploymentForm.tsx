@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
-import { Badge } from '@/components/ui/badge'
 import { useConfetti } from '@/components/ui/confetti'
 import { useCreateDeployment, usePVCs, type DeploymentConfig } from '@/hooks/useDeployments'
 import { useHuggingFaceStatus, useGgufFiles } from '@/hooks/useHuggingFace'
@@ -14,7 +13,7 @@ import { useGatewayStatus } from '@/hooks/useGateway'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
 import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, type KaitoResourceType } from '@/lib/api'
-import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles, AlertTriangle, Server, Box, HardDrive } from 'lucide-react'
+import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles, Box, HardDrive } from 'lucide-react'
 import { CapacityWarning } from './CapacityWarning'
 import { AIConfiguratorPanel } from './AIConfiguratorPanel'
 import { ManifestViewer } from './ManifestViewer'
@@ -24,6 +23,7 @@ import { KaitoModelConfiguration } from './KaitoModelConfiguration'
 import { KaitoResourceTypeSelector } from './KaitoResourceTypeSelector'
 import { EngineSelectionPanel } from './EngineSelectionPanel'
 import { DeploymentOptionsPanel } from './DeploymentOptionsPanel'
+import { RuntimeSelectionPanel } from './RuntimeSelectionPanel'
 import { calculateGpuRecommendation, calculateMultiNode } from '@/lib/gpu-recommendations'
 import {
   FP8_ARG_ENGINES,
@@ -47,7 +47,6 @@ import {
   getNodeCountFromOverrides,
   getNumericEngineArg,
   isKaitoConfigValid,
-  isRuntimeCompatible,
   normalizeGatewayAvailability,
   selectPreferredGgufFile,
   setDynamoParallelismEngineArgs,
@@ -617,120 +616,12 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
       {/* Runtime Selection */}
       {runtimes && runtimes.length > 0 && (
-        <div className="glass-panel">
-          <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-            <Server className="h-5 w-5" />
-            Runtime
-          </h3>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {runtimes.map((runtime) => {
-              const info = RUNTIME_INFO[runtime.id as RuntimeId]
-              if (!info) return null
-
-              const isCompatible = isRuntimeCompatible(runtime.id as RuntimeId, model.supportedEngines)
-              const isSelected = selectedRuntime === runtime.id
-              const isCrdLessRuntime = runtime.requiresCRD === false
-              const isCrdLessRuntimeNotReady = isCrdLessRuntime && !runtime.installed
-
-              return (
-                <div
-                  key={runtime.id}
-                  role="radio"
-                  aria-checked={isSelected}
-                  tabIndex={isCompatible ? 0 : -1}
-                  onClick={() => {
-                    if (isCompatible) {
-                      handleRuntimeChange(runtime.id as RuntimeId)
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (isCompatible && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault()
-                      handleRuntimeChange(runtime.id as RuntimeId)
-                    }
-                  }}
-                  className={cn(
-                    "relative flex items-start space-x-3 rounded-xl border p-4 transition-all duration-200 bg-white/[0.02]",
-                    !isCompatible && "opacity-50 cursor-not-allowed",
-                    isCompatible && "cursor-pointer",
-                    isCompatible && isSelected
-                      ? "border-cyan-400/50 bg-cyan-500/5 shadow-[0_0_15px_rgba(0,217,255,0.15)]"
-                      : "border-white/5",
-                    isCompatible && !isSelected && "hover:border-white/10 hover:bg-white/[0.03]",
-                    isCompatible && !runtime.installed && "opacity-75"
-                  )}
-                >
-                  {/* Custom radio indicator */}
-                  <div
-                    className={cn(
-                      "mt-1 h-4 w-4 rounded-full border flex items-center justify-center shrink-0",
-                      isSelected ? "border-cyan-400" : "border-muted-foreground/50",
-                      !isCompatible && "opacity-50"
-                    )}
-                  >
-                    {isSelected && (
-                      <div className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
-                    )}
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "font-medium text-sm",
-                          isCompatible ? "cursor-pointer" : "cursor-not-allowed"
-                        )}
-                      >
-                        {info.name}
-                      </span>
-                      {!isCompatible ? (
-                        <Badge variant="outline" className="text-muted-foreground border-muted text-xs">
-                          Not Compatible
-                        </Badge>
-                      ) : runtime.installed ? (
-                        <Badge variant="outline" className="text-green-400 border-green-500/50 bg-green-500/10 text-xs">
-                          <CheckCircle2 className="h-3 w-3 mr-1" />
-                          {isCrdLessRuntime ? 'Registered' : 'Installed'}
-                        </Badge>
-                      ) : isCrdLessRuntimeNotReady ? (
-                        <Badge variant="outline" className="text-yellow-400 border-yellow-500/50 bg-yellow-500/10 text-xs">
-                          <AlertTriangle className="h-3 w-3 mr-1" />
-                          Not Ready
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-yellow-400 border-yellow-500/50 bg-yellow-500/10 text-xs">
-                          <AlertTriangle className="h-3 w-3 mr-1" />
-                          Not Installed
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {info.description}
-                    </p>
-                    {!isCompatible && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        This model requires {model.supportedEngines.includes('llamacpp') ? 'llama.cpp' : model.supportedEngines.join('/')} which is not supported by this runtime.
-                      </p>
-                    )}
-                    {isCompatible && !runtime.installed && isSelected && (
-                      <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
-                        {isCrdLessRuntime ? (
-                          'Provider is registered but not ready yet.'
-                        ) : (
-                          <>
-                            <Link to="/installation" className="underline hover:no-underline">
-                              Install {info.name}
-                            </Link>{' '}
-                            before deploying.
-                          </>
-                        )}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+        <RuntimeSelectionPanel
+          runtimes={runtimes}
+          selectedRuntime={selectedRuntime}
+          modelEngines={model.supportedEngines}
+          onRuntimeChange={handleRuntimeChange}
+        />
       )}
 
       {/* AI Configurator Panel - only show for Dynamo runtime */}
