@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { useConfetti } from '@/components/ui/confetti'
 import { useCreateDeployment, usePVCs, type DeploymentConfig } from '@/hooks/useDeployments'
@@ -13,7 +12,7 @@ import { useGatewayStatus } from '@/hooks/useGateway'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
 import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus, type PremadeModel, type AIConfiguratorResult, aikitApi, type KaitoResourceType } from '@/lib/api'
-import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles, Box, HardDrive } from 'lucide-react'
+import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Box, HardDrive } from 'lucide-react'
 import { CapacityWarning } from './CapacityWarning'
 import { AIConfiguratorPanel } from './AIConfiguratorPanel'
 import { ManifestViewer } from './ManifestViewer'
@@ -24,6 +23,7 @@ import { KaitoResourceTypeSelector } from './KaitoResourceTypeSelector'
 import { EngineSelectionPanel } from './EngineSelectionPanel'
 import { DeploymentOptionsPanel } from './DeploymentOptionsPanel'
 import { RuntimeSelectionPanel } from './RuntimeSelectionPanel'
+import { DeploymentModePanel } from './DeploymentModePanel'
 import { prepareGgufImageRef } from './deploymentFormSubmit'
 import { calculateGpuRecommendation, calculateMultiNode } from '@/lib/gpu-recommendations'
 import {
@@ -34,6 +34,7 @@ import {
   RUNTIME_INFO,
   TENSOR_PARALLEL_SIZE_ARG,
   applyRuntimeChangeToConfig,
+  applyDeploymentModeChangeToConfig,
   buildDeploymentFormConfig,
   buildDynamoMultiNodeOverrides,
   applyAIConfiguratorResultToConfig,
@@ -670,80 +671,15 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
       {/* Deployment Mode - show for non-KAITO runtimes OR KAITO with vLLM models */}
       {(selectedRuntime !== 'kaito' || isVllmModel) && (
-      <div className="glass-panel">
-        <h3 className="text-lg font-semibold mb-4">Deployment Mode</h3>
-        <div>
-          <RadioGroup
-            value={config.mode}
-            onValueChange={(value) => {
-              // Only allow changing mode for non-KAITO runtimes
-              if (selectedRuntime !== 'kaito') {
-                const newMode = value as DeploymentMode;
-                setTopologyManagedByAIConfig(false)
-                // Clear aggregated-only multi-node overrides when switching to disaggregated
-                if (newMode === 'disaggregated') {
-                  setConfig(prev => {
-                    return {
-                      ...prev,
-                      mode: newMode,
-                      providerOverrides: undefined,
-                      engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
-                    };
-                  })
-                } else {
-                  updateConfig('mode', newMode)
-                }
-              }
-            }}
-            className="grid gap-4 sm:grid-cols-2"
-          >
-            <div className="flex items-start space-x-2">
-              <RadioGroupItem value="aggregated" id="mode-aggregated" className="mt-1" />
-              <div>
-                <Label htmlFor="mode-aggregated" className="cursor-pointer font-medium flex items-center gap-2">
-                  Aggregated (Standard)
-                  {aiConfigRecommendedMode === 'aggregated' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                      <Sparkles className="h-3 w-3" />
-                      Optimized
-                    </span>
-                  )}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Combined prefill and decode on same workers
-                </p>
-              </div>
-            </div>
-            <div className={cn("flex items-start space-x-2", selectedRuntime === 'kaito' && "opacity-50")}>
-                  <RadioGroupItem
-                    value="disaggregated"
-                    id="mode-disaggregated"
-                    className="mt-1"
-                disabled={selectedRuntime === 'kaito'}
-              />
-              <div>
-                    <Label
-                      htmlFor="mode-disaggregated"
-                  className={cn("font-medium flex items-center gap-2", selectedRuntime === 'kaito' ? "cursor-not-allowed" : "cursor-pointer")}
-                >
-                  Disaggregated (P/D)
-                  {aiConfigRecommendedMode === 'disaggregated' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                      <Sparkles className="h-3 w-3" />
-                      Optimized
-                    </span>
-                  )}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                      {selectedRuntime === 'kaito'
-                    ? 'Separate prefill and decode workers - not supported by KAITO'
-                    : 'Separate prefill and decode workers for better resource utilization'}
-                </p>
-              </div>
-            </div>
-          </RadioGroup>
-        </div>
-      </div>
+        <DeploymentModePanel
+          mode={config.mode}
+          selectedRuntime={selectedRuntime}
+          aiConfigRecommendedMode={aiConfigRecommendedMode}
+          onModeChange={(mode) => {
+            setTopologyManagedByAIConfig(false)
+            setConfig(prev => applyDeploymentModeChangeToConfig(prev, mode))
+          }}
+        />
       )}
 
       <DeploymentOptionsPanel

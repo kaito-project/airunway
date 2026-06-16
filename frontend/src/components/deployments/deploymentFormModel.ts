@@ -238,6 +238,26 @@ export function applyRuntimeChangeToConfig(
   }
 }
 
+
+export function applyDeploymentModeChangeToConfig(
+  prev: DeploymentConfig,
+  mode: DeploymentMode
+): DeploymentConfig {
+  if (mode === 'disaggregated') {
+    return {
+      ...prev,
+      mode,
+      providerOverrides: undefined,
+      engineArgs: setDynamoParallelismEngineArgs(prev.engineArgs, null),
+    }
+  }
+
+  return {
+    ...prev,
+    mode,
+  }
+}
+
 export function getNodeCountFromOverrides(overrides?: Record<string, unknown>): number {
   if (!overrides) return 1
   const spec = overrides.spec as Record<string, unknown> | undefined

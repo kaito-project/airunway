@@ -10,6 +10,7 @@ import {
   createInitialDeploymentConfig,
   calculateSelectedGpus,
   applyRuntimeChangeToConfig,
+  applyDeploymentModeChangeToConfig,
   getAIConfigRecommendedValues,
   getAIConfiguratorAppliedToastDescription,
   getAvailableEnginesForRuntime,
@@ -158,6 +159,27 @@ describe('deploymentFormModel', () => {
       [TENSOR_PARALLEL_SIZE_ARG]: '4',
       [PIPELINE_PARALLEL_SIZE_ARG]: '3',
     })
+  })
+
+  it('clears aggregated-only Dynamo topology when switching to disaggregated mode', () => {
+    const withTopology = baseConfig({
+      mode: 'aggregated',
+      providerOverrides: { spec: { services: { VllmWorker: { multinode: { nodeCount: 3 } } } } },
+      engineArgs: {
+        [TENSOR_PARALLEL_SIZE_ARG]: '4',
+        [PIPELINE_PARALLEL_SIZE_ARG]: '3',
+        custom: 'keep',
+      },
+    })
+
+    const disaggregated = applyDeploymentModeChangeToConfig(withTopology, 'disaggregated')
+    expect(disaggregated.mode).toBe('disaggregated')
+    expect(disaggregated.providerOverrides).toBeUndefined()
+    expect(disaggregated.engineArgs).toEqual({ custom: 'keep' })
+
+    const aggregated = applyDeploymentModeChangeToConfig(disaggregated, 'aggregated')
+    expect(aggregated.mode).toBe('aggregated')
+    expect(aggregated.engineArgs).toEqual({ custom: 'keep' })
   })
 
   it('applies aggregated AI Configurator recommendations including Dynamo parallelism', () => {
