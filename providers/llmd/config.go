@@ -44,14 +44,6 @@ const (
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
 
-	// LLMDSchedulerImage is the llm-d Inference Scheduler image used as the
-	// EPP for all llm-d ModelDeployments.
-	//
-	// Source of truth: /versions.env at the repo root.
-	// (see providers/llmd/Makefile). The string literal below is a fallback for
-	// `go run` / `go test` invocations that bypass the Makefile.
-	LLMDSchedulerImage = "ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0"
-
 	// LLMDSchedulerDefaultConfig is the default EndpointPickerConfig shipped
 	// with the llm-d provider. It mirrors deploy/config/epp-config.yaml from
 	// llm-d-inference-scheduler: a heuristic prefix-cache scorer
@@ -74,6 +66,14 @@ schedulingProfiles:
     weight: 2
 `
 )
+
+// LLMDSchedulerImage is the llm-d Inference Scheduler image used as the
+// EPP for all llm-d ModelDeployments.
+//
+// Source of truth: /versions.env at the repo root.
+// (see providers/llmd/Makefile). The string literal below is a fallback for
+// `go run` / `go test` invocations that bypass the Makefile.
+var LLMDSchedulerImage = "ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0"
 
 // ProviderConfigManager handles registration and heartbeat for the llm-d provider
 type ProviderConfigManager struct {
