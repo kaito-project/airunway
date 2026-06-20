@@ -411,6 +411,11 @@ function hasProviderDeploymentCapabilities(
   );
 }
 
+function getProviderOverrideRouterMode(providerOverrides: Record<string, unknown> | undefined): string | undefined {
+  const value = providerOverrides?.routerMode;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 async function validateProviderCapabilities(config: DeploymentConfig): Promise<void> {
   if (!config.provider) {
     return;
@@ -454,8 +459,11 @@ async function validateProviderCapabilities(config: DeploymentConfig): Promise<v
   );
   const effectiveModelSource = config.modelSource ?? 'huggingface';
   validateSupportedCapability(config.provider, 'model source', effectiveModelSource, capabilities.modelSources);
-  if (config.routerMode && config.routerMode !== 'default') {
-    validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
+  const effectiveRouterMode = config.routerMode && config.routerMode !== 'default'
+    ? config.routerMode
+    : getProviderOverrideRouterMode(config.providerOverrides);
+  if (effectiveRouterMode && effectiveRouterMode !== 'default') {
+    validateSupportedCapability(config.provider, 'router mode', effectiveRouterMode, capabilities.routerModes);
   }
 }
 

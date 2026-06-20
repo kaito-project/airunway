@@ -8,11 +8,8 @@ import { loadKubeConfig, makeApiClient, kubeConfigToBunTls, type BunTlsOptions }
 import { type K8sApiError } from '../lib/k8s-errors';
 import logger from '../lib/logger';
 import {
-  aggregateRequiresCRDFromCapabilities,
   extractProviderInfo,
-  getAnnotatedProviderDisplayName,
   getProviderDisplayName,
-  providerRequiresRuntimeCRD,
 } from '../lib/providers';
 
 // ModelDeployment CRD configuration
@@ -947,13 +944,7 @@ class KubernetesService {
         items.map(async (item): Promise<RuntimeStatus> => {
           const providerInfo = extractProviderInfo(item);
           const status = item.status || {};
-          const annotations = item.metadata?.annotations;
-          const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
-          const requiresCRD = providerInfo.requiresCRD ?? providerRequiresRuntimeCRD(
-            providerInfo.id,
-            aggregateRequiresCRDFromCapabilities(item.spec?.capabilities),
-            annotatedDisplayName,
-          );
+          const requiresCRD = providerInfo.requiresCRD ?? true;
           const runtimeStatus = await this.checkProviderInstallationStatus(
             providerInfo.id,
             status,

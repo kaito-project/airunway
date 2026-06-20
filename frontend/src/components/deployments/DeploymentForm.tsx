@@ -206,8 +206,35 @@ const FALLBACK_RUNTIME_ENGINES: Record<string, Engine[]> = {
   llmd: ['vllm'],
 }
 
+const FALLBACK_RUNTIME_MODES: Record<string, DeploymentMode[]> = {
+  dynamo: ['aggregated', 'disaggregated'],
+  kuberay: ['aggregated', 'disaggregated'],
+  kaito: ['aggregated'],
+  vllm: ['aggregated'],
+  llmd: ['aggregated', 'disaggregated'],
+}
+
+const RUNTIME_SELECTION_PRIORITY = ['dynamo', 'kuberay', 'kaito', 'llmd', 'vllm']
+
 function isEngine(value: string): value is Engine {
   return SUPPORTED_ENGINE_IDS.includes(value as Engine)
+}
+
+function isDeploymentMode(value: string): value is DeploymentMode {
+  return value === 'aggregated' || value === 'disaggregated'
+}
+
+function uniqueValues<T>(values: T[]): T[] {
+  return Array.from(new Set(values))
+}
+
+function getPrioritizedRuntimes(runtimes: RuntimeStatus[]): RuntimeStatus[] {
+  const priority = new Map(RUNTIME_SELECTION_PRIORITY.map((id, index) => [id, index]))
+  return [...runtimes].sort((left, right) => {
+    const leftPriority = priority.get(left.id) ?? Number.MAX_SAFE_INTEGER
+    const rightPriority = priority.get(right.id) ?? Number.MAX_SAFE_INTEGER
+    return leftPriority - rightPriority
+  })
 }
 
 function getRuntimeEngines(runtime?: RuntimeStatus): Engine[] {
@@ -216,9 +243,33 @@ function getRuntimeEngines(runtime?: RuntimeStatus): Engine[] {
   return runtime?.id ? (FALLBACK_RUNTIME_ENGINES[runtime.id] ?? []) : []
 }
 
-function isRuntimeCompatible(runtime: RuntimeStatus, modelEngines: Engine[]): boolean {
+function getRuntimeModes(runtime?: RuntimeStatus, engine?: Engine): DeploymentMode[] {
+  // Direct vLLM and KAITO are single-mode deployment methods in this UI even
+  // when generic runtime fixtures or compatibility mirrors carry broader modes.
+  if (runtime?.id === 'vllm' || runtime?.id === 'kaito') {
+    return FALLBACK_RUNTIME_MODES[runtime.id]
+  }
+
+  const perEngineModes = runtime?.capabilities?.engineCapabilities
+    ?.filter((capability) => !engine || capability.name === engine)
+    .flatMap((capability) => capability.servingModes || [])
+    .filter(isDeploymentMode) ?? []
+
+  if (perEngineModes.length > 0) return uniqueValues(perEngineModes)
+
+  const discoveredModes = runtime?.capabilities?.modes?.filter(isDeploymentMode) ?? []
+  if (discoveredModes.length > 0) return discoveredModes
+
+  return runtime?.id ? (FALLBACK_RUNTIME_MODES[runtime.id] ?? ['aggregated']) : ['aggregated']
+}
+
+function runtimeSupportsMode(runtime: RuntimeStatus | undefined, mode: DeploymentMode, engine?: Engine): boolean {
+  return getRuntimeModes(runtime, engine).includes(mode)
+}
+
+function isRuntimeCompatible(runtime: RuntimeStatus, modelEngines: Engine[], mode: DeploymentMode = 'aggregated'): boolean {
   const runtimeEngines = getRuntimeEngines(runtime)
-  return modelEngines.some((engine) => runtimeEngines.includes(engine))
+  return modelEngines.some((engine) => runtimeEngines.includes(engine) && runtimeSupportsMode(runtime, mode, engine))
 }
 
 function normalizeGatewayAvailability(
@@ -395,17 +446,18 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
       return model.supportedEngines.includes('llamacpp') ? 'kaito' : 'dynamo'
     }
 
-    const compatibleInstalled = runtimes.find(
+    const prioritizedRuntimes = getPrioritizedRuntimes(runtimes)
+    const compatibleInstalled = prioritizedRuntimes.find(
       (runtime) => runtime.installed && isRuntimeCompatible(runtime, model.supportedEngines)
     )
     if (compatibleInstalled) return compatibleInstalled.id
 
-    const compatible = runtimes.find((runtime) =>
+    const compatible = prioritizedRuntimes.find((runtime) =>
       isRuntimeCompatible(runtime, model.supportedEngines)
     )
     if (compatible) return compatible.id
 
-    return runtimes.find((runtime) => runtime.installed)?.id || runtimes[0]?.id || 'dynamo'
+    return prioritizedRuntimes.find((runtime) => runtime.installed)?.id || prioritizedRuntimes[0]?.id || 'dynamo'
   }
   const [selectedRuntime, setSelectedRuntime] = useState<string>(getDefaultRuntime)
   const runtimeManuallySelectedRef = useRef(false)
@@ -1201,7 +1253,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
   }
 
   const selectedGpus = calculateSelectedGpus()
-  const supportsDisaggregatedMode = selectedRuntime !== 'kaito' && selectedRuntime !== 'vllm'
+  const supportsDisaggregatedMode = runtimeSupportsMode(selectedRuntimeStatus, 'disaggregated', config.engine)
 
   // Compute current multi-node state from providerOverrides
   const currentMultiNode: MultiNodeRecommendation | null = (() => {
@@ -1321,7 +1373,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
           <div className="grid gap-4 sm:grid-cols-2">
             {runtimes.map((runtime) => {
               const runtimeId = runtime.id
-              const isCompatible = isRuntimeCompatible(runtime, model.supportedEngines)
+              const isCompatible = isRuntimeCompatible(runtime, model.supportedEngines, config.mode)
               const isSelected = selectedRuntime === runtimeId
               const displayName = getRuntimeDisplayName(runtimeId)
               const description = getRuntimeDescription(runtime)

@@ -159,6 +159,57 @@ describe('DeploymentForm', () => {
     expect(screen.getByRole('button', { name: /Deploy Model/i })).toBeEnabled()
   })
 
+  it('prefers managed runtime priority when multiple compatible runtimes are installed', () => {
+    render(
+      <MemoryRouter>
+        <DeploymentForm
+          model={createModel({ supportedEngines: ['vllm'] })}
+          detailedCapacity={createCapacity()}
+          runtimes={[
+            createRuntime({ id: 'kaito', name: 'KAITO', installed: true, healthy: true }),
+            createRuntime({ id: 'kuberay', name: 'KubeRay', installed: true, healthy: true }),
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    const kuberayCard = screen.getByText('KubeRay').closest('[role="radio"]') as HTMLElement
+    const kaitoCard = screen.getByText('KAITO').closest('[role="radio"]') as HTMLElement
+
+    expect(kuberayCard).toHaveAttribute('aria-checked', 'true')
+    expect(kaitoCard).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('disables disaggregated mode when a custom runtime only advertises aggregated serving', () => {
+    render(
+      <MemoryRouter>
+        <DeploymentForm
+          model={createModel({ supportedEngines: ['vllm'] })}
+          detailedCapacity={createCapacity()}
+          runtimes={[
+            createRuntime({
+              id: 'custom-runtime',
+              name: 'Custom Runtime',
+              installed: true,
+              healthy: true,
+              capabilities: {
+                engines: ['vllm'],
+                engineCapabilities: [{ name: 'vllm', servingModes: ['aggregated'] }],
+                modes: ['aggregated'],
+                modelSources: ['huggingface'],
+                routerModes: [],
+                features: {},
+              },
+            }),
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('Custom Runtime').closest('[role="radio"]')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: /Disaggregated \(P\/D\)/i })).toBeDisabled()
+  })
+
   it('warns but does not block deploying when the throughput estimate says the model does not fit', () => {
     render(
       <MemoryRouter>

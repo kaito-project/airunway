@@ -568,6 +568,34 @@ describe('Deployment Routes', () => {
       expect(data.resources[0].manifest.spec.provider.name).toBe('dynamo');
     });
 
+    test('POST /api/deployments/preview validates router mode in providerOverrides', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+          providerConfigWithCapabilities(providerId, {
+            engines: ['vllm'],
+            modes: ['aggregated'],
+            modelSources: ['huggingface'],
+            routerModes: ['kv'],
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'dynamo',
+          routerMode: 'default',
+          providerOverrides: { routerMode: 'unsupported' },
+        }),
+      });
+
+      expect(res.status).toBe(422);
+      const data = await res.json();
+      expect(data.error.message).toContain('does not support router mode "unsupported"');
+    });
+
     test('POST /api/deployments/preview defers to admission when provider config lookup has a transient error', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => {
