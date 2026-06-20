@@ -408,6 +408,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
     return runtimes.find((runtime) => runtime.installed)?.id || runtimes[0]?.id || 'dynamo'
   }
   const [selectedRuntime, setSelectedRuntime] = useState<string>(getDefaultRuntime)
+  const runtimeManuallySelectedRef = useRef(false)
   const selectedRuntimeStatus = runtimes?.find(r => r.id === selectedRuntime)
   const isSelectedCrdLessRuntime = selectedRuntimeStatus?.requiresCRD === false
   const isSelectedCrdLessRuntimeNotReady = isSelectedCrdLessRuntime && !selectedRuntimeStatus?.installed
@@ -529,18 +530,26 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // If runtimes arrive after the form initializes, select the best discovered runtime.
   useEffect(() => {
-    if (!runtimes || runtimes.length === 0 || runtimes.some(r => r.id === selectedRuntime)) return
+    if (!runtimes || runtimes.length === 0 || runtimeManuallySelectedRef.current) return
 
     const runtime = getDefaultRuntime()
-    if (!runtime) return
+    if (!runtime || runtime === selectedRuntime) return
 
     setSelectedRuntime(runtime)
-    setConfig(prev => ({
-      ...prev,
-      provider: runtime,
-      namespace: getRuntimeDefaultNamespace(runtime),
-      engine: getDefaultEngineForRuntime(runtime),
-    }))
+    setConfig(prev => {
+      const leavingDirectVllm = prev.provider === 'vllm' && runtime !== 'vllm'
+      return {
+        ...prev,
+        provider: runtime,
+        namespace: getRuntimeDefaultNamespace(runtime),
+        engine: runtime === 'vllm' ? 'vllm' : getDefaultEngineForRuntime(runtime),
+        mode: runtime === 'kaito' || runtime === 'vllm' ? 'aggregated' : prev.mode,
+        providerOverrides: runtime === 'vllm' ? undefined : prev.providerOverrides,
+        modelSource: runtime === 'vllm' ? 'vllm' : leavingDirectVllm ? undefined : prev.modelSource,
+        imageRef: runtime === 'vllm' ? (prev.imageRef || DIRECT_VLLM_NIGHTLY_IMAGE) : leavingDirectVllm ? undefined : prev.imageRef,
+        recipeProvenance: runtime === 'vllm' ? prev.recipeProvenance : undefined,
+      }
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimes, selectedRuntime])
 
@@ -843,6 +852,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes, 
 
   // Handle runtime change - update namespace and engine
   const handleRuntimeChange = (runtime: string) => {
+    runtimeManuallySelectedRef.current = true
     setTopologyManagedByAIConfig(false)
     setSelectedRuntime(runtime)
     const runtimeEngines = getRuntimeEngines(runtimes?.find(r => r.id === runtime))

@@ -454,7 +454,9 @@ async function validateProviderCapabilities(config: DeploymentConfig): Promise<v
   );
   const effectiveModelSource = config.modelSource ?? 'huggingface';
   validateSupportedCapability(config.provider, 'model source', effectiveModelSource, capabilities.modelSources);
-  validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
+  if (config.routerMode && config.routerMode !== 'default') {
+    validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
+  }
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | undefined {

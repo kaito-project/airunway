@@ -1248,11 +1248,11 @@ class KubernetesService {
       : statusReady;
     const operatorRunning = operatorPods.length > 0
       ? operatorProbe.ready
-      : (crdResults.length > 0 ? crdFound : statusReady);
+      : (crdResults.length > 0 ? crdFound && statusReady : statusReady);
     const installed = crdResults.length > 0 && operatorPods.length > 0
       ? crdFound && operatorRunning
       : crdResults.length > 0
-        ? crdFound
+        ? crdFound && statusReady
         : operatorRunning;
 
     const crdLabel = describeCrdSet(crds);
@@ -1281,6 +1281,8 @@ class KubernetesService {
         : `No ready ${providerName} operator pods were detected in ${namespaces}`;
     } else if (statusReady) {
       message = `${crdLabel} found and ${providerName} is ready`;
+    } else if (crdResults.length > 0) {
+      message = `${crdLabel} found but ${providerName} is not ready`;
     } else {
       message = `${crdLabel} found`;
     }

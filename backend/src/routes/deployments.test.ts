@@ -541,6 +541,33 @@ describe('Deployment Routes', () => {
       expect(data.error.message).toContain('does not support model source "huggingface"');
     });
 
+    test('POST /api/deployments/preview allows implicit default router mode when provider advertises overrides', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+          providerConfigWithCapabilities(providerId, {
+            engines: ['vllm'],
+            modes: ['aggregated'],
+            modelSources: ['huggingface'],
+            routerModes: ['kv'],
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'dynamo',
+          routerMode: 'default',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.resources[0].manifest.spec.provider.name).toBe('dynamo');
+    });
+
     test('POST /api/deployments/preview defers to admission when provider config lookup has a transient error', async () => {
       restores.push(
         mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async () => {

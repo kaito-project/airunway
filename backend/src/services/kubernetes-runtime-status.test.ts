@@ -490,6 +490,26 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.message).toBe('badhealth.example.com not found');
   });
 
+
+  test('does not report CRD-only providers installed until provider status is ready', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
+    );
+
+    const status = await kubernetesService.checkProviderInstallationStatus(
+      'crd-only-provider',
+      { ready: false },
+      'CRD Only Provider',
+      { crds: [{ name: 'crdonly.example.com', displayName: 'CRD Only CRD' }] },
+      true,
+    );
+
+    expect(status.installed).toBe(false);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(false);
+    expect(status.message).toBe('CRD Only CRD found but CRD Only Provider is not ready');
+  });
+
   test('reports KAITO as not fully installed when the CRD exists but no ready operator pod is found', async () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
