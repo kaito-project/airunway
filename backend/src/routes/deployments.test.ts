@@ -333,6 +333,90 @@ describe('Deployment Routes', () => {
       const data = await res.json();
       expect(data.resources[0].manifest.spec.gateway).toEqual({ enabled: false });
     });
+
+    test('preserves env in preview manifests', async () => {
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+
+      const env = {
+        VLLM_USE_V1: '1',
+        NCCL_DEBUG: 'INFO',
+      };
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'vllm',
+          env,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.resources[0].manifest.spec.env).toEqual([
+        { name: 'VLLM_USE_V1', value: '1' },
+        { name: 'NCCL_DEBUG', value: 'INFO' },
+      ]);
+    });
+
+    test('preserves Direct vLLM recipe provenance as metadata annotations in preview manifests', async () => {
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+
+      const imageRef = 'vllm/vllm-openai@sha256:1111111111111111111111111111111111111111111111111111111111111111';
+      const recipeFeatures = ['prefixCaching', 'kvCacheDtype'];
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          name: 'recipe-vllm',
+          provider: 'vllm',
+          imageRef,
+          engineExtraArgs: ['--enable-auto-tool-choice'],
+          recipeProvenance: {
+            source: 'vllm-recipes',
+            id: 'meta-llama/Llama-3.1-8B-Instruct',
+            strategy: 'single_node_tp',
+            hardware: 'h100',
+            variant: 'default',
+            precision: 'bf16',
+            features: recipeFeatures,
+            revision: '2026-05-04',
+          },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      const manifest = data.resources[0].manifest;
+      expect(manifest.metadata.annotations).toEqual({
+        'airunway.ai/generated-by': 'vllm-recipe-resolver',
+        'airunway.ai/recipe.source': 'vllm-recipes',
+        'airunway.ai/recipe.id': 'meta-llama/Llama-3.1-8B-Instruct',
+        'airunway.ai/recipe.strategy': 'single_node_tp',
+        'airunway.ai/recipe.hardware': 'h100',
+        'airunway.ai/recipe.variant': 'default',
+        'airunway.ai/recipe.precision': 'bf16',
+        'airunway.ai/recipe.revision': '2026-05-04',
+        'airunway.ai/recipe.features': JSON.stringify(recipeFeatures),
+      });
+      expect(manifest.spec.provider.name).toBe('vllm');
+      expect(manifest.spec.engine.type).toBe('vllm');
+      expect(manifest.spec.engine.image).toBe(imageRef);
+      expect(manifest.spec.engine.extraArgs).toEqual(['--enable-auto-tool-choice']);
+      expect(manifest.spec.image).toBeUndefined();
+      expect(manifest.spec.recipe).toBeUndefined();
+      expect(manifest.spec.recipes).toBeUndefined();
+      expect(manifest.status?.recipe).toBeUndefined();
+    });
   });
 
 
@@ -429,6 +513,32 @@ describe('Deployment Routes', () => {
       expect(res.status).toBe(422);
       const data = await res.json();
       expect(data.error.message).toContain('does not support mode for engine trtllm "disaggregated"');
+    });
+
+    test('POST /api/deployments/preview validates omitted modelSource as HuggingFace', async () => {
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getInferenceProviderConfig', async (providerId: string) => (
+          providerConfigWithCapabilities(providerId, {
+            engines: ['vllm'],
+            modes: ['aggregated'],
+            modelSources: ['custom'],
+          })
+        )),
+      );
+
+      const res = await app.request('/api/deployments/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          provider: 'custom-provider',
+          modelSource: undefined,
+        }),
+      });
+
+      expect(res.status).toBe(422);
+      const data = await res.json();
+      expect(data.error.message).toContain('does not support model source "huggingface"');
     });
   });
 
@@ -1099,8 +1209,9 @@ describe('Deployment Routes', () => {
       });
 
       expect(res.status).toBe(201);
-      expect(capturedConfig.imageRef).toBe('ghcr.io/kaito-project/aikit/runners/llama-cpp-cuda:latest');
-      expect(capturedConfig.engineArgs?.ggufUrl).toBe(
+      expect(capturedConfig).toBeDefined();
+      expect(capturedConfig!.imageRef).toBe('ghcr.io/kaito-project/aikit/runners/llama-cpp-cuda:latest');
+      expect(capturedConfig!.engineArgs?.ggufUrl).toBe(
         'https://huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF/resolve/main/NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf'
       );
     });
@@ -1142,7 +1253,51 @@ describe('Deployment Routes', () => {
       });
 
       expect(res.status).toBe(201);
-      expect(capturedConfig.imageRef).toBe('ghcr.io/kaito-project/aikit/llama3.2:3b');
+      expect(capturedConfig).toBeDefined();
+      expect(capturedConfig!.imageRef).toBe('ghcr.io/kaito-project/aikit/llama3.2:3b');
+    });
+
+    test('passes env through create schema to Kubernetes service', async () => {
+      let capturedConfig: DeploymentConfig | undefined;
+
+      restores.push(
+        mockServiceMethod(kubernetesService, 'createDeployment', async (config) => {
+          capturedConfig = config;
+          return undefined;
+        }),
+      );
+      restores.push(
+        mockServiceMethod(kubernetesService, 'getClusterGpuCapacity', async () => ({
+          totalGpus: 16,
+          allocatedGpus: 0,
+          availableGpus: 16,
+          maxContiguousAvailable: 8,
+          nodes: [],
+        })),
+      );
+      restores.push(
+        mockServiceMethod(configService, 'getDefaultNamespace', async () => 'default'),
+      );
+
+      const env = {
+        VLLM_USE_V1: '1',
+        NCCL_DEBUG: 'INFO',
+      };
+
+      const res = await app.request('/api/deployments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...validDeploymentBody,
+          name: 'env-test',
+          provider: 'vllm',
+          env,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      expect(capturedConfig).toBeDefined();
+      expect(capturedConfig!.env).toEqual(env);
     });
 
     test('accepts deployment with providerOverrides', async () => {

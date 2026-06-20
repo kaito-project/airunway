@@ -433,8 +433,8 @@ function normalizeProvider(config: any): ProviderDetails {
     capabilitiesSource,
     warnings,
   );
-  const explicitRequiresCRD = aggregateRequiresCRDFromCapabilities(config.spec?.capabilities ?? parsedCapabilities)
-    ?? ((parsedCapabilities as { requiresCRD?: unknown } | undefined)?.requiresCRD);
+  const explicitRequiresCRD = aggregateRequiresCRDFromCapabilities(capabilitiesSource)
+    ?? ((capabilitiesSource as { requiresCRD?: unknown } | undefined)?.requiresCRD);
   const annotatedDisplayName = getAnnotatedProviderDisplayName(annotations);
   const requiresCRD = providerRequiresRuntimeCRD(id, explicitRequiresCRD, annotatedDisplayName);
   const deploymentDefaults = normalizeDeploymentDefaults(

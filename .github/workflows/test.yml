@@ -121,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [dynamo, kaito, kuberay, llmd]
+        provider: [dynamo, kaito, kuberay, llmd, vllm]
 
     steps:
       - name: Checkout repository

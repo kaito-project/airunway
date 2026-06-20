@@ -133,6 +133,17 @@ const storageSchema = z.object({
   volumes: z.array(storageVolumeSchema).max(8, 'Maximum 8 storage volumes allowed').optional(),
 }).optional();
 
+const recipeProvenanceSchema = z.object({
+  source: z.string().optional(),
+  id: z.string().optional(),
+  strategy: z.string().optional(),
+  hardware: z.string().optional(),
+  variant: z.string().optional(),
+  precision: z.string().optional(),
+  features: z.array(z.string()).optional(),
+  revision: z.string().optional(),
+}).optional();
+
 const createDeploymentSchema = z.object({
   name: resourceNameSchema,
   modelId: z.string().min(1, 'Model ID is required'),
@@ -153,6 +164,8 @@ const createDeploymentSchema = z.object({
     memory: z.string().optional(),
   }).optional(),
   engineArgs: z.record(z.string(), z.unknown()).optional(),
+  engineExtraArgs: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   providerOverrides: z.record(z.string(), z.unknown()).optional(),
   prefillReplicas: z.number().int().min(0).optional(),
   decodeReplicas: z.number().int().min(0).optional(),
@@ -166,6 +179,7 @@ const createDeploymentSchema = z.object({
   computeType: z.enum(['cpu', 'gpu']).optional(),
   maxModelLen: z.number().int().positive().optional(),
   gatewayEnabled: z.boolean().optional(),
+  recipeProvenance: recipeProvenanceSchema,
   storage: storageSchema,
 }).superRefine((data, ctx) => {
   const volumes = data.storage?.volumes;
@@ -385,6 +399,18 @@ function getSupportedModesForEngine(
     : undefined;
 }
 
+function hasProviderDeploymentCapabilities(
+  capabilities: NonNullable<ReturnType<typeof extractProviderDetails>['capabilities']>,
+): boolean {
+  return Boolean(
+    capabilities.engines.length > 0
+    || (capabilities.engineCapabilities?.length ?? 0) > 0
+    || capabilities.modes.length > 0
+    || capabilities.modelSources.length > 0
+    || capabilities.routerModes.length > 0
+  );
+}
+
 async function validateProviderCapabilities(config: DeploymentConfig): Promise<void> {
   if (!config.provider) {
     return;
@@ -404,6 +430,11 @@ async function validateProviderCapabilities(config: DeploymentConfig): Promise<v
     features: {},
   };
 
+  if (!hasProviderDeploymentCapabilities(capabilities)) {
+    logger.warn({ providerId: config.provider }, 'Provider does not declare deployment capabilities; skipping provider capability validation');
+    return;
+  }
+
   validateSupportedCapability(config.provider, 'engine', config.engine, capabilities.engines);
   const supportedModesForEngine = getSupportedModesForEngine(capabilities, config.engine);
   validateSupportedCapability(
@@ -412,7 +443,8 @@ async function validateProviderCapabilities(config: DeploymentConfig): Promise<v
     config.mode,
     supportedModesForEngine ?? capabilities.modes,
   );
-  validateSupportedCapability(config.provider, 'model source', config.modelSource, capabilities.modelSources);
+  const effectiveModelSource = config.modelSource ?? 'huggingface';
+  validateSupportedCapability(config.provider, 'model source', effectiveModelSource, capabilities.modelSources);
   validateSupportedCapability(config.provider, 'router mode', config.routerMode, capabilities.routerModes);
 }
 

@@ -169,7 +169,7 @@ describe('Installation Provider Routes', () => {
 
   function createCustomNamedNoCrdProviderConfigWithExplicitRequiresCrd() {
     const config = createNoCrdProviderConfigWithHelmMetadata();
-    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = config.metadata.annotations;
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = config.metadata.annotations;
 
     return {
       ...config,
@@ -198,13 +198,14 @@ describe('Installation Provider Routes', () => {
     // display name are non-canonical, so the canonical fallback in
     // providerRequiresRuntimeCRD cannot mask a buggy aggregation.
     const baseInstallation = JSON.parse(mockInferenceProviderConfig.metadata.annotations['airunway.ai/installation']);
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
     return {
       ...mockInferenceProviderConfig,
       metadata: {
         ...mockInferenceProviderConfig.metadata,
         name: 'mycustom-runtime',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          ...annotationsWithoutHealth,
           'airunway.io/provider-name': 'My Custom Runtime',
           'airunway.ai/installation': JSON.stringify(baseInstallation),
         },
@@ -232,7 +233,7 @@ describe('Installation Provider Routes', () => {
   });
 
   function withoutHealthAnnotation<T extends { metadata: { annotations: Record<string, string> } }>(config: T): T {
-    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = config.metadata.annotations;
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = config.metadata.annotations;
     return {
       ...config,
       metadata: {

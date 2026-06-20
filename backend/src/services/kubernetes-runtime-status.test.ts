@@ -250,7 +250,7 @@ describe('KubernetesService - Runtime Status', () => {
   });
 
   test('honors explicit requiresCRD metadata for custom-named CRD-less runtime entries', async () => {
-    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
     const customVllmConfig = {
       ...mockInferenceProviderConfig,
       metadata: {
@@ -299,13 +299,14 @@ describe('KubernetesService - Runtime Status', () => {
     // stripped, and the verdict lives on each engine. The provider id/display
     // name are non-canonical, so the canonical-id fallback cannot mask a
     // buggy aggregation.
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
     const customConfig = {
       ...mockInferenceProviderConfig,
       metadata: {
         ...mockInferenceProviderConfig.metadata,
         name: 'mycustom-runtime',
         annotations: {
-          ...mockInferenceProviderConfig.metadata.annotations,
+          ...annotationsWithoutHealth,
           'airunway.ai/provider-name': 'My Custom Runtime',
         },
       },
@@ -341,7 +342,7 @@ describe('KubernetesService - Runtime Status', () => {
   });
 
   test('honors annotation-derived requiresCRD when spec capabilities are absent', async () => {
-    const { 'airunway.ai/health': _health, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
+    const { 'airunway.ai/health': _health, 'airunway.ai/capabilities': _capabilities, ...annotationsWithoutHealth } = mockInferenceProviderConfig.metadata.annotations;
     const customConfig = {
       ...mockInferenceProviderConfig,
       metadata: {
