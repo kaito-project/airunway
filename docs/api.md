@@ -1255,6 +1255,7 @@ Get the status of HuggingFace token secrets across namespaces.
   "configured": true,
   "namespaces": [
     { "name": "dynamo-system", "exists": true },
+    { "name": "ray-system", "exists": true },
     { "name": "kuberay-system", "exists": true },
     { "name": "default", "exists": true }
   ],
@@ -1291,6 +1292,7 @@ Save HuggingFace access token as Kubernetes secrets in all required namespaces.
   },
   "results": [
     { "namespace": "dynamo-system", "success": true },
+    { "namespace": "ray-system", "success": true },
     { "namespace": "kuberay-system", "success": true },
     { "namespace": "default", "success": true }
   ]
@@ -1309,6 +1311,7 @@ Delete HuggingFace token secrets from all namespaces.
   "message": "HuggingFace secrets deleted successfully",
   "results": [
     { "namespace": "dynamo-system", "success": true },
+    { "namespace": "ray-system", "success": true },
     { "namespace": "kuberay-system", "success": true },
     { "namespace": "default", "success": true }
   ]

@@ -249,6 +249,7 @@ export const mockHfSecretStatusConfigured: HfSecretStatus = {
   configured: true,
   namespaces: [
     { name: 'dynamo-system', exists: true },
+    { name: 'ray-system', exists: true },
     { name: 'kuberay-system', exists: true },
     { name: 'kaito-workspace', exists: true },
     { name: 'default', exists: true },
@@ -260,6 +261,7 @@ export const mockHfSecretStatusEmpty: HfSecretStatus = {
   configured: false,
   namespaces: [
     { name: 'dynamo-system', exists: false },
+    { name: 'ray-system', exists: false },
     { name: 'kuberay-system', exists: false },
     { name: 'kaito-workspace', exists: false },
     { name: 'default', exists: false },
@@ -270,6 +272,7 @@ export const mockHfDistributeResult = {
   success: true,
   results: [
     { namespace: 'dynamo-system', success: true },
+    { namespace: 'ray-system', success: true },
     { namespace: 'kuberay-system', success: true },
     { namespace: 'kaito-workspace', success: true },
     { namespace: 'default', success: true },
@@ -280,6 +283,7 @@ export const mockHfDeleteResult = {
   success: true,
   results: [
     { namespace: 'dynamo-system', success: true, deleted: true },
+    { namespace: 'ray-system', success: true, deleted: true },
     { namespace: 'kuberay-system', success: true, deleted: true },
     { namespace: 'kaito-workspace', success: true, deleted: true },
     { namespace: 'default', success: true, deleted: true },
