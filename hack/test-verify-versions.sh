@@ -20,6 +20,7 @@ GO_MOD="controller/go.mod"
 DYNAMO_CONFIG="providers/dynamo/config.go"
 GATEWAY_DETECTION="controller/internal/gateway/detection.go"
 KAITO_CONFIG="providers/kaito/config.go"
+VLLM_TRANSFORMER="providers/vllm/transformer.go"
 VERSIONS_TS="shared/types/versions.generated.ts"
 
 BACKUPS=(
@@ -27,6 +28,7 @@ BACKUPS=(
     "${DYNAMO_CONFIG}.bak"
     "${GATEWAY_DETECTION}.bak"
     "${KAITO_CONFIG}.bak"
+    "${VLLM_TRANSFORMER}.bak"
     "${VERSIONS_TS}.bak"
 )
 
@@ -80,6 +82,11 @@ echo "== Mutating ${KAITO_CONFIG} (install Command --version arg) =="
 sed -i.bak -E 's|(--version )[^ ]+( )|\10.0.0-bogus\2|' "${KAITO_CONFIG}"
 expect_fail "${KAITO_CONFIG} install Command --version"
 mv -f "${KAITO_CONFIG}.bak" "${KAITO_CONFIG}"
+
+echo "== Mutating ${VLLM_TRANSFORMER} =="
+sed -i.bak -E 's|^var VLLMVersion = "[^"]*"$|var VLLMVersion = "0.0.0-bogus"|' "${VLLM_TRANSFORMER}"
+expect_fail "${VLLM_TRANSFORMER}"
+mv -f "${VLLM_TRANSFORMER}.bak" "${VLLM_TRANSFORMER}"
 
 echo "== Mutating ${VERSIONS_TS} =="
 # Now that verify-versions diffs a temp regen against the working-tree

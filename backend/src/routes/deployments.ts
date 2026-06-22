@@ -132,6 +132,17 @@ const storageSchema = z.object({
   volumes: z.array(storageVolumeSchema).max(8, 'Maximum 8 storage volumes allowed').optional(),
 }).optional();
 
+const recipeProvenanceSchema = z.object({
+  source: z.string().optional(),
+  id: z.string().optional(),
+  strategy: z.string().optional(),
+  hardware: z.string().optional(),
+  variant: z.string().optional(),
+  precision: z.string().optional(),
+  features: z.array(z.string()).optional(),
+  revision: z.string().optional(),
+}).optional();
+
 const createDeploymentSchema = z.object({
   name: resourceNameSchema,
   modelId: z.string().min(1, 'Model ID is required'),
@@ -152,6 +163,8 @@ const createDeploymentSchema = z.object({
     memory: z.string().optional(),
   }).optional(),
   engineArgs: z.record(z.string(), z.unknown()).optional(),
+  engineExtraArgs: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   providerOverrides: z.record(z.string(), z.unknown()).optional(),
   prefillReplicas: z.number().int().min(0).optional(),
   decodeReplicas: z.number().int().min(0).optional(),
@@ -165,6 +178,7 @@ const createDeploymentSchema = z.object({
   computeType: z.enum(['cpu', 'gpu']).optional(),
   maxModelLen: z.number().int().positive().optional(),
   gatewayEnabled: z.boolean().optional(),
+  recipeProvenance: recipeProvenanceSchema,
   storage: storageSchema,
 }).superRefine((data, ctx) => {
   const volumes = data.storage?.volumes;

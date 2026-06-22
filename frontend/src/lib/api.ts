@@ -58,6 +58,11 @@ export type {
   StorageSpec,
   VolumePurpose,
   PersistentVolumeAccessMode,
+  VllmRecipeIndexEntry,
+  VllmRecipeListResponse,
+  VllmRecipeRawResponse,
+  VllmRecipeResolveRequest,
+  VllmRecipeResolveResult,
 } from '@airunway/shared';
 
 // Settings types
@@ -115,6 +120,7 @@ export type {
   AutoscalerDetectionResult,
   AutoscalerStatusInfo,
   DetailedClusterCapacity,
+  GpuThroughputEstimate,
   NodePoolInfo,
   PodFailureReason,
   PodLogsOptions,
@@ -159,6 +165,7 @@ import type {
   AutoscalerDetectionResult,
   AutoscalerStatusInfo,
   DetailedClusterCapacity,
+  GpuThroughputEstimate,
   PodFailureReason,
   RuntimesStatusResponse,
   PodLogsResponse,
@@ -167,6 +174,10 @@ import type {
   AikitBuildResult,
   AikitPreviewResult,
   AikitInfrastructureStatus,
+  VllmRecipeListResponse,
+  VllmRecipeRawResponse,
+  VllmRecipeResolveRequest,
+  VllmRecipeResolveResult,
 } from '@airunway/shared';
 
 // ============================================================================
@@ -268,6 +279,29 @@ async function request<T>(endpoint: string, options?: RequestOptions): Promise<T
 export const modelsApi = {
   list: () => request<{ models: Model[] }>('/models'),
   get: (id: string) => request<Model>(`/models/${encodeURIComponent(id)}`),
+};
+
+
+// ============================================================================
+// vLLM Recipes API
+// ============================================================================
+
+export const vllmRecipesApi = {
+  /** List known upstream vLLM deployment recipes */
+  list: () => request<VllmRecipeListResponse>('/vllm/recipes'),
+
+  /** Resolve a recipe into deployment-ready engine args, image, resources, and provenance */
+  resolve: (data: VllmRecipeResolveRequest) =>
+    request<VllmRecipeResolveResult>('/vllm/recipes/resolve', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Fetch a raw recipe payload for a Hugging Face organization/model pair */
+  get: (org: string, model: string) =>
+    request<VllmRecipeRawResponse>(
+      `/vllm/recipes/${encodeURIComponent(org)}/${encodeURIComponent(model)}`
+    ),
 };
 
 // ============================================================================
@@ -519,6 +553,37 @@ export const gpuOperatorApi = {
   getCapacity: () => request<ClusterGpuCapacity>('/installation/gpu-capacity'),
 
   getDetailedCapacity: () => request<DetailedClusterCapacity>('/installation/gpu-capacity/detailed'),
+
+  /** Estimate inference throughput (per-chat speed + concurrent capacity) for a model on the cluster's GPUs */
+  getThroughput: (
+    params: {
+      modelId?: string;
+      paramCount?: number;
+      contextLen?: number;
+      quantization?: 'fp8' | 'int8' | 'fp16' | 'bf16';
+      kvCacheDtype?: 'fp8' | 'int8' | 'fp16' | 'bf16';
+      gpuModel?: string;
+      tpSize?: number;
+    },
+    hfToken?: string
+  ) => {
+    const search = new URLSearchParams();
+    if (params.modelId) search.set('modelId', params.modelId);
+    if (params.paramCount) search.set('paramCount', String(params.paramCount));
+    if (params.contextLen) search.set('contextLen', String(params.contextLen));
+    if (params.quantization) search.set('quantization', params.quantization);
+    if (params.kvCacheDtype) search.set('kvCacheDtype', params.kvCacheDtype);
+    if (params.gpuModel) search.set('gpuModel', params.gpuModel);
+    if (params.tpSize) search.set('tpSize', String(params.tpSize));
+
+    const headers: Record<string, string> = {};
+    if (hfToken) {
+      headers['X-HF-Token'] = hfToken;
+    }
+    return request<GpuThroughputEstimate>(`/installation/gpu-throughput?${search.toString()}`, {
+      headers,
+    });
+  },
 };
 
 // ============================================================================

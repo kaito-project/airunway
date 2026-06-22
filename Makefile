@@ -1,4 +1,4 @@
-.PHONY: install dev dev-frontend dev-backend build compile lint test clean help providers-test verify-versions test-verify-versions
+.PHONY: install dev dev-frontend dev-backend build compile lint test test-coverage test-coverage-backend test-coverage-frontend clean help providers-test verify-versions test-verify-versions
 .PHONY: controller-build controller-docker-build controller-install controller-deploy controller-generate generate-deploy-manifests
 .PHONY: model-downloader-docker-build setup-gateway cleanup-gateway
 
@@ -41,6 +41,7 @@ help:
 	@echo "  compile-windows        Cross-compile for Windows (x64)"
 	@echo "  lint                   Run linters"
 	@echo "  test                   Run tests"
+	@echo "  test-coverage          Run tests with coverage (frontend + backend)"
 	@echo "  clean                  Remove build artifacts and node_modules"
 	@echo ""
 	@echo "Controller Targets:"
@@ -125,6 +126,18 @@ lint:
 test: verify-versions
 	bun run test
 
+# Testing with coverage (CI entrypoint). Coverage prints to stdout;
+# GitHub step-summary formatting lives in the workflow, not here.
+# Uses `cd <ws> && bun run test:coverage` (not `bun run --filter`) so output
+# stays unprefixed and the coverage tables render cleanly in the CI summary.
+test-coverage: verify-versions test-coverage-backend test-coverage-frontend
+
+test-coverage-backend:
+	cd backend && bun run test:coverage
+
+test-coverage-frontend:
+	cd frontend && bun run test:coverage
+
 # Clean build artifacts
 clean:
 	rm -rf node_modules frontend/node_modules backend/node_modules shared/node_modules
@@ -184,6 +197,7 @@ providers-test: verify-versions
 	cd providers/kaito && go test ./...
 	cd providers/kuberay && go test ./...
 	cd providers/llmd && go test ./...
+	cd providers/vllm && go test ./...
 	@echo "✅ Provider tests completed"
 
 # Generate deploy manifests for controller and dashboard
@@ -266,6 +280,7 @@ cleanup-gateway:
 GAIE_VERSION_RE := $(subst .,\.,$(GAIE_VERSION))
 DYNAMO_VERSION_RE := $(subst .,\.,$(DYNAMO_VERSION))
 KAITO_VERSION_RE := $(subst .,\.,$(KAITO_VERSION))
+VLLM_VERSION_RE := $(subst .,\.,$(VLLM_VERSION))
 
 verify-versions:
 	@# 1. controller/go.mod must pin GAIE_VERSION
@@ -283,7 +298,10 @@ verify-versions:
 	@# 5. providers/kaito/config.go install Command --version arg must match KAITO_VERSION
 	@grep -qE -- '--version $(KAITO_VERSION_RE) ' providers/kaito/config.go || \
 	  { echo "❌ providers/kaito/config.go install Command --version != $(KAITO_VERSION) (from versions.env)"; exit 1; }
-	@# 6. generated TS must be in sync with versions.env.
+	@# 6. providers/vllm/transformer.go fallback literal must match VLLM_VERSION
+	@grep -qE '^var VLLMVersion = "$(VLLM_VERSION_RE)"$$' providers/vllm/transformer.go || \
+	  { echo "❌ providers/vllm/transformer.go VLLMVersion fallback != $(VLLM_VERSION) (from versions.env)"; exit 1; }
+	@# 7. generated TS must be in sync with versions.env.
 	@#    Generate to a temp file and diff against the working-tree copy so
 	@#    that synced uncommitted edits pass (the local-dev case) while
 	@#    stale committed files still fail (the CI case — CI's working
@@ -301,7 +319,9 @@ verify-versions:
 	    echo "❌ shared/types/versions.generated.ts is stale — run 'cd shared && bun run generate-versions' and commit the result"; \
 	    exit 1; \
 	  }
-	@echo "✅ versions in sync (GAIE_VERSION=$(GAIE_VERSION), DYNAMO_VERSION=$(DYNAMO_VERSION), KAITO_VERSION=$(KAITO_VERSION))"
+	@# Print the versions straight from versions.env so this summary stays in
+	@# sync automatically as keys are added (no hardcoded list to maintain).
+	@printf '✅ versions in sync (%s)\n' "$$(awk -F= '/^[A-Z][A-Z0-9_]*=/ { printf "%s%s=%s", sep, $$1, $$2; sep=", " }' versions.env)"
 
 # Test the verify-versions guard itself by deliberately breaking each
 # input it inspects and asserting the target exits non-zero.

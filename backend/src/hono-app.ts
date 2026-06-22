@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { compress } from 'hono/compress';
+import { trimTrailingSlash } from 'hono/trailing-slash';
 import { HTTPException } from 'hono/http-exception';
 
 import { authService } from './services/auth';
@@ -30,6 +31,7 @@ import {
   aiconfigurator,
   costs,
   gateway,
+  vllmRecipes,
 } from './routes';
 
 // Load static files at startup
@@ -105,6 +107,11 @@ const app = new Hono<AppEnv>();
 
 // Global middleware
 app.use('*', compress());
+// Treat a trailing slash as equivalent to no slash: Hono routes strictly, so
+// "/api/vllm/recipes/" would otherwise 404 while "/api/vllm/recipes" works.
+// This only acts on a would-be 404 GET/HEAD, 301-redirecting to the no-slash
+// path, so it never changes the outcome of an already-matched route.
+app.use('*', trimTrailingSlash());
 app.use(
   '*',
   cors({
@@ -203,6 +210,7 @@ app.route('/api/aikit', aikit);
 app.route('/api/aiconfigurator', aiconfigurator);
 app.route('/api/costs', costs);
 app.route('/api/gateway', gateway);
+app.route('/api/vllm/recipes', vllmRecipes);
 
 // Static file serving middleware - uses Bun.file() for zero-copy serving
 app.use('*', async (c, next) => {

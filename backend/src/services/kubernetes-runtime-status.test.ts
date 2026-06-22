@@ -3,6 +3,27 @@ import { kubernetesService } from './kubernetes';
 import { mockServiceMethod } from '../test/helpers';
 import { mockInferenceProviderConfig } from '../test/fixtures';
 
+// Minimal pod shape these tests construct and match against label selectors.
+interface PodLike {
+  metadata?: { name?: string; labels?: Record<string, string> };
+  status?: unknown;
+}
+
+// Arguments the Kubernetes client passes to the pod-listing methods we stub.
+interface K8sCallArg {
+  namespace?: string;
+  labelSelector?: string;
+}
+
+// Writable view of the private KubernetesService internals these tests stub.
+type MockableKubernetesService = {
+  coreV1Api: Record<string, (arg: K8sCallArg) => Promise<unknown>>;
+  customObjectsApi: Record<string, (arg?: K8sCallArg) => Promise<unknown>>;
+};
+
+const asMockable = (): MockableKubernetesService =>
+  kubernetesService as unknown as MockableKubernetesService;
+
 describe('KubernetesService - Runtime Status', () => {
   const restores: Array<() => void> = [];
   const kaitoOperatorSelector = 'app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace';
@@ -14,8 +35,8 @@ describe('KubernetesService - Runtime Status', () => {
     restores.length = 0;
   });
 
-  function mockProviderConfigs(items: any[]) {
-    const service = kubernetesService as any;
+  function mockProviderConfigs(items: unknown[]) {
+    const service = asMockable();
     const original = service.customObjectsApi.listClusterCustomObject;
     service.customObjectsApi.listClusterCustomObject = async () => ({ items });
     restores.push(() => {
@@ -23,7 +44,7 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
-  function podMatchesSelector(pod: any, selector?: string): boolean {
+  function podMatchesSelector(pod: PodLike, selector?: string): boolean {
     if (!selector) return true;
     const labels = pod.metadata?.labels || {};
     return selector.split(',').every((part) => {
@@ -32,16 +53,16 @@ describe('KubernetesService - Runtime Status', () => {
     });
   }
 
-  function mockOperatorPods(namespace: string, selector: string, items: any[], allNamespaceItems: any[] = []) {
-    const service = kubernetesService as any;
+  function mockOperatorPods(namespace: string, selector: string, items: PodLike[], allNamespaceItems: PodLike[] = []) {
+    const service = asMockable();
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
-    service.coreV1Api.listNamespacedPod = async (arg: any) => {
+    service.coreV1Api.listNamespacedPod = async (arg: K8sCallArg) => {
       expect(arg.namespace).toBe(namespace);
       const requestedSelector = arg.labelSelector;
       return { items: requestedSelector === selector ? items : items.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
-    service.coreV1Api.listPodForAllNamespaces = async (arg: any) => {
+    service.coreV1Api.listPodForAllNamespaces = async (arg: K8sCallArg) => {
       const requestedSelector = arg?.labelSelector;
       return { items: allNamespaceItems.filter((pod) => podMatchesSelector(pod, requestedSelector)) };
     };
@@ -378,6 +399,33 @@ describe('KubernetesService - Runtime Status', () => {
     expect(status.message).toBe('KAITO workspace CRD found and KAITO operator pods are ready');
   });
 
+  test('reports KAITO as installed when the AKS AI-toolchain-operator add-on pod is running in kube-system', async () => {
+    restores.push(
+      mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'workspaces.kaito.sh'),
+    );
+    // The AKS add-on runs the KAITO operator in kube-system, labeled
+    // app=ai-toolchain-operator rather than the upstream Helm chart labels, so
+    // it only surfaces through the cross-namespace fallback search.
+    mockOperatorPods('kaito-workspace', kaitoOperatorSelector, [], [
+      {
+        metadata: { namespace: 'kube-system', name: 'kaito-workspace-557dbc5ffb-smczp', labels: { app: 'ai-toolchain-operator' } },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: true, restartCount: 0 },
+          ],
+        },
+      },
+    ]);
+
+    const status = await kubernetesService.checkKaitoInstallationStatus();
+
+    expect(status.installed).toBe(true);
+    expect(status.crdFound).toBe(true);
+    expect(status.operatorRunning).toBe(true);
+    expect(status.message).toBe('KAITO workspace CRD found and KAITO operator pods are ready in kube-system');
+  });
+
   test('reports Dynamo as installed when a ready operator pod is found', async () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async (crdName: string) => crdName === 'dynamographdeployments.nvidia.com'),
@@ -508,7 +556,7 @@ describe('KubernetesService - Runtime Status', () => {
     restores.push(
       mockServiceMethod(kubernetesService, 'checkCRDExists', async () => true),
     );
-    const service = kubernetesService as any;
+    const service = asMockable();
     const originalNamespaced = service.coreV1Api.listNamespacedPod;
     const originalAllNamespaces = service.coreV1Api.listPodForAllNamespaces;
     const forbidden = { statusCode: 403, body: { message: 'pods is forbidden' } };

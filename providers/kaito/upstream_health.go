@@ -17,7 +17,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -43,9 +45,23 @@ const (
 
 // Well-known resource selectors the probe looks up.
 const (
-	kaitoDeploymentSelectorKey    = "app.kubernetes.io/name"
-	kaitoDeploymentSelectorValue  = "workspace"
-	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install KAITO with `helm install kaito-workspace kaito/workspace`. If this cluster was provisioned with `--enable-ai-toolchain-operator`, disable the AKS extension first (`az aks update --disable-ai-toolchain-operator ...`)."
+	kaitoDeploymentSelectorKey   = "app.kubernetes.io/name"
+	kaitoDeploymentSelectorValue = "workspace"
+	// aksAddonSelectorValue matches the KAITO controller Deployment installed by
+	// the AKS AI-toolchain-operator add-on. Verified against a live
+	// `--enable-ai-toolchain-operator` cluster, the add-on Deployment carries
+	// BOTH app.kubernetes.io/name=ai-toolchain-operator AND app=ai-toolchain-operator
+	// (in kube-system), so probing the dotted key here is correct.
+	// NOTE: the add-on POD only carries the bare `app` label, so the TypeScript
+	// pod probe in backend/src/services/kubernetes.ts intentionally matches
+	// `app=ai-toolchain-operator` instead. The two paths use different label
+	// keys on purpose because they inspect different objects (Deployment here,
+	// Pod there).
+	aksAddonSelectorValue = "ai-toolchain-operator"
+	// controllerMissingUserMessage covers both the "never installed" case and the
+	// "add-on enabled but unhealthy" case, pointing at the namespace to inspect
+	// for each install path.
+	controllerMissingUserMessage  = "The KAITO workspace controller is not running. Install it with `helm install kaito-workspace kaito/workspace` (check the kaito-workspace namespace), or via the AKS AI toolchain operator add-on `az aks update --enable-ai-toolchain-operator ...` (check the kube-system namespace)."
 	controllerNotReadyUserMessage = "The KAITO workspace controller Deployment %s/%s exists but has no ready replicas."
 	crdMissingUserMessage         = "KAITO Workspace CRD not found. Install KAITO."
 )
@@ -132,16 +148,35 @@ func isNoKindMatch(err error) bool {
 // workspace controller label selector. It also returns a second return value
 // indicating whether any Deployment with the selector was found (so callers
 // can distinguish "missing" from "not ready").
+//
+// The selector matches both the upstream Helm chart
+// (app.kubernetes.io/name=workspace) and the AKS AI-toolchain-operator add-on
+// (app.kubernetes.io/name=ai-toolchain-operator). The List is cluster-wide so
+// the controller is found regardless of which namespace it runs in
+// (kaito-workspace for the chart, kube-system for the add-on).
 func listWorkspaceController(ctx context.Context, direct client.Client) (*appsv1.Deployment, bool, error) {
+	req, err := labels.NewRequirement(
+		kaitoDeploymentSelectorKey,
+		selection.In,
+		[]string{kaitoDeploymentSelectorValue, aksAddonSelectorValue},
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("build controller selector: %w", err)
+	}
+	selector := labels.NewSelector().Add(*req)
+
 	list := &appsv1.DeploymentList{}
-	if err := direct.List(ctx, list, client.MatchingLabels{kaitoDeploymentSelectorKey: kaitoDeploymentSelectorValue}); err != nil {
+	if err := direct.List(ctx, list, client.MatchingLabelsSelector{Selector: selector}); err != nil {
 		return nil, false, fmt.Errorf("list deployments: %w", err)
 	}
 	if len(list.Items) == 0 {
 		return nil, false, nil
 	}
 	// Prefer a ready one; otherwise return the first item so the caller can
-	// reference the namespace/name in the message.
+	// reference the namespace/name in the message. When both the Helm chart and
+	// the AKS add-on are present, the In selector returns both Deployments and
+	// this loop reports the first ready one — installed/healthy is what matters,
+	// not which install path wins the tiebreak.
 	for i := range list.Items {
 		d := &list.Items[i]
 		if d.Status.ReadyReplicas > 0 {
