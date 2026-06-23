@@ -30,7 +30,12 @@ SKIP_BUILD=false
 KEEP=false
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GO_TIMEOUT="45m"
+# go test global timeout. It must exceed the worst-case single-case chain
+# (upstream-CR 3m + scheduling 2m + Running 45m + gateway 5m + inference 3m +
+# cleanup delete 6m ≈ 64m) with headroom, so the global timeout can never fire
+# before a case's t.Cleanup runs and frees its GPU. Cases run in parallel, so
+# wall-clock is the slowest single case, not the sum.
+GO_TIMEOUT="75m"
 
 # All providers the harness knows about (KubeRay is intentionally excluded).
 ALL_PROVIDERS=(dynamo vllm kaito)
@@ -173,10 +178,9 @@ run_includes() {
 # Tooling + reachability
 # ---------------------------------------------------------------------------
 require_tools() {
-    local tools=(kubectl helm jq go)
-    if ! $SKIP_BUILD; then
-        tools+=(docker)
-    fi
+    # docker is required even with --skip-build: preflight_pull runs
+    # `docker manifest inspect` in both the build and skip-build paths.
+    local tools=(kubectl helm jq go docker)
     # The Dynamo setup bundle (setup-dynamo -> setup-gateway) needs these.
     if run_includes dynamo && ! $SKIP_INSTALL; then
         tools+=(istioctl envsubst curl)

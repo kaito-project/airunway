@@ -79,19 +79,19 @@ func maxNodeGPUs() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	max := 0
+	maxGPUs := 0
 	for _, n := range nodes.Items {
-		if q := atoiQuantity(n.Status.Allocatable[gpuResource]); q > max {
-			max = q
+		if q := atoiQuantity(n.Status.Allocatable[gpuResource]); q > maxGPUs {
+			maxGPUs = q
 		}
 	}
-	return max, nil
+	return maxGPUs, nil
 }
 
 func getNodes() (*nodeList, error) {
-	out, err := exec.Command("kubectl", "get", "nodes", "-o", "json").Output()
+	out, err := exec.Command("kubectl", "get", "nodes", "-o", "json").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("kubectl get nodes: %w", err)
+		return nil, fmt.Errorf("kubectl get nodes: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	var nodes nodeList
 	if err := json.Unmarshal(out, &nodes); err != nil {

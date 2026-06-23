@@ -31,9 +31,10 @@ func moduleDir() string {
 }
 
 // runResultsDir returns (and lazily creates) the directory for this test run.
-// GPU_E2E_RESULTS_DIR overrides the location entirely (the shell sets it so its
-// own logs and the suite's bundles share a root); otherwise it is
-// <module>/gpu-e2e-results/<timestamp>/. GPU_E2E_RUN_TS pins the timestamp.
+// An optional GPU_E2E_RESULTS_DIR env var overrides the location entirely (e.g.
+// to share a root with an external caller's logs); otherwise it is
+// <module>/gpu-e2e-results/<timestamp>/. The optional GPU_E2E_RUN_TS env var
+// pins the timestamp. Neither is set by scripts/gpu-e2e.sh today.
 func runResultsDir(t *testing.T) string {
 	t.Helper()
 	resultsOnce.Do(func() {

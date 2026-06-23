@@ -36,12 +36,6 @@ const (
 	// mdNamespace is the namespace for the ModelDeployment.
 	mdNamespace = "default"
 
-	// pvcName is the expected PVC name: <md-name>-<volume-name>.
-	pvcName = "qwen3-0-6b-model-cache"
-
-	// jobName is the expected download Job name: <md-name>-model-download.
-	jobName = "qwen3-0-6b-model-download"
-
 	// frontendPort is the port exposed by the Dynamo frontend service.
 	frontendPort = "8000"
 

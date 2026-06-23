@@ -17,13 +17,17 @@ import (
 const schedulingDeadline = 2 * time.Minute
 
 // classifyScheduling implements the phase-1 scheduling check. It returns once
-// the workload pod has left Pending (so phase-2 readiness can proceed), or it
-// terminates the case via t.Skip (capacity) / t.Fatal (real failure):
+// the workload pod has been admitted to a node (so the phase-2 Running wait can
+// own image-pull and startup latency), or it terminates the case:
 //
 //   - permanently unschedulable (pod wants more GPUs than any node has)  -> Skip
-//   - Pending past the deadline solely for insufficient GPU              -> Skip
-//   - Pending for a non-GPU reason (taint, image pull, quota)            -> Fatal
-//   - scheduled                                                          -> return
+//   - PodScheduled=False for insufficient GPU, past the deadline          -> Skip
+//   - PodScheduled=False for a non-GPU reason, past the deadline          -> Fatal
+//   - scheduled (Pending-but-pulling, Running, or no PodScheduled=False)  -> return
+//
+// A pod that is bound to a node but still Pending (pulling a multi-GB image)
+// has no PodScheduled=False condition, so it counts as scheduled and is handed
+// off to the Running wait rather than failed here.
 //
 // "Permanently unschedulable" is a static check: the case's max per-pod GPU
 // demand against the largest node. It runs first so a hopeless case is skipped
@@ -43,24 +47,31 @@ func classifyScheduling(t *testing.T, tc testCase) {
 	for {
 		pod, found := firstWorkloadPod(t, tc)
 		if found {
-			switch pod.phase {
-			case "Pending":
-				if reason, gpu := pendingReason(pod); !gpu {
-					// Non-GPU scheduling failure: no point waiting 45 minutes.
-					if time.Now().After(deadline) {
-						t.Fatalf("FAILED: %s pod Pending for non-GPU reason: %s",
-							tc.name, reason)
-					}
-				} else if time.Now().After(deadline) {
+			if pod.phase != "Pending" {
+				// Running/Succeeded/Failed: the pod was admitted to a node, so
+				// phase 1 is done. Image-pull and startup latency belong to the
+				// phase-2 Running wait, not here.
+				return
+			}
+			// Pending: distinguish "not yet scheduled" from "scheduled, pulling".
+			// A scheduled pod has no PodScheduled=False condition (it is True or
+			// absent) — it is progressing, so hand off to the Running wait.
+			notScheduled, gpu := unschedulableReason(pod)
+			if !notScheduled {
+				return
+			}
+			if time.Now().After(deadline) {
+				if gpu {
 					// Still GPU-starved after the deadline. A batch-mate may yet
 					// free a GPU, but we cannot prove progress here, so classify
 					// as capacity rather than block the batch.
-					t.Skipf("SKIPPED (capacity): %s pod Pending for GPU past %s: %s",
-						tc.name, schedulingDeadline, reason)
+					t.Skipf("SKIPPED (capacity): %s pod unschedulable for GPU past %s: %s",
+						tc.name, schedulingDeadline, podScheduledMessage(pod))
 				}
-			default:
-				// Scheduled (or already running/succeeded): phase 1 is done.
-				return
+				// Unschedulable for a non-GPU reason (taint, affinity, quota):
+				// no point waiting out the 45-minute Running timeout.
+				t.Fatalf("FAILED: %s pod unschedulable for non-GPU reason: %s",
+					tc.name, podScheduledMessage(pod))
 			}
 		} else if time.Now().After(deadline) {
 			// No pod created at all within the scheduling window is a real fault
@@ -104,23 +115,46 @@ func firstWorkloadPod(t *testing.T, tc testCase) (podInfo, bool) {
 			} `json:"status"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list.Items) == 0 {
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		t.Logf("[%s] warning: could not parse pod list JSON: %v", tc.name, err)
+		return podInfo{}, false
+	}
+	if len(list.Items) == 0 {
 		return podInfo{}, false
 	}
 	it := list.Items[0]
 	return podInfo{phase: it.Status.Phase, conditions: it.Status.Conditions}, true
 }
 
-// pendingReason returns the PodScheduled=False message and whether it is due to
-// insufficient GPU specifically.
-func pendingReason(pod podInfo) (msg string, gpuInsufficient bool) {
+// unschedulableReason inspects a Pending pod's PodScheduled condition.
+//
+// It returns notScheduled=true only when there is an explicit
+// PodScheduled=False condition — i.e. the scheduler could not place the pod on
+// any node. A pod that is scheduled but still Pending (pulling its image,
+// initializing) has PodScheduled=True or no PodScheduled condition yet, so
+// notScheduled=false and the caller hands off to the Running wait. gpu reports
+// whether an unschedulable pod's reason names the GPU resource.
+func unschedulableReason(pod podInfo) (notScheduled, gpu bool) {
 	for _, c := range pod.conditions {
 		if c.Type == "PodScheduled" && c.Status == "False" {
-			m := c.Message
-			return m, strings.Contains(m, gpuResource)
+			return true, strings.Contains(c.Message, gpuResource)
 		}
 	}
-	return "no PodScheduled=False condition", false
+	return false, false
+}
+
+// podScheduledMessage returns the PodScheduled=False message for logging, or a
+// placeholder when none is present.
+func podScheduledMessage(pod podInfo) string {
+	for _, c := range pod.conditions {
+		if c.Type == "PodScheduled" && c.Status == "False" {
+			if c.Message != "" {
+				return c.Message
+			}
+			return c.Reason
+		}
+	}
+	return "no PodScheduled=False condition"
 }
 
 // maxPodGPUDemand returns the largest single-pod GPU request the case's fixture
@@ -156,18 +190,19 @@ func maxPodGPUDemand(t *testing.T, tc testCase) int {
 		} `json:"spec"`
 	}
 	if err := json.Unmarshal([]byte(out), &md); err != nil {
+		t.Logf("[%s] warning: could not parse MD spec for GPU demand: %v", tc.name, err)
 		return 0
 	}
 	// Disaggregated: the larger of the two component pods.
 	if md.Spec.Scaling.Prefill != nil || md.Spec.Scaling.Decode != nil {
-		max := 0
-		if p := md.Spec.Scaling.Prefill; p != nil && p.GPU.Count > max {
-			max = p.GPU.Count
+		maxDemand := 0
+		if p := md.Spec.Scaling.Prefill; p != nil && p.GPU.Count > maxDemand {
+			maxDemand = p.GPU.Count
 		}
-		if d := md.Spec.Scaling.Decode; d != nil && d.GPU.Count > max {
-			max = d.GPU.Count
+		if d := md.Spec.Scaling.Decode; d != nil && d.GPU.Count > maxDemand {
+			maxDemand = d.GPU.Count
 		}
-		return max
+		return maxDemand
 	}
 	return md.Spec.Resources.GPU.Count
 }

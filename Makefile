@@ -1,4 +1,4 @@
-.PHONY: install dev dev-frontend dev-backend build compile lint test test-coverage test-coverage-backend test-coverage-frontend clean help providers-test verify-versions test-verify-versions
+.PHONY: install dev dev-frontend dev-backend build compile lint test test-coverage test-coverage-backend test-coverage-frontend clean help providers-test gpu-e2e verify-versions test-verify-versions
 .PHONY: controller-build controller-docker-build controller-install controller-deploy controller-generate generate-deploy-manifests
 .PHONY: model-downloader-docker-build setup-gateway cleanup-gateway
 

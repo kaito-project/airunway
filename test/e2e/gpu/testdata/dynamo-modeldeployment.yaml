@@ -8,7 +8,7 @@ spec:
     id: Qwen/Qwen3-0.6B
     source: huggingface
     # Dynamo serves under the HF id, so gateway.modelName must equal it.
-    # The storage block is required: TestDynamoProviderE2E asserts a Bound
+    # The storage block is required: assertDynamoPVC asserts a Bound
     # model-cache PVC. storageClassName is azurefile-premium because the volume
     # defaults to ReadWriteMany, which Azure Disk classes (the cluster default)
     # cannot serve — only the file.csi azurefile-premium class can. The harness

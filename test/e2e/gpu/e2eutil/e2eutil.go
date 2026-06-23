@@ -32,11 +32,13 @@ func WaitFor(t *testing.T, timeout, interval time.Duration, desc string, fn func
 
 	// Evaluate once immediately so a fast-ready condition does not wait a full
 	// interval before its first check.
+	var lastErr error
 	if err := fn(); err == nil {
 		return
+	} else {
+		lastErr = err
 	}
 
-	var lastErr error
 	for {
 		select {
 		case <-ctx.Done():

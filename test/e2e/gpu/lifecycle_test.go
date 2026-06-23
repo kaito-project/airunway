@@ -63,7 +63,7 @@ func applyFixture(t *testing.T, tc testCase) {
 	if err != nil {
 		t.Fatalf("reading fixture %s: %v", tc.fixture, err)
 	}
-	manifest := patchFixture(tc, raw)
+	manifest := patchFixture(t, tc, raw)
 	if out, err := e2eutil.KubectlApply(t, manifest); err != nil {
 		t.Fatalf("applying fixture %s: %v\n%s", tc.fixture, err, out)
 	}
@@ -72,20 +72,30 @@ func applyFixture(t *testing.T, tc testCase) {
 
 // patchFixture applies harness-owned overrides to a fixture before apply. For
 // Dynamo it injects the chosen StorageClass so --storage-class retargets both
-// the PVC and the storage assertion from a single source.
-func patchFixture(tc testCase, raw []byte) []byte {
+// the PVC and the storage assertion from a single source. It fails the test if
+// the expected literal is absent (e.g. the fixture was reformatted), since a
+// silent no-op would otherwise surface later as a confusing PVC mismatch.
+func patchFixture(t *testing.T, tc testCase, raw []byte) []byte {
+	t.Helper()
 	if tc.provider != "dynamo" {
 		return raw
 	}
-	// The fixture pins azurefile-premium; rewrite it to the selected class.
-	return []byte(strings.ReplaceAll(string(raw),
-		"storageClassName: azurefile-premium",
-		"storageClassName: "+storageClass()))
+	const pinned = "storageClassName: azurefile-premium"
+	s := string(raw)
+	if !strings.Contains(s, pinned) {
+		t.Fatalf("dynamo fixture %s no longer contains %q; "+
+			"the storage-class patch would silently no-op", tc.fixture, pinned)
+	}
+	return []byte(strings.ReplaceAll(s, pinned, "storageClassName: "+storageClass()))
 }
 
-// cleanup deletes the MD inline (not via t.Cleanup) so a parallel case frees its
-// GPU as soon as it finishes. On a graceful-delete timeout it force-cascades to
-// release the GPU for the rest of the batch. Skipped under GPU_E2E_KEEP.
+// cleanup runs as a t.Cleanup so a parallel case frees its GPU as soon as it
+// finishes (on success or a mid-case t.Fatal), not at the end of the batch.
+// After a graceful MD delete it asserts the upstream resources were actually
+// garbage-collected (no orphans left holding a GPU) — a regression check a
+// finalizer/ownerRef bug would otherwise slip past. On a graceful-delete
+// timeout it force-cascades to release the GPU and skips the orphan check,
+// since force-removal is the abnormal path. Skipped entirely under GPU_E2E_KEEP.
 func cleanup(t *testing.T, tc testCase) {
 	if keepEnabled() {
 		t.Logf("GPU_E2E_KEEP set; leaving %s in place", tc.mdName)
@@ -97,6 +107,35 @@ func cleanup(t *testing.T, tc testCase) {
 	if err != nil {
 		t.Logf("graceful delete of %s timed out (%v); force-cascading to free GPU", tc.mdName, err)
 		forceCascade(t, tc)
+		t.Logf("force-cascaded %s", tc.mdName)
+		return
 	}
+	assertNoOrphans(t, tc)
 	t.Logf("cleaned up %s", tc.mdName)
+}
+
+// assertNoOrphans verifies that deleting the ModelDeployment cascaded to its
+// rendered resources. It is read-only and best-effort-bounded: the upstream CR
+// must be gone, and for Dynamo the model-cache PVC and download Job too. A
+// controller bug that leaks these (a missing ownerRef or stuck finalizer) would
+// leave GPU-holding workloads behind, which this catches.
+func assertNoOrphans(t *testing.T, tc testCase) {
+	gone := func(kind, name string) {
+		e2eutil.WaitFor(t, 2*time.Minute, 5*time.Second,
+			desc(tc, "orphan "+kind+" cleared"), func() error {
+				out, _ := e2eutil.KubectlMayFail(t, "get", kind, name,
+					"-n", tc.namespace, "--ignore-not-found")
+				if out != "" {
+					return errf("%s/%s still exists after MD delete", kind, name)
+				}
+				return nil
+			})
+	}
+
+	gone(tc.upstreamCR, tc.mdName)
+	if tc.provider == "dynamo" {
+		gone("pvc", tc.mdName+"-model-cache")
+		gone("job", tc.mdName+"-model-download")
+	}
+	t.Logf("[%s] no orphaned resources after delete", tc.name)
 }
