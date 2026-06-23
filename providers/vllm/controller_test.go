@@ -495,3 +495,42 @@ func TestRemoteImageResolverRejectsEmptyAndInvalidRefs(t *testing.T) {
 		t.Error("expected parse error for malformed image reference")
 	}
 }
+
+func TestSyncStatusRunningUpdatesMessage(t *testing.T) {
+	scheme := newScheme()
+
+	deploy := &unstructured.Unstructured{}
+	deploy.SetGroupVersionKind(deploymentGVK)
+	deploy.SetName("test")
+	deploy.SetNamespace("default")
+	deploy.Object["status"] = map[string]interface{}{
+		"conditions": []interface{}{
+			map[string]interface{}{"type": "Available", "status": "True"},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(deploy).Build()
+	r := NewVLLMProviderReconciler(c, scheme)
+
+	md := &airunwayv1alpha1.ModelDeployment{}
+	// Simulate a prior reconcile loop that left the deploying-phase message.
+	md.Status.Message = "Deployments created, waiting for pods to be ready"
+
+	desired := &unstructured.Unstructured{}
+	desired.SetGroupVersionKind(deploymentGVK)
+	desired.SetName("test")
+	desired.SetNamespace("default")
+
+	if err := r.syncStatus(context.Background(), md, desired); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if md.Status.Phase != airunwayv1alpha1.DeploymentPhaseRunning {
+		t.Fatalf("expected Running phase, got %s", md.Status.Phase)
+	}
+	if strings.Contains(md.Status.Message, "waiting for pods") {
+		t.Errorf("status message still claims waiting for pods while Running: %q", md.Status.Message)
+	}
+	if md.Status.Message == "" {
+		t.Errorf("expected a non-empty status message in Running phase")
+	}
+}
