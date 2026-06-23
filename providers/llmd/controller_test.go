@@ -2,10 +2,12 @@ package llmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -269,5 +271,48 @@ func TestReconcileIgnoresNoProvider(t *testing.T) {
 	}
 	if result.Requeue || result.RequeueAfter != 0 {
 		t.Error("expected no requeue when no provider assigned")
+	}
+}
+
+// TestSyncStatusRunningUpdatesMessage reproduces issue #289: once the upstream
+// Deployment is Available the phase flips to Running, but the status message
+// must no longer claim it is "waiting for pods to be ready".
+func TestSyncStatusRunningUpdatesMessage(t *testing.T) {
+	scheme := newScheme()
+
+	deploy := &unstructured.Unstructured{}
+	deploy.SetAPIVersion("apps/v1")
+	deploy.SetKind("Deployment")
+	deploy.SetName("test")
+	deploy.SetNamespace("default")
+	deploy.Object["status"] = map[string]interface{}{
+		"conditions": []interface{}{
+			map[string]interface{}{"type": "Available", "status": "True"},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(deploy).Build()
+	r := NewLLMDProviderReconciler(c, scheme)
+
+	md := &airunwayv1alpha1.ModelDeployment{}
+	md.Status.Message = "Deployments created, waiting for pods to be ready"
+
+	desired := &unstructured.Unstructured{}
+	desired.SetAPIVersion("apps/v1")
+	desired.SetKind("Deployment")
+	desired.SetName("test")
+	desired.SetNamespace("default")
+
+	if err := r.syncStatus(context.Background(), md, desired); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if md.Status.Phase != airunwayv1alpha1.DeploymentPhaseRunning {
+		t.Fatalf("expected Running phase, got %s", md.Status.Phase)
+	}
+	if strings.Contains(md.Status.Message, "waiting for pods") {
+		t.Errorf("status message still claims waiting for pods while Running: %q", md.Status.Message)
+	}
+	if md.Status.Message == "" {
+		t.Errorf("expected a non-empty status message in Running phase")
 	}
 }
