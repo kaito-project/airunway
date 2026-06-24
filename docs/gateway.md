@@ -212,6 +212,20 @@ Replace `provider.name` with your gateway implementation (`istio`, `gke`, or omi
 
 See the [upstream multi-model guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/serving-multiple-inference-pools-latest/) for full details.
 
+> **Known limitation — BBR restart on each new model.** BBR builds its model
+> registry only at startup and does not dynamically watch InferencePools, so the
+> controller triggers a rolling restart of the shared BBR Deployment once per new
+> `ModelDeployment` (tracked by the `airunway.ai/bbr-restarted` annotation). The
+> restart is **not zero-downtime**: while BBR is restarting, its registry is
+> incomplete, so an in-flight request for an *already-serving* model can miss its
+> `X-Gateway-Model-Name` header and mis-route to another model's InferencePool.
+> With disaggregated Dynamo serving this surfaces as a `Worker ID required
+> (--direct-route)` 500 on a concurrent aggregated request. This mainly affects
+> deploying multiple models close together; once all models are settled, routing
+> is correct and stable. A zero-downtime BBR reload (or a BBR that watches
+> InferencePools) would remove the window. The GPU e2e suite leaves
+> disaggregated serving out of its default matrix for this reason.
+
 ### Auto-detection with Multiple Gateways
 
 When no explicit gateway is configured and multiple Gateway resources exist in the cluster, the controller looks for one labeled with:

@@ -72,4 +72,7 @@ var cases = []testCase{
 		podSelector: "nvidia.com/dynamo-graph-deployment-name=qwen3-0-6b-dynamo",
 		extraAssert: assertDynamoDeep,
 	},
+	// Disaggregated Dynamo serving is intentionally excluded: it serves correctly
+	// in isolation but its shared-BBR restart races with concurrent aggregated
+	// requests (kaito-project/airunway#334). Re-add as a data-only case once fixed.
 }

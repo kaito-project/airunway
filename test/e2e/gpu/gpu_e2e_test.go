@@ -45,6 +45,15 @@ const (
 	deleteTimeout = 6 * time.Minute
 )
 
+// Inference gateway coordinates. assertInference port-forwards this Service
+// rather than using its external LoadBalancer IP, so inference is reachable from
+// any machine with kubectl access.
+const (
+	gatewayService   = "inference-gateway-istio"
+	gatewayNamespace = "default"
+	gatewayPort      = 80
+)
+
 // keepEnabled reports whether GPU_E2E_KEEP requests leaving MDs in place after
 // the test (for inspection). The next run's pre-delete still clears them.
 func keepEnabled() bool {
@@ -172,18 +181,22 @@ func assertGatewayReady(t *testing.T, tc testCase) {
 		e2eutil.MDJSONPath(t, tc.mdName, tc.namespace, "{.status.gateway.modelName}"))
 }
 
-// assertInference posts a chat-completion through the gateway LB and asserts a
-// non-empty completion. The model name is read from status.gateway.modelName —
-// never hardcoded — and equals the backend served name (enforced by fixtures).
+// assertInference posts a chat-completion through the inference gateway and
+// asserts a non-empty completion. It reaches the gateway via a port-forward to
+// the gateway Service rather than its external LoadBalancer IP, so the check
+// works from any machine with kubectl access (the external IP can be blocked by
+// network policy). The model name is read from status.gateway.modelName — never
+// hardcoded — and equals the backend served name (enforced by fixtures).
 func assertInference(t *testing.T, tc testCase) {
-	endpoint := e2eutil.MDJSONPath(t, tc.mdName, tc.namespace, "{.status.gateway.endpoint}")
 	model := e2eutil.MDJSONPath(t, tc.mdName, tc.namespace, "{.status.gateway.modelName}")
-	if endpoint == "" || model == "" {
-		t.Fatalf("missing gateway endpoint=%q or model=%q", endpoint, model)
+	if model == "" {
+		t.Fatalf("missing status.gateway.modelName")
 	}
 
+	pf := e2eutil.PortForwardService(t, gatewayService, gatewayNamespace, gatewayPort)
+
 	e2eutil.WaitFor(t, inferenceWindow, 5*time.Second, desc(tc, "inference response"), func() error {
-		content, err := e2eutil.GatewayChatCompletion(endpoint, model, inferenceTimeout)
+		content, err := e2eutil.GatewayChatCompletion(pf.BaseURL, model, inferenceTimeout)
 		if err != nil {
 			return err
 		}

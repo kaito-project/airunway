@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -126,15 +127,69 @@ type ChatResponse struct {
 	} `json:"error"`
 }
 
-// GatewayChatCompletion posts a chat-completion request to the inference gateway
-// LB at endpoint, routing to (and validating against) model. It returns the
-// generated text — message.content, or message.reasoning when a reasoning model
-// emits its text there with content null. The gateway routes on the request
-// body "model" field via the X-Gateway-Model-Name header, and the backend
-// validates the same value against its served model name, so model must be the
-// value the suite reads from status.gateway.modelName.
-func GatewayChatCompletion(endpoint, model string, timeout time.Duration) (string, error) {
-	url := fmt.Sprintf("http://%s/v1/chat/completions", endpoint)
+// PortForwardSession is a running `kubectl port-forward` process exposing a
+// cluster Service on a local port.
+type PortForwardSession struct {
+	cmd     *exec.Cmd
+	BaseURL string // e.g. http://127.0.0.1:38291
+}
+
+// Stop terminates the port-forward process.
+func (p *PortForwardSession) Stop() {
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+		_, _ = p.cmd.Process.Wait()
+	}
+}
+
+// PortForwardService starts `kubectl port-forward svc/<service> <local>:<remote>`
+// on a free local port and returns a session whose BaseURL points at it. It
+// registers t.Cleanup to stop the process. Using a port-forward instead of the
+// Service's external LoadBalancer IP makes inference reachable from any machine
+// with kubectl access — the external IP can be blocked by network policy (e.g.
+// an NSG that denies Internet-sourced inbound), which the API-server-tunneled
+// port-forward sidesteps.
+func PortForwardService(t *testing.T, service, namespace string, remotePort int) *PortForwardSession {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("finding a free local port: %v", err)
+	}
+	localPort := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	cmd := exec.Command("kubectl", "port-forward",
+		fmt.Sprintf("svc/%s", service),
+		fmt.Sprintf("%d:%d", localPort, remotePort),
+		"-n", namespace,
+	)
+	t.Logf("starting port-forward: kubectl port-forward svc/%s %d:%d -n %s",
+		service, localPort, remotePort, namespace)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting port-forward: %v", err)
+	}
+
+	session := &PortForwardSession{
+		cmd:     cmd,
+		BaseURL: fmt.Sprintf("http://127.0.0.1:%d", localPort),
+	}
+	t.Cleanup(session.Stop)
+
+	// Give the forward a moment to establish before callers use it.
+	time.Sleep(3 * time.Second)
+	return session
+}
+
+// GatewayChatCompletion posts a chat-completion request to baseURL (the gateway,
+// reached via a port-forward), routing to (and validating against) model. It
+// returns the generated text — message.content, or message.reasoning when a
+// reasoning model emits its text there with content null. The gateway routes on
+// the request body "model" field via the X-Gateway-Model-Name header, and the
+// backend validates the same value against its served model name, so model must
+// be the value the suite reads from status.gateway.modelName.
+func GatewayChatCompletion(baseURL, model string, timeout time.Duration) (string, error) {
+	url := baseURL + "/v1/chat/completions"
 	// max_tokens is generous: reasoning models spend tokens in a think phase
 	// before emitting an answer, so a tiny budget can yield empty content.
 	payload := fmt.Sprintf(

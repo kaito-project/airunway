@@ -70,20 +70,21 @@ func applyFixture(t *testing.T, tc testCase) {
 	t.Logf("applied fixture %s", tc.fixture)
 }
 
-// patchFixture applies harness-owned overrides to a fixture before apply. For
-// Dynamo it injects the chosen StorageClass so --storage-class retargets both
-// the PVC and the storage assertion from a single source. It fails the test if
-// the expected literal is absent (e.g. the fixture was reformatted), since a
-// silent no-op would otherwise surface later as a confusing PVC mismatch.
+// patchFixture applies harness-owned overrides to a fixture before apply. For a
+// Dynamo fixture that declares storage, it injects the chosen StorageClass so
+// --storage-class retargets both the PVC and the storage assertion from a single
+// source, and fails the test if the pinned literal is missing (a silent no-op
+// would otherwise surface later as a confusing PVC mismatch). Storage-less
+// fixtures (e.g. the disaggregated case) are returned unchanged.
 func patchFixture(t *testing.T, tc testCase, raw []byte) []byte {
 	t.Helper()
-	if tc.provider != "dynamo" {
+	s := string(raw)
+	if tc.provider != "dynamo" || !strings.Contains(s, "storageClassName:") {
 		return raw
 	}
 	const pinned = "storageClassName: azurefile-premium"
-	s := string(raw)
 	if !strings.Contains(s, pinned) {
-		t.Fatalf("dynamo fixture %s no longer contains %q; "+
+		t.Fatalf("dynamo fixture %s declares storage but not %q; "+
 			"the storage-class patch would silently no-op", tc.fixture, pinned)
 	}
 	return []byte(strings.ReplaceAll(s, pinned, "storageClassName: "+storageClass()))
