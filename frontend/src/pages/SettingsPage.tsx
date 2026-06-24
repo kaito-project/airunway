@@ -46,7 +46,7 @@ import {
   Trash2,
   Globe,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { useSearchParams } from 'react-router-dom'
 
 type SettingsTab = 'general' | 'runtimes' | 'integrations'
@@ -124,6 +124,57 @@ const crdLessRuntimeReadinessMessage = (ready: boolean | null | undefined) => (
 const crdLessRuntimeStateLabel = (ready: boolean | null | undefined) => (
   ready ? 'Ready' : 'Registered'
 )
+
+type ShimStatusSource = {
+  shimRegistered?: boolean
+  shimConnected?: boolean
+  shimLastHeartbeat?: string
+}
+
+type IntegrationStatus = {
+  label: 'Connected' | 'Not heartbeating' | 'Not registered'
+  tone: 'success' | 'warning' | 'unknown'
+  description: string
+}
+
+const formatHeartbeatAge = (heartbeat?: string): string | null => {
+  if (!heartbeat) return null
+  const ts = Date.parse(heartbeat)
+  if (Number.isNaN(ts)) return null
+  // Clamp future heartbeats (clock skew between cluster and browser) to "now"
+  // so the UI never shows a negative age. formatRelativeTime then handles the
+  // human-readable formatting, keeping it consistent with the rest of the app.
+  const safe = Math.min(Date.now(), ts)
+  return formatRelativeTime(new Date(safe).toISOString())
+}
+
+const describeIntegrationStatus = (source: ShimStatusSource | undefined | null): IntegrationStatus => {
+  if (!source?.shimRegistered) {
+    return {
+      label: 'Not registered',
+      tone: 'unknown',
+      description: 'No AI Runway provider integration is registered for this runtime.',
+    }
+  }
+  if (source.shimConnected) {
+    const age = formatHeartbeatAge(source.shimLastHeartbeat)
+    return {
+      label: 'Connected',
+      tone: 'success',
+      description: age
+        ? `AI Runway is connected to the provider (last heartbeat ${age}).`
+        : 'AI Runway is connected to the provider.',
+    }
+  }
+  const age = formatHeartbeatAge(source.shimLastHeartbeat)
+  return {
+    label: 'Not heartbeating',
+    tone: 'warning',
+    description: age
+      ? `The AI Runway integration registered for this runtime but has not reported a recent heartbeat (last seen ${age}).`
+      : 'The AI Runway integration registered for this runtime but has not reported a heartbeat yet.',
+  }
+}
 
 const selectDefaultRuntimeId = (runtimes: RuntimeSelectionMetadata[] | undefined): RuntimeId | null => {
   if (!runtimes) {
@@ -634,6 +685,26 @@ export function SettingsPage() {
                           <span className="font-mono text-xs">{runtime.version}</span>
                         </div>
                       )}
+                      {runtimeRequiresCRD(runtime) && runtime.shimRegistered && (() => {
+                        const integration = describeIntegrationStatus(runtime)
+                        return (
+                          <div
+                            className="flex items-center justify-between"
+                            title={integration.description}
+                            data-testid={`integration-status-${runtime.id}`}
+                          >
+                            <span className="text-muted-foreground">AI Runway integration</span>
+                            <span className="flex items-center gap-1 text-xs">
+                              {integration.tone === 'success' ? (
+                                <CheckCircle className="h-3.5 w-3.5 text-green-400" />
+                              ) : (
+                                <AlertCircle className="h-3.5 w-3.5 text-yellow-500" />
+                              )}
+                              <span>{integration.label}</span>
+                            </span>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -695,24 +766,57 @@ export function SettingsPage() {
               ) : (
                 <>
                   {selectedRuntimeRequiresCRD ? (
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>CRD Installed</span>
-                        {installationStatus?.crdFound ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Status of the underlying {installationStatus?.providerName || currentRuntime?.name || 'runtime'} operator
+                        and CRDs in the cluster. Use the install button below to deploy them if missing.
+                      </p>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="flex items-center justify-between rounded-lg bg-muted p-3">
+                          <span>CRD Installed</span>
+                          {installationStatus?.crdFound ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-red-500" />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg bg-muted p-3">
+                          <span>Operator Running</span>
+                          {installationStatus?.operatorRunning ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-red-500" />
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                        <span>Operator Running</span>
-                        {installationStatus?.operatorRunning ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                    </div>
+                      {(() => {
+                        if (installationStatus?.shimRegistered === undefined) {
+                          return null
+                        }
+                        const integration = describeIntegrationStatus(installationStatus)
+                        return (
+                          <div
+                            className="flex items-center justify-between rounded-lg bg-muted/60 p-3 text-sm"
+                            data-testid="integration-status-detail"
+                          >
+                            <div>
+                              <div className="font-medium">AI Runway integration</div>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {integration.description}
+                              </p>
+                            </div>
+                            <span className="flex items-center gap-1 shrink-0">
+                              {integration.tone === 'success' ? (
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <AlertCircle className="h-4 w-4 text-yellow-500" />
+                              )}
+                              <span className="text-xs">{integration.label}</span>
+                            </span>
+                          </div>
+                        )
+                      })()}
+                    </>
                   ) : (
                     <div className="flex items-center gap-2 rounded-lg bg-muted p-3 text-sm text-muted-foreground">
                       {isInstalled ? (
