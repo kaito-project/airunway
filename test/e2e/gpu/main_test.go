@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/kaito-project/airunway/test/e2e/gpu/sched"
 )
 
 // TestMain enforces the cheap, unambiguous cluster preconditions before any case
@@ -43,7 +46,9 @@ type nodeList struct {
 	} `json:"items"`
 }
 
-const gpuResource = "nvidia.com/gpu"
+// gpuResource is the allocatable resource key summed by the GPU gate. It is
+// single-sourced from the sched package so the gate and the classifier agree.
+const gpuResource = sched.GPUResource
 
 // checkGPUs sums allocatable nvidia.com/gpu across all nodes by parsing the node
 // JSON in Go. This deliberately avoids `kubectl -o jsonpath` with a bracketed
@@ -101,14 +106,11 @@ func getNodes() (*nodeList, error) {
 }
 
 // atoiQuantity parses a plain integer resource quantity (GPU counts are always
-// whole numbers); returns 0 for empty or unparseable values.
+// whole numbers); returns 0 for empty or non-integer values. strconv.Atoi
+// rejects trailing junk (e.g. "5x"), unlike fmt.Sscanf which would accept it.
 func atoiQuantity(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	var n int
-	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
 		return 0
 	}
 	return n

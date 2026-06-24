@@ -128,10 +128,16 @@ type ChatResponse struct {
 }
 
 // PortForwardSession is a running `kubectl port-forward` process exposing a
-// cluster Service on a local port.
+// cluster Service on a local port. It can re-establish itself if the tunnel
+// drops mid-test.
 type PortForwardSession struct {
-	cmd     *exec.Cmd
-	BaseURL string // e.g. http://127.0.0.1:38291
+	t         *testing.T
+	service   string
+	namespace string
+	remote    int
+	local     int
+	cmd       *exec.Cmd
+	BaseURL   string // e.g. http://127.0.0.1:38291
 }
 
 // Stop terminates the port-forward process.
@@ -139,7 +145,55 @@ func (p *PortForwardSession) Stop() {
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 		_, _ = p.cmd.Process.Wait()
+		p.cmd = nil
 	}
+}
+
+// alive reports whether the local port currently accepts a TCP connection.
+func (p *PortForwardSession) alive() bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p.local), time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// start launches the kubectl process and waits until the local port accepts
+// connections (instead of a fixed sleep). Fails the test if it never comes up.
+func (p *PortForwardSession) start() {
+	p.t.Helper()
+	cmd := exec.Command("kubectl", "port-forward",
+		fmt.Sprintf("svc/%s", p.service),
+		fmt.Sprintf("%d:%d", p.local, p.remote),
+		"-n", p.namespace,
+	)
+	if err := cmd.Start(); err != nil {
+		p.t.Fatalf("starting port-forward: %v", err)
+	}
+	p.cmd = cmd
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if p.alive() {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	p.t.Fatalf("port-forward to svc/%s never became ready on :%d", p.service, p.local)
+}
+
+// EnsureReady re-establishes the tunnel if it has dropped. Callers that retry
+// HTTP requests (e.g. the inference wait) call this so a tunnel that died
+// mid-window is restarted rather than turning into connection-refused for the
+// rest of the window.
+func (p *PortForwardSession) EnsureReady() {
+	if p.alive() {
+		return
+	}
+	p.t.Logf("port-forward to svc/%s dropped; re-establishing", p.service)
+	p.Stop()
+	p.start()
 }
 
 // PortForwardService starts `kubectl port-forward svc/<service> <local>:<remote>`
@@ -152,6 +206,10 @@ func (p *PortForwardSession) Stop() {
 func PortForwardService(t *testing.T, service, namespace string, remotePort int) *PortForwardSession {
 	t.Helper()
 
+	// Pick a free local port. There is a small window between closing this
+	// listener and kubectl binding the port; the readiness poll in start()
+	// covers it (a lost race shows up as a failed dial, and EnsureReady can
+	// re-pick), so it is not a hard failure.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("finding a free local port: %v", err)
@@ -159,25 +217,18 @@ func PortForwardService(t *testing.T, service, namespace string, remotePort int)
 	localPort := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	cmd := exec.Command("kubectl", "port-forward",
-		fmt.Sprintf("svc/%s", service),
-		fmt.Sprintf("%d:%d", localPort, remotePort),
-		"-n", namespace,
-	)
+	session := &PortForwardSession{
+		t:         t,
+		service:   service,
+		namespace: namespace,
+		remote:    remotePort,
+		local:     localPort,
+		BaseURL:   fmt.Sprintf("http://127.0.0.1:%d", localPort),
+	}
 	t.Logf("starting port-forward: kubectl port-forward svc/%s %d:%d -n %s",
 		service, localPort, remotePort, namespace)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting port-forward: %v", err)
-	}
-
-	session := &PortForwardSession{
-		cmd:     cmd,
-		BaseURL: fmt.Sprintf("http://127.0.0.1:%d", localPort),
-	}
+	session.start()
 	t.Cleanup(session.Stop)
-
-	// Give the forward a moment to establish before callers use it.
-	time.Sleep(3 * time.Second)
 	return session
 }
 
@@ -209,8 +260,17 @@ func GatewayChatCompletion(baseURL, model string, timeout time.Duration) (string
 		return "", fmt.Errorf("reading response body: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncate(string(body), 300))
+	return parseChatResponse(resp.StatusCode, body)
+}
+
+// parseChatResponse extracts the generated text from a chat-completion HTTP
+// response. It is split out from GatewayChatCompletion (which does the HTTP) so
+// the parse branches — non-200, invalid JSON, error envelope, empty choices,
+// and the reasoning-model content-vs-reasoning fallback — can be unit-tested
+// without a server.
+func parseChatResponse(statusCode int, body []byte) (string, error) {
+	if statusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d: %s", statusCode, truncate(string(body), 300))
 	}
 
 	var parsed ChatResponse
@@ -236,4 +296,28 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// PinnedStorageClass is the StorageClass literal a Dynamo fixture pins, which
+// the harness rewrites to the chosen --storage-class.
+const PinnedStorageClass = "storageClassName: azurefile-premium"
+
+// InjectStorageClass rewrites a Dynamo fixture's pinned StorageClass to sc.
+//
+//   - Non-Dynamo fixtures, or fixtures with no storage block at all, are
+//     returned unchanged with ok=true.
+//   - A Dynamo fixture that declares storage but lacks the pinned literal
+//     returns ok=false (the caller should fail loudly — a silent no-op would
+//     surface later as a confusing PVC mismatch).
+//
+// It is split out as a pure function so it can be unit-tested without a cluster.
+func InjectStorageClass(provider string, raw []byte, sc string) (out []byte, ok bool) {
+	s := string(raw)
+	if provider != "dynamo" || !strings.Contains(s, "storageClassName:") {
+		return raw, true
+	}
+	if !strings.Contains(s, PinnedStorageClass) {
+		return raw, false
+	}
+	return []byte(strings.ReplaceAll(s, PinnedStorageClass, "storageClassName: "+sc)), true
 }

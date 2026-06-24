@@ -78,16 +78,12 @@ func applyFixture(t *testing.T, tc testCase) {
 // fixtures (e.g. the disaggregated case) are returned unchanged.
 func patchFixture(t *testing.T, tc testCase, raw []byte) []byte {
 	t.Helper()
-	s := string(raw)
-	if tc.provider != "dynamo" || !strings.Contains(s, "storageClassName:") {
-		return raw
-	}
-	const pinned = "storageClassName: azurefile-premium"
-	if !strings.Contains(s, pinned) {
+	out, ok := e2eutil.InjectStorageClass(tc.provider, raw, storageClass())
+	if !ok {
 		t.Fatalf("dynamo fixture %s declares storage but not %q; "+
-			"the storage-class patch would silently no-op", tc.fixture, pinned)
+			"the storage-class patch would silently no-op", tc.fixture, e2eutil.PinnedStorageClass)
 	}
-	return []byte(strings.ReplaceAll(s, pinned, "storageClassName: "+storageClass()))
+	return out
 }
 
 // cleanup runs as a t.Cleanup so a parallel case frees its GPU as soon as it
@@ -102,14 +98,21 @@ func cleanup(t *testing.T, tc testCase) {
 		t.Logf("GPU_E2E_KEEP set; leaving %s in place", tc.mdName)
 		return
 	}
-	_, err := e2eutil.KubectlMayFail(t, "delete", "modeldeployment", tc.mdName,
+	out, err := e2eutil.KubectlMayFail(t, "delete", "modeldeployment", tc.mdName,
 		"-n", tc.namespace, "--ignore-not-found",
 		fmt.Sprintf("--timeout=%ds", int(deleteTimeout.Seconds())))
 	if err != nil {
-		t.Logf("graceful delete of %s timed out (%v); force-cascading to free GPU", tc.mdName, err)
-		forceCascade(t, tc)
-		t.Logf("force-cascaded %s", tc.mdName)
-		return
+		// Only a delete *timeout* means the resources are wedged and need a
+		// force-cascade to free the GPU. Any other failure (RBAC, apiserver
+		// down, missing CRD) is a real error we should surface, not silently
+		// downgrade into a no-op cleanup that skips the orphan check.
+		if strings.Contains(out, "timed out") || strings.Contains(err.Error(), "timed out") {
+			t.Logf("graceful delete of %s timed out; force-cascading to free GPU", tc.mdName)
+			forceCascade(t, tc)
+			t.Logf("force-cascaded %s", tc.mdName)
+			return
+		}
+		t.Fatalf("deleting %s failed (not a timeout): %v\n%s", tc.mdName, err, out)
 	}
 	assertNoOrphans(t, tc)
 	t.Logf("cleaned up %s", tc.mdName)

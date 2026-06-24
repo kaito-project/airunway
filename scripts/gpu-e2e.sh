@@ -310,6 +310,20 @@ preflight_pull() {
 # Operator install (gated on operator-deployment health)
 # ---------------------------------------------------------------------------
 # operator_deployment <provider> -> "<namespace> <label>" or empty (no operator)
+# kaito_operator_available checks cluster-wide for a KAITO workspace controller
+# Deployment with ready replicas, matching either the Helm chart
+# (app.kubernetes.io/name=workspace, ns kaito-workspace) or the AKS AI-toolchain
+# add-on (app.kubernetes.io/name=ai-toolchain-operator, ns kube-system). This
+# mirrors providers/kaito/upstream_health.go, so an AKS add-on cluster is
+# recognized instead of getting a second KAITO controller installed.
+kaito_operator_available() {
+    local ready
+    ready="$(kubectl get deploy --all-namespaces \
+        -l 'app.kubernetes.io/name in (workspace,ai-toolchain-operator)' \
+        -o jsonpath='{range .items[*]}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null || true)"
+    grep -qE '^[1-9]' <<<"$ready"
+}
+
 operator_deployment() {
     case "$1" in
     dynamo) echo "dynamo-system app.kubernetes.io/name=dynamo-operator" ;;
@@ -332,6 +346,13 @@ ensure_operator() {
     spec="$(operator_deployment "$p")"
     [[ -z "$spec" ]] && return 0 # vllm: nothing to install
     read -r ns label <<<"$spec"
+
+    # KAITO can run from the Helm chart (kaito-workspace) or the AKS add-on
+    # (kube-system); check both cluster-wide before deciding to install.
+    if [[ "$p" == "kaito" ]] && kaito_operator_available; then
+        log "kaito operator already Available (chart or AKS add-on); skipping setup-kaito"
+        return 0
+    fi
 
     if operator_available "$ns" "$label"; then
         log "${p} operator already Available; skipping setup-${p}"
@@ -377,8 +398,11 @@ deploy_airunway() {
 maybe_create_hf_secret() {
     [[ -z "$HF_TOKEN" ]] && return 0
     log "creating hf-token-secret in default namespace"
-    kubectl create secret generic hf-token-secret \
-        --from-literal=HF_TOKEN="$HF_TOKEN" -n default \
+    # Feed the token via stdin (--from-file=...=/dev/stdin) rather than
+    # --from-literal so it never appears in the process argv (ps / proc /
+    # CI arg-logging).
+    printf '%s' "$HF_TOKEN" | kubectl create secret generic hf-token-secret \
+        --from-file=HF_TOKEN=/dev/stdin -n default \
         --dry-run=client -o yaml | kubectl apply -f -
 }
 

@@ -31,9 +31,18 @@ type testCase struct {
 	// upstream custom resource, used for the exists-check and debug dumps.
 	upstreamCR string
 
-	// podSelector selects the workload pods that hold GPUs, for the
-	// timeout-only force-cascade teardown.
+	// podSelector selects the workload pods, for the timeout-only force-cascade
+	// teardown. It may match more than the GPU-holding pod (e.g. Dynamo's
+	// graph-deployment selector also matches the GPU-less frontend/EPP pod) —
+	// that is fine for teardown, which deletes everything.
 	podSelector string
+
+	// workloadSelector optionally narrows the scheduling check to the
+	// GPU-holding worker pod. When empty, the scheduling check uses podSelector.
+	// Set it when podSelector also matches non-GPU pods (Dynamo), so the
+	// capacity-SKIP path inspects the worker, not a frontend that schedules
+	// instantly.
+	workloadSelector string
 
 	// extraAssert runs provider-specific assertions after GatewayReady and
 	// before the inference check. nil for providers with no extra checks.
@@ -70,7 +79,11 @@ var cases = []testCase{
 		namespace:   "default",
 		upstreamCR:  "dynamographdeployments.nvidia.com",
 		podSelector: "nvidia.com/dynamo-graph-deployment-name=qwen3-0-6b-dynamo",
-		extraAssert: assertDynamoDeep,
+		// The graph-deployment selector also matches the GPU-less frontend/EPP
+		// pod; narrow the scheduling check to the GPU worker so capacity-SKIP
+		// isn't masked by a frontend pod that schedules instantly.
+		workloadSelector: "nvidia.com/dynamo-graph-deployment-name=qwen3-0-6b-dynamo,nvidia.com/dynamo-component-type=worker",
+		extraAssert:      assertDynamoDeep,
 	},
 	// Disaggregated Dynamo serving is intentionally excluded: it serves correctly
 	// in isolation but its shared-BBR restart races with concurrent aggregated

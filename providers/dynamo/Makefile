@@ -109,7 +109,8 @@ test-e2e:
 
 ## Run the CPU-only mocker e2e tests (aggregated + disaggregated). Requires a cluster
 ## with the Dynamo platform (see setup-dynamo-mocker) and the dynamo provider deployed.
-## No -run filter: the GPU lane (TestDynamoProviderE2E) self-skips without DYNAMO_INSTALLED,
-## so dropping it lets the unit-style TestInjectMockerAnnotation run here too.
+## No -run filter: the GPU lanes (TestDynamoMultiNodeE2E, TestDynamoStorageValidationE2E)
+## self-skip without DYNAMO_INSTALLED, so dropping it lets the unit-style
+## TestInjectMockerAnnotation run here too.
 test-e2e-mocker:
 	DYNAMO_MOCKER=true go test -count=1 -tags=e2e -v -timeout 30m ./test/e2e/

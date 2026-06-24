@@ -24,8 +24,6 @@ import (
 
 // Timeouts for the case lifecycle.
 const (
-	// providerReadyTimeout bounds the wait for inferenceproviderconfig/<p>.
-	providerReadyTimeout = 2 * time.Minute
 	// upstreamCRTimeout bounds the wait for the provider's rendered CR to appear.
 	upstreamCRTimeout = 3 * time.Minute
 	// runningTimeout bounds the wait for the MD to reach Running (image pull +
@@ -196,6 +194,9 @@ func assertInference(t *testing.T, tc testCase) {
 	pf := e2eutil.PortForwardService(t, gatewayService, gatewayNamespace, gatewayPort)
 
 	e2eutil.WaitFor(t, inferenceWindow, 5*time.Second, desc(tc, "inference response"), func() error {
+		// Re-establish the tunnel if it dropped, so a dead port-forward becomes
+		// a one-tick retry instead of connection-refused for the whole window.
+		pf.EnsureReady()
 		content, err := e2eutil.GatewayChatCompletion(pf.BaseURL, model, inferenceTimeout)
 		if err != nil {
 			return err

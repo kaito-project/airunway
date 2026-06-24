@@ -4,11 +4,11 @@ package gpu
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/kaito-project/airunway/test/e2e/gpu/e2eutil"
+	"github.com/kaito-project/airunway/test/e2e/gpu/sched"
 )
 
 // schedulingDeadline bounds phase 1 (does the workload pod schedule at all). A
@@ -32,6 +32,9 @@ const schedulingDeadline = 2 * time.Minute
 // "Permanently unschedulable" is a static check: the case's max per-pod GPU
 // demand against the largest node. It runs first so a hopeless case is skipped
 // in seconds rather than burning the deadline.
+//
+// The decision logic (UnschedulableReason/PodScheduledMessage) lives in the
+// cluster-free sched package so it can be unit-tested in CI.
 func classifyScheduling(t *testing.T, tc testCase) {
 	t.Helper()
 
@@ -47,7 +50,7 @@ func classifyScheduling(t *testing.T, tc testCase) {
 	for {
 		pod, found := firstWorkloadPod(t, tc)
 		if found {
-			if pod.phase != "Pending" {
+			if pod.Phase != "Pending" {
 				// Running/Succeeded/Failed: the pod was admitted to a node, so
 				// phase 1 is done. Image-pull and startup latency belong to the
 				// phase-2 Running wait, not here.
@@ -56,7 +59,7 @@ func classifyScheduling(t *testing.T, tc testCase) {
 			// Pending: distinguish "not yet scheduled" from "scheduled, pulling".
 			// A scheduled pod has no PodScheduled=False condition (it is True or
 			// absent) — it is progressing, so hand off to the Running wait.
-			notScheduled, gpu := unschedulableReason(pod)
+			notScheduled, gpu := sched.UnschedulableReason(pod)
 			if !notScheduled {
 				return
 			}
@@ -66,12 +69,12 @@ func classifyScheduling(t *testing.T, tc testCase) {
 					// free a GPU, but we cannot prove progress here, so classify
 					// as capacity rather than block the batch.
 					t.Skipf("SKIPPED (capacity): %s pod unschedulable for GPU past %s: %s",
-						tc.name, schedulingDeadline, podScheduledMessage(pod))
+						tc.name, schedulingDeadline, sched.PodScheduledMessage(pod))
 				}
 				// Unschedulable for a non-GPU reason (taint, affinity, quota):
 				// no point waiting out the 45-minute Running timeout.
 				t.Fatalf("FAILED: %s pod unschedulable for non-GPU reason: %s",
-					tc.name, podScheduledMessage(pod))
+					tc.name, sched.PodScheduledMessage(pod))
 			}
 		} else if time.Now().After(deadline) {
 			// No pod created at all within the scheduling window is a real fault
@@ -83,78 +86,45 @@ func classifyScheduling(t *testing.T, tc testCase) {
 	}
 }
 
-// podInfo is the slice of pod status the scheduling classifier needs.
-type podInfo struct {
-	phase      string
-	conditions []struct {
-		Type    string `json:"type"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-		Message string `json:"message"`
+// schedulingSelector returns the label selector that matches the GPU-holding
+// pod(s) for the scheduling check. It defaults to the case's podSelector, but a
+// case may set workloadSelector to narrow to the GPU worker — important for
+// Dynamo, whose graph-deployment selector also matches the GPU-less frontend/EPP
+// pod. If the broad selector were used, firstWorkloadPod's Items[0] could be the
+// frontend (which schedules instantly), making the capacity-SKIP path dead.
+func schedulingSelector(tc testCase) string {
+	if tc.workloadSelector != "" {
+		return tc.workloadSelector
 	}
+	return tc.podSelector
 }
 
-// firstWorkloadPod returns the first pod matching the case's podSelector.
-func firstWorkloadPod(t *testing.T, tc testCase) (podInfo, bool) {
+// firstWorkloadPod returns the first pod matching the case's scheduling
+// selector.
+func firstWorkloadPod(t *testing.T, tc testCase) (sched.PodInfo, bool) {
 	t.Helper()
 	out, err := e2eutil.KubectlMayFail(t, "get", "pods", "-n", tc.namespace,
-		"-l", tc.podSelector, "-o", "json")
+		"-l", schedulingSelector(tc), "-o", "json")
 	if err != nil {
-		return podInfo{}, false
+		return sched.PodInfo{}, false
 	}
 	var list struct {
 		Items []struct {
 			Status struct {
-				Phase      string `json:"phase"`
-				Conditions []struct {
-					Type    string `json:"type"`
-					Status  string `json:"status"`
-					Reason  string `json:"reason"`
-					Message string `json:"message"`
-				} `json:"conditions"`
+				Phase      string               `json:"phase"`
+				Conditions []sched.PodCondition `json:"conditions"`
 			} `json:"status"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		t.Logf("[%s] warning: could not parse pod list JSON: %v", tc.name, err)
-		return podInfo{}, false
+		return sched.PodInfo{}, false
 	}
 	if len(list.Items) == 0 {
-		return podInfo{}, false
+		return sched.PodInfo{}, false
 	}
 	it := list.Items[0]
-	return podInfo{phase: it.Status.Phase, conditions: it.Status.Conditions}, true
-}
-
-// unschedulableReason inspects a Pending pod's PodScheduled condition.
-//
-// It returns notScheduled=true only when there is an explicit
-// PodScheduled=False condition — i.e. the scheduler could not place the pod on
-// any node. A pod that is scheduled but still Pending (pulling its image,
-// initializing) has PodScheduled=True or no PodScheduled condition yet, so
-// notScheduled=false and the caller hands off to the Running wait. gpu reports
-// whether an unschedulable pod's reason names the GPU resource.
-func unschedulableReason(pod podInfo) (notScheduled, gpu bool) {
-	for _, c := range pod.conditions {
-		if c.Type == "PodScheduled" && c.Status == "False" {
-			return true, strings.Contains(c.Message, gpuResource)
-		}
-	}
-	return false, false
-}
-
-// podScheduledMessage returns the PodScheduled=False message for logging, or a
-// placeholder when none is present.
-func podScheduledMessage(pod podInfo) string {
-	for _, c := range pod.conditions {
-		if c.Type == "PodScheduled" && c.Status == "False" {
-			if c.Message != "" {
-				return c.Message
-			}
-			return c.Reason
-		}
-	}
-	return "no PodScheduled=False condition"
+	return sched.PodInfo{Phase: it.Status.Phase, Conditions: it.Status.Conditions}, true
 }
 
 // maxPodGPUDemand returns the largest single-pod GPU request the case's fixture
