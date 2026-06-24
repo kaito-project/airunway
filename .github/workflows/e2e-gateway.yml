@@ -46,8 +46,10 @@ jobs:
 
       - name: Install cloud-provider-kind
         run: |
-          # Pinned: v0.11.0+ requires Go 1.26, but this job pins Go 1.25 with
-          # GOTOOLCHAIN=local. v0.10.0 is the newest release that builds on Go 1.25.
+          # Pinned: cloud-provider-kind v0.11.0+ requires Go 1.26. This job runs
+          # Go 1.25, and actions/setup-go exports GOTOOLCHAIN=local (which forbids
+          # auto-downloading a newer toolchain), so `@latest` fails to install.
+          # v0.10.0 is the newest release that builds on Go 1.25.
           go install sigs.k8s.io/cloud-provider-kind@v0.10.0
           cloud-provider-kind &
           sleep 5
