@@ -473,8 +473,15 @@ export const settingsApi = {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
-  listProviders: () => request<{ providers: ProviderInfo[] }>('/settings/providers'),
-  getProvider: (id: string) => request<ProviderDetails>(`/settings/providers/${encodeURIComponent(id)}`),
+};
+
+// ============================================================================
+// Providers API
+// ============================================================================
+
+export const providersApi = {
+  list: () => request<{ providers: ProviderInfo[] }>('/providers'),
+  get: (id: string) => request<ProviderDetails>(`/providers/${encodeURIComponent(id)}`),
 };
 
 // ============================================================================

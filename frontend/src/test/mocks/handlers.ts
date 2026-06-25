@@ -138,11 +138,11 @@ export const handlers = [
     })
   }),
 
-  http.get(`${API_BASE}/settings/providers`, () => {
+  http.get(`${API_BASE}/providers`, () => {
     return HttpResponse.json({ providers: mockSettings.providers })
   }),
 
-  http.get(`${API_BASE}/settings/providers/:id`, ({ params }) => {
+  http.get(`${API_BASE}/providers/:id`, ({ params }) => {
     const runtimeEntry = mockSettings.providers.find(entry => entry.id === params.id)
     if (!runtimeEntry) {
       return HttpResponse.json({ error: { message: 'Runtime catalog entry not found' } }, { status: 404 })

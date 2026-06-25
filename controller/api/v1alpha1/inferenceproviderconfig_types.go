@@ -22,10 +22,28 @@ import (
 )
 
 const (
+	// AnnotationDisplayName is the annotation key for the provider display name.
+	AnnotationDisplayName = "airunway.ai/display-name"
+
+	// AnnotationDescription is the annotation key for the provider description.
+	AnnotationDescription = "airunway.ai/description"
+
+	// AnnotationDefaultNamespace is the annotation key for the provider default namespace.
+	AnnotationDefaultNamespace = "airunway.ai/default-namespace"
+
+	// AnnotationDocumentationURL is the canonical annotation key for the provider documentation URL.
+	AnnotationDocumentationURL = "airunway.ai/documentation-url"
+
+	// AnnotationCapabilities is the annotation key for provider capabilities metadata (JSON-encoded ProviderCapabilities).
+	AnnotationCapabilities = "airunway.ai/capabilities"
+
+	// AnnotationHealth is the annotation key for provider health probe metadata.
+	AnnotationHealth = "airunway.ai/health"
+
 	// AnnotationInstallation is the annotation key for provider installation metadata (JSON-encoded InstallationInfo).
 	AnnotationInstallation = "airunway.ai/installation"
 
-	// AnnotationDocumentation is the annotation key for the provider documentation URL.
+	// AnnotationDocumentation is the legacy annotation key for the provider documentation URL.
 	AnnotationDocumentation = "airunway.ai/documentation"
 )
 
@@ -215,6 +233,24 @@ type HelmChart struct {
 	// +optional
 	CreateNamespace bool `json:"createNamespace,omitempty"`
 
+	// skipCrds indicates whether Helm should skip installing CRDs from the chart.
+	// +optional
+	SkipCRDs bool `json:"skipCrds,omitempty"`
+
+	// fetchUrl is an optional URL to fetch the chart from before installation.
+	// When set, chart remains the local chart path or chart reference to install.
+	// +optional
+	FetchURL string `json:"fetchUrl,omitempty"`
+
+	// preCrdUrls are CRD manifest URLs to apply before installing this chart.
+	// +optional
+	PreCRDURLs []string `json:"preCrdUrls,omitempty"`
+
+	// preInstallMissingCrds indicates that missing CRDs should be applied from the
+	// chart before installing the chart itself.
+	// +optional
+	PreInstallMissingCRDs bool `json:"preInstallMissingCrds,omitempty"`
+
 	// values is a JSON object of Helm --set-json overrides.
 	// Each top-level key is the Helm values path to pass as the --set-json key,
 	// and each top-level value is the JSON payload for that path. This is not
@@ -280,14 +316,14 @@ type SelectionRule struct {
 	Priority int32 `json:"priority,omitempty"`
 }
 
-// InferenceProviderConfigSpec defines the desired state of InferenceProviderConfig
+// InferenceProviderConfigSpec defines the desired state of InferenceProviderConfig.
 type InferenceProviderConfigSpec struct {
-	// capabilities defines what this provider supports
+	// capabilities defines what this provider supports.
 	// +optional
 	Capabilities *ProviderCapabilities `json:"capabilities,omitempty"`
 
-	// selectionRules defines rules for auto-selecting this provider
-	// Conditions use CEL (Common Expression Language)
+	// selectionRules defines rules for auto-selecting this provider.
+	// Conditions use CEL (Common Expression Language).
 	// +optional
 	SelectionRules []SelectionRule `json:"selectionRules,omitempty"`
 }
@@ -334,7 +370,7 @@ type InferenceProviderConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the provider capabilities and selection rules
+	// spec defines provider capabilities and selection rules
 	// +optional
 	Spec InferenceProviderConfigSpec `json:"spec,omitempty"`
 
