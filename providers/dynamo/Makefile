@@ -9,10 +9,26 @@ IMAGE_OUTPUT_FLAG := $(if $(PUSH_ENABLED),--push,--load)
 include ../../versions.env
 export
 
-# Inject the build-time Dynamo runtime tag into the provider binary so it
-# tracks /versions.env automatically. The Go fallback in config.go only
-# applies when bypassing this Makefile (e.g. `go run`, `go test`).
-LDFLAGS := -X github.com/kaito-project/airunway/providers/dynamo.DynamoVersion=$(DYNAMO_VERSION)
+# Module path, resolved from go.mod so the -X target can never drift from a
+# hand-typed string (decision 2). Drives every -X below.
+MODULE := $(shell go list -m)
+
+# Reported shim version: a git stamp for local/CI builds, overridden by the
+# release workflow with the tag (SHIM_VERSION=v0.3.0). bin/provider is
+# gitignored, so building never dirties the tree. NOTE: `git status --porcelain`
+# counts *untracked* files as dirty on purpose — `go build` compiles untracked
+# .go files in the package dir, so untracked content can change the binary
+# (decision 5).
+GIT_SHA      := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_DIRTY    := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo '-dirty')
+SHIM_VERSION ?= dev-$(GIT_SHA)$(GIT_DIRTY)
+
+# Inject the build-time Dynamo runtime tag and the reported shim version into
+# the provider binary so they track /versions.env and the release tag
+# automatically. The Go fallbacks in config.go only apply when bypassing this
+# Makefile (e.g. `go run`, `go test`).
+LDFLAGS := -X $(MODULE).DynamoVersion=$(DYNAMO_VERSION)
+LDFLAGS += -X $(MODULE).shimVersion=$(SHIM_VERSION)
 
 .PHONY: build vet test docker-build deploy generate-deploy-manifests setup-dynamo setup-dynamo-mocker cleanup-dynamo test-e2e test-e2e-mocker verify-versions
 
@@ -39,7 +55,7 @@ build: verify-versions vet
 
 ## Build provider Docker image
 docker-build: verify-versions
-	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) --build-arg DYNAMO_VERSION=$(DYNAMO_VERSION) -f Dockerfile -t $(IMG) ../..
+	docker buildx build --platform $(PLATFORM) $(IMAGE_OUTPUT_FLAG) --build-arg DYNAMO_VERSION=$(DYNAMO_VERSION) --build-arg SHIM_VERSION=$(SHIM_VERSION) -f Dockerfile -t $(IMG) ../..
 	@echo "✅ Dynamo provider image built: $(IMG) ($(PLATFORM), $(if $(PUSH_ENABLED),pushed,loaded locally))"
 
 ## Deploy provider to the K8s cluster

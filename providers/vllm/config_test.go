@@ -1,6 +1,7 @@
 package vllm
 
 import (
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -80,6 +81,15 @@ func TestGetInstallationInfo(t *testing.T) {
 	}
 	if !foundLowercaseSecretCommand {
 		t.Error("expected lowercase vllm-hf-token secret command")
+	}
+}
+
+func TestProviderConstants(t *testing.T) {
+	if ProviderConfigName != "vllm" {
+		t.Errorf("expected provider config name 'vllm', got %s", ProviderConfigName)
+	}
+	if !strings.HasPrefix(ProviderVersion, "vllm-provider:") {
+		t.Errorf("expected provider version to start with 'vllm-provider:', got %s", ProviderVersion)
 	}
 }
 

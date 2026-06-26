@@ -45,5 +45,7 @@ jobs:
           tags: |
             ghcr.io/kaito-project/airunway/kaito-provider:${{ inputs.version }}
             ghcr.io/kaito-project/airunway/kaito-provider:latest
+          build-args: |
+            SHIM_VERSION=${{ inputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
