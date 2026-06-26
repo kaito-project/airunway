@@ -206,10 +206,12 @@ func (p *PortForwardSession) EnsureReady() {
 func PortForwardService(t *testing.T, service, namespace string, remotePort int) *PortForwardSession {
 	t.Helper()
 
-	// Pick a free local port. There is a small window between closing this
-	// listener and kubectl binding the port; the readiness poll in start()
-	// covers it (a lost race shows up as a failed dial, and EnsureReady can
-	// re-pick), so it is not a hard failure.
+	// Pick a free local port by binding :0, reading the assigned port, then
+	// closing the listener so kubectl can take it. start()'s readiness poll
+	// absorbs kubectl's own bind latency (up to 15s). There is a small window
+	// between the close here and kubectl binding the port; if another process
+	// actually steals it in that window, start() fails the test at the poll
+	// deadline — rare, and surfaced loudly rather than papered over.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("finding a free local port: %v", err)
