@@ -281,6 +281,7 @@ GAIE_VERSION_RE := $(subst .,\.,$(GAIE_VERSION))
 DYNAMO_VERSION_RE := $(subst .,\.,$(DYNAMO_VERSION))
 KAITO_VERSION_RE := $(subst .,\.,$(KAITO_VERSION))
 VLLM_VERSION_RE := $(subst .,\.,$(VLLM_VERSION))
+LLMD_VERSION_RE := $(subst .,\.,$(LLMD_VERSION))
 
 verify-versions:
 	@# 1. controller/go.mod must pin GAIE_VERSION
@@ -301,7 +302,10 @@ verify-versions:
 	@# 6. providers/vllm/transformer.go fallback literal must match VLLM_VERSION
 	@grep -qE '^var VLLMVersion = "$(VLLM_VERSION_RE)"$$' providers/vllm/transformer.go || \
 	  { echo "❌ providers/vllm/transformer.go VLLMVersion fallback != $(VLLM_VERSION) (from versions.env)"; exit 1; }
-	@# 7. generated TS must be in sync with versions.env.
+	@# 7. providers/llmd/config.go fallback literal must match LLMD_VERSION
+	@grep -qE '^var LLMDSchedulerImage = "ghcr\.io/llm-d/llm-d-inference-scheduler:v$(LLMD_VERSION_RE)"$$' providers/llmd/config.go || \
+	  { echo "❌ providers/llmd/config.go LLMDSchedulerImage tag != $(LLMD_VERSION) (from versions.env)"; exit 1; }
+	@# 8. generated TS must be in sync with versions.env.
 	@#    Generate to a temp file and diff against the working-tree copy so
 	@#    that synced uncommitted edits pass (the local-dev case) while
 	@#    stale committed files still fail (the CI case — CI's working

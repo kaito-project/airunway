@@ -357,6 +357,22 @@ func (t *Transformer) buildVLLMArgs(md *airunwayv1alpha1.ModelDeployment, kvTran
 		args = append(args, "--trust-remote-code")
 	}
 
+	// Prefix caching. vLLM's prefix caching helps the EPP get real cache hits
+	// when the llm-d Router routes requests to a pod that has previously seen
+	// a similar prompt. Defaults to true via the CRD; explicitly map both
+	// states so an override of false produces --no-enable-prefix-caching.
+	if md.Spec.Engine.EnablePrefixCaching {
+		args = append(args, "--enable-prefix-caching")
+	} else {
+		args = append(args, "--no-enable-prefix-caching")
+	}
+
+	// Eager execution (disables CUDA graphs). Off by default; only emit the
+	// flag when explicitly requested.
+	if md.Spec.Engine.EnforceEager {
+		args = append(args, "--enforce-eager")
+	}
+
 	// Tensor parallelism from GPU count
 	tpCount := gpuCount
 	if tpCount == 0 && md.Spec.Resources != nil && md.Spec.Resources.GPU != nil {

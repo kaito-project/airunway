@@ -21,6 +21,7 @@ DYNAMO_CONFIG="providers/dynamo/config.go"
 GATEWAY_DETECTION="controller/internal/gateway/detection.go"
 KAITO_CONFIG="providers/kaito/config.go"
 VLLM_TRANSFORMER="providers/vllm/transformer.go"
+LLMD_CONFIG="providers/llmd/config.go"
 VERSIONS_TS="shared/types/versions.generated.ts"
 
 BACKUPS=(
@@ -29,6 +30,7 @@ BACKUPS=(
     "${GATEWAY_DETECTION}.bak"
     "${KAITO_CONFIG}.bak"
     "${VLLM_TRANSFORMER}.bak"
+    "${LLMD_CONFIG}.bak"
     "${VERSIONS_TS}.bak"
 )
 
@@ -87,6 +89,11 @@ echo "== Mutating ${VLLM_TRANSFORMER} =="
 sed -i.bak -E 's|^var VLLMVersion = "[^"]*"$|var VLLMVersion = "0.0.0-bogus"|' "${VLLM_TRANSFORMER}"
 expect_fail "${VLLM_TRANSFORMER}"
 mv -f "${VLLM_TRANSFORMER}.bak" "${VLLM_TRANSFORMER}"
+
+echo "== Mutating ${LLMD_CONFIG} =="
+sed -i.bak -E 's|^var LLMDSchedulerImage = "[^"]*"$|var LLMDSchedulerImage = "ghcr.io/llm-d/llm-d-inference-scheduler:v0.0.0-bogus"|' "${LLMD_CONFIG}"
+expect_fail "${LLMD_CONFIG}"
+mv -f "${LLMD_CONFIG}.bak" "${LLMD_CONFIG}"
 
 echo "== Mutating ${VERSIONS_TS} =="
 # Now that verify-versions diffs a temp regen against the working-tree
