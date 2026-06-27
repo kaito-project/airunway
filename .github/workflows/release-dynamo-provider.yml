@@ -55,5 +55,6 @@ jobs:
             ghcr.io/kaito-project/airunway/dynamo-provider:latest
           build-args: |
             DYNAMO_VERSION=${{ env.DYNAMO_VERSION }}
+            SHIM_VERSION=${{ inputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

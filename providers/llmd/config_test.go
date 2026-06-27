@@ -2,6 +2,7 @@ package llmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -93,6 +94,15 @@ func TestGetInstallationInfo(t *testing.T) {
 	}
 	if len(info.Steps) == 0 {
 		t.Error("expected installation steps")
+	}
+}
+
+func TestProviderConstants(t *testing.T) {
+	if ProviderConfigName != "llmd" {
+		t.Errorf("expected provider config name 'llmd', got %s", ProviderConfigName)
+	}
+	if !strings.HasPrefix(ProviderVersion, "llmd-provider:") {
+		t.Errorf("expected provider version to start with 'llmd-provider:', got %s", ProviderVersion)
 	}
 }
 

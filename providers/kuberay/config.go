@@ -37,9 +37,6 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for KubeRay
 	ProviderConfigName = "kuberay"
 
-	// ProviderVersion is the version of the KubeRay provider
-	ProviderVersion = "kuberay-provider:v0.1.0"
-
 	// ProviderDocumentation is the documentation URL for the KubeRay provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/kuberay.md"
 
@@ -48,6 +45,19 @@ const (
 
 	rayServiceResource = "rayservices"
 )
+
+// shimVersion is this shim's reported version tag, injected at build time via:
+//
+//	-ldflags "-X $(go list -m).shimVersion=$(SHIM_VERSION)"
+//
+// The Makefile supplies a release tag (e.g. "v0.3.0") or a git stamp
+// ("dev-<sha>" / "dev-<sha>-dirty"). The "dev" literal below is the last-resort
+// fallback for bare `go build`/`go run`/`go test` that bypass the Makefile.
+var shimVersion = "dev"
+
+// ProviderVersion is the reported version of this shim (e.g.
+// "kuberay-provider:v0.3.0"), written to InferenceProviderConfig.status.version.
+var ProviderVersion = ProviderConfigName + "-provider:" + shimVersion
 
 // ProviderConfigManager handles registration and heartbeat for the KubeRay provider
 type ProviderConfigManager struct {
