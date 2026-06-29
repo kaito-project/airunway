@@ -35,9 +35,6 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for llm-d
 	ProviderConfigName = "llmd"
 
-	// ProviderVersion is the version of the llm-d provider
-	ProviderVersion = "llmd-provider:v0.1.0"
-
 	// ProviderDocumentation is the documentation URL for the llm-d provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/llmd.md"
 
@@ -74,6 +71,19 @@ schedulingProfiles:
 // (see providers/llmd/Makefile). The string literal below is a fallback for
 // `go run` / `go test` invocations that bypass the Makefile.
 var LLMDSchedulerImage = "ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0"
+
+// shimVersion is this shim's reported version tag, injected at build time via:
+//
+//	-ldflags "-X $(go list -m).shimVersion=$(SHIM_VERSION)"
+//
+// The Makefile supplies a release tag (e.g. "v0.3.0") or a git stamp
+// ("dev-<sha>" / "dev-<sha>-dirty"). The "dev" literal below is the last-resort
+// fallback for bare `go build`/`go run`/`go test` that bypass the Makefile.
+var shimVersion = "dev"
+
+// ProviderVersion is the reported version of this shim (e.g.
+// "llmd-provider:v0.3.0"), written to InferenceProviderConfig.status.version.
+var ProviderVersion = ProviderConfigName + "-provider:" + shimVersion
 
 // ProviderConfigManager handles registration and heartbeat for the llm-d provider
 type ProviderConfigManager struct {

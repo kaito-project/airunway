@@ -1,6 +1,6 @@
 # Temporary — providers will be moved out-of-tree.
-# Remove this workflow once llm-d provider has its own repository and CI.
-name: Release llm-d Provider
+# Remove this workflow once vLLM provider has its own repository and CI.
+name: Release vLLM Provider
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and Push llm-d Provider Image
+    name: Build and Push vLLM Provider Image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -41,20 +41,20 @@ jobs:
           # shellcheck disable=SC1091
           . ./versions.env
           set +a
-          echo "LLMD_VERSION=$LLMD_VERSION" >> "$GITHUB_ENV"
+          echo "VLLM_VERSION=$VLLM_VERSION" >> "$GITHUB_ENV"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
-          file: providers/llmd/Dockerfile
+          file: providers/vllm/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/kaito-project/airunway/llmd-provider:${{ inputs.version }}
-            ghcr.io/kaito-project/airunway/llmd-provider:latest
+            ghcr.io/kaito-project/airunway/vllm-provider:${{ inputs.version }}
+            ghcr.io/kaito-project/airunway/vllm-provider:latest
           build-args: |
-            LLMD_VERSION=${{ env.LLMD_VERSION }}
+            VLLM_VERSION=${{ env.VLLM_VERSION }}
             SHIM_VERSION=${{ inputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

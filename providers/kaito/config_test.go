@@ -3,6 +3,7 @@ package kaito
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -115,8 +116,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "kaito" {
 		t.Errorf("expected provider config name 'kaito', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "kaito-provider:v0.1.0" {
-		t.Errorf("expected provider version 'kaito-provider:v0.1.0', got %s", ProviderVersion)
+	if !strings.HasPrefix(ProviderVersion, "kaito-provider:") {
+		t.Errorf("expected provider version to start with 'kaito-provider:', got %s", ProviderVersion)
 	}
 }
 
