@@ -115,14 +115,20 @@ func GetProviderConfigSpec() airunwayv1alpha1.InferenceProviderConfigSpec {
 						airunwayv1alpha1.APIFormatOpenAIResponses,
 						airunwayv1alpha1.APIFormatAnthropicMessages,
 					},
-				GPUSupport:  true,
-				RequiresCRD: &requiresCRD,
-				Gateway: &airunwayv1alpha1.GatewayCapabilities{
-					EndpointPicker: &airunwayv1alpha1.EndpointPickerCapabilities{
-						Image:      LLMDSchedulerImage,
-						ConfigData: LLMDSchedulerDefaultConfig,
+					GPUSupport:  true,
+					RequiresCRD: &requiresCRD,
+					Gateway: &airunwayv1alpha1.GatewayCapabilities{
+						// llm-d does not delegate InferencePool creation to its own
+						// operator. Instead it provides a custom EPP image (the llm-d
+						// Router Endpoint Picker) with llm-d-specific scoring plugins.
+						// The controller still creates the InferencePool and EPP
+						// scaffolding; only the EPP image and plugin config come from
+						// the provider.
+						EndpointPicker: &airunwayv1alpha1.EndpointPickerCapabilities{
+							Image:      LLMDSchedulerImage,
+							ConfigData: LLMDSchedulerDefaultConfig,
+						},
 					},
-				},
 				},
 			},
 		},
