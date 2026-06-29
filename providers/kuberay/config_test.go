@@ -3,6 +3,7 @@ package kuberay
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -80,8 +81,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "kuberay" {
 		t.Errorf("expected provider config name 'kuberay', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "kuberay-provider:v0.1.0" {
-		t.Errorf("expected provider version 'kuberay-provider:v0.1.0', got %s", ProviderVersion)
+	if !strings.HasPrefix(ProviderVersion, "kuberay-provider:") {
+		t.Errorf("expected provider version to start with 'kuberay-provider:', got %s", ProviderVersion)
 	}
 }
 

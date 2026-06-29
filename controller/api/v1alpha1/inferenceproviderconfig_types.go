@@ -93,6 +93,27 @@ type ProviderCapabilities struct {
 }
 
 // GatewayCapabilities defines gateway-related capabilities for a specific engine.
+//
+// There are two independent extension points:
+//
+//  1. Full InferencePool + EPP delegation. When ManagesInferencePool is true,
+//     the controller assumes the provider's upstream operator creates both the
+//     InferencePool and the Endpoint Picker (EPP) downstream (e.g. NVIDIA Dynamo
+//     creates them from a DynamoGraphDeployment). The controller waits for the
+//     named pool, reads its EndpointPickerRef, and wires HTTPRoute/ReferenceGrant
+//     accordingly. The controller does not create an InferencePool or EPP itself.
+//
+//  2. Endpoint Picker customization. When EndpointPicker is set, the controller
+//     still creates the default InferencePool and manages the EPP & scaffolding
+//     (ServiceAccount, Role, RoleBinding, ConfigMap, Deployment, Service), but
+//     substitutes the provider-supplied EPP image and plugin config. This lets a
+//     provider ship its own scheduler (e.g. the llm-d Endpoint Picker with its
+//     own scoring plugins) without re-implementing the surrounding RBAC and
+//     plumbing.
+//
+// The two extension points can be specified independently, but
+// ManagesInferencePool takes precedence: when it is true, EndpointPicker is
+// ignored (the provider is then expected to manage the EPP itself).
 type GatewayCapabilities struct {
 	// managesInferencePool indicates that the provider's operator creates and
 	// owns the GAIE InferencePool (and EPP) for ModelDeployments using this
@@ -117,6 +138,13 @@ type GatewayCapabilities struct {
 	// +optional
 	InferencePoolNamespace string `json:"inferencePoolNamespace,omitempty"`
 
+	// endpointPicker, when set, customizes the EPP image and plugin
+	// configuration that the controller deploys alongside the default
+	// InferencePool. Ignored when ManagesInferencePool is true (the provider
+	// is then expected to manage the EPP itself).
+	// +optional
+	EndpointPicker *EndpointPickerCapabilities `json:"endpointPicker,omitempty"`
+
 	// ignoresServedName indicates that gateway routing for this provider+engine
 	// pair does not honor spec.model.servedName, so the controller should fall
 	// back to auto-discovery / spec.model.id when computing the route model
@@ -124,6 +152,24 @@ type GatewayCapabilities struct {
 	// expose the OpenAI-style served name (e.g. KAITO's llama.cpp deployment).
 	// +optional
 	IgnoresServedName bool `json:"ignoresServedName,omitempty"`
+}
+
+// EndpointPickerCapabilities lets a provider override the EPP image and plugin
+// configuration used by the controller-managed Endpoint Picker. All other EPP
+// resources (ServiceAccount, Role, RoleBinding, ConfigMap, Deployment, Service)
+// are still created by the controller using the same shape as the default EPP.
+type EndpointPickerCapabilities struct {
+	// image is the container image for the EPP. When empty, the controller
+	// uses its built-in default GAIE EPP image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// configData is the raw YAML body of the EndpointPickerConfig that will be
+	// written into the EPP ConfigMap under the key "default-plugins.yaml" and
+	// mounted at /config/default-plugins.yaml. When empty, the controller's
+	// default (empty) EndpointPickerConfig is used.
+	// +optional
+	ConfigData string `json:"configData,omitempty"`
 }
 
 // HasEngine returns true if the provider supports the given engine type

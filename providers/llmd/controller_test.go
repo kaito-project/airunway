@@ -242,7 +242,6 @@ func TestReconcileIgnoresOtherProviders(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-model"},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -267,7 +266,6 @@ func TestReconcileIgnoresNoProvider(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-model"},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

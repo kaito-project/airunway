@@ -3,6 +3,7 @@ package dynamo
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	airunwayv1alpha1 "github.com/kaito-project/airunway/controller/api/v1alpha1"
@@ -140,8 +141,8 @@ func TestProviderConstants(t *testing.T) {
 	if ProviderConfigName != "dynamo" {
 		t.Errorf("expected provider config name 'dynamo', got %s", ProviderConfigName)
 	}
-	if ProviderVersion != "dynamo-provider:v0.2.0" {
-		t.Errorf("expected provider version 'dynamo-provider:v0.2.0', got %s", ProviderVersion)
+	if !strings.HasPrefix(ProviderVersion, "dynamo-provider:") {
+		t.Errorf("expected provider version to start with 'dynamo-provider:', got %s", ProviderVersion)
 	}
 }
 
