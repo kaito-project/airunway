@@ -36,15 +36,25 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for KAITO
 	ProviderConfigName = "kaito"
 
-	// ProviderVersion is the version of the KAITO provider
-	ProviderVersion = "kaito-provider:v0.1.0"
-
 	// ProviderDocumentation is the documentation URL for the KAITO provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/kaito.md"
 
 	// HeartbeatInterval is the interval for updating the provider heartbeat
 	HeartbeatInterval = 1 * time.Minute
 )
+
+// shimVersion is this shim's reported version tag, injected at build time via:
+//
+//	-ldflags "-X $(go list -m).shimVersion=$(SHIM_VERSION)"
+//
+// The Makefile supplies a release tag (e.g. "v0.3.0") or a git stamp
+// ("dev-<sha>" / "dev-<sha>-dirty"). The "dev" literal below is the last-resort
+// fallback for bare `go build`/`go run`/`go test` that bypass the Makefile.
+var shimVersion = "dev"
+
+// ProviderVersion is the reported version of this shim (e.g.
+// "kaito-provider:v0.3.0"), written to InferenceProviderConfig.status.version.
+var ProviderVersion = ProviderConfigName + "-provider:" + shimVersion
 
 // ProviderConfigManager handles registration and heartbeat for the KAITO provider
 type ProviderConfigManager struct {
@@ -291,12 +301,49 @@ func boolToConditionStatus(b bool) metav1.ConditionStatus {
 }
 
 func buildAnnotations() (map[string]string, error) {
-	installJSON, err := json.Marshal(GetInstallationInfo())
+	installation := GetInstallationInfo()
+	health := map[string]interface{}{
+		"crds": []map[string]string{
+			{"name": "workspaces.kaito.sh", "displayName": "KAITO workspace CRD"},
+		},
+		"operatorPods": []map[string]interface{}{
+			{
+				"namespace": "kaito-workspace",
+				"selectors": []string{
+					"app.kubernetes.io/name=workspace,app.kubernetes.io/instance=kaito-workspace",
+					"app.kubernetes.io/name=workspace",
+				},
+			},
+			{
+				"selectors": []string{
+					"app.kubernetes.io/name=workspace",
+					"app=ai-toolchain-operator",
+				},
+			},
+		},
+	}
+
+	installJSON, err := json.Marshal(installation)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal installation info: %w", err)
 	}
+	capabilitiesJSON, err := json.Marshal(GetProviderConfigSpec().Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal capabilities: %w", err)
+	}
+	healthJSON, err := json.Marshal(health)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal health info: %w", err)
+	}
+
 	return map[string]string{
-		airunwayv1alpha1.AnnotationInstallation:  string(installJSON),
-		airunwayv1alpha1.AnnotationDocumentation: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationDisplayName:      "KAITO",
+		airunwayv1alpha1.AnnotationDescription:      installation.Description,
+		airunwayv1alpha1.AnnotationDefaultNamespace: installation.DefaultNamespace,
+		airunwayv1alpha1.AnnotationDocumentationURL: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationCapabilities:     string(capabilitiesJSON),
+		airunwayv1alpha1.AnnotationHealth:           string(healthJSON),
+		airunwayv1alpha1.AnnotationInstallation:     string(installJSON),
+		airunwayv1alpha1.AnnotationDocumentation:    ProviderDocumentation,
 	}, nil
 }

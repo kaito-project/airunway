@@ -212,6 +212,20 @@ Replace `provider.name` with your gateway implementation (`istio`, `gke`, or omi
 
 See the [upstream multi-model guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/serving-multiple-inference-pools-latest/) for full details.
 
+> **Known limitation — BBR restart on each new model.** BBR builds its model
+> registry only at startup and does not dynamically watch InferencePools, so the
+> controller triggers a rolling restart of the shared BBR Deployment once per new
+> `ModelDeployment` (tracked by the `airunway.ai/bbr-restarted` annotation). The
+> restart is **not zero-downtime**: while BBR is restarting, its registry is
+> incomplete, so an in-flight request for an *already-serving* model can miss its
+> `X-Gateway-Model-Name` header and mis-route to another model's InferencePool.
+> With disaggregated Dynamo serving this surfaces as a `Worker ID required
+> (--direct-route)` 500 on a concurrent aggregated request. This mainly affects
+> deploying multiple models close together; once all models are settled, routing
+> is correct and stable. A zero-downtime BBR reload (or a BBR that watches
+> InferencePools) would remove the window. The GPU e2e suite leaves
+> disaggregated serving out of its default matrix for this reason.
+
 ### Auto-detection with Multiple Gateways
 
 When no explicit gateway is configured and multiple Gateway resources exist in the cluster, the controller looks for one labeled with:
@@ -264,7 +278,12 @@ spec:
 
 Some inference providers (e.g., NVIDIA Dynamo, llm-d) have native Gateway API Inference Extension support with their own InferencePool and Endpoint Picker (EPP). These providers deploy specialized EPPs with capabilities beyond the generic upstream EPP — for example, Dynamo's EPP uses **KV-cache-aware scoring** to route requests to endpoints with the highest KV cache hit probability.
 
-When a provider declares gateway capabilities in its `InferenceProviderConfig`, the controller **delegates** InferencePool and/or EPP management to the provider instead of creating its own.
+When a provider declares gateway capabilities in its `InferenceProviderConfig`, the controller adapts what it creates. Two extension points exist:
+
+1. **Full delegation** (`managesInferencePool: true`): the provider owns both the InferencePool and the EPP. The controller skips creating either and only wires the HTTPRoute. Used by Dynamo.
+2. **EPP customization** (`endpointPicker: { image, configData }`): the controller still creates the InferencePool, EPP & scaffolding, but substitutes the provider's EPP image and plugin configuration. Used by llm-d.
+
+`endpointPicker` is ignored when `managesInferencePool: true` — full delegation supersedes any EPP override.
 
 ### How It Works
 
@@ -295,12 +314,12 @@ spec:
           inferencePoolNamespace: "{namespace}"
 ```
 
-The controller adapts its reconciliation based on these flags:
+The controller adapts its reconciliation based on these fields:
 
-| Flag | `true` (provider-managed) | `false` / absent (controller-managed) |
+| Field | When set | When unset / absent |
 |---|---|---|
-| `managesInferencePool` | Controller waits for the provider's InferencePool to exist, then uses it as the HTTPRoute backend. Skips `reconcileInferencePool()` and `labelModelPods()`. | Controller creates and owns the InferencePool (default behavior). |
-| `managesEPP` | Controller does nothing. | Controller deploys the generic upstream EPP. |
+| `managesInferencePool` | When set to `true`, controller waits for the provider's InferencePool to exist, then uses it as the HTTPRoute backend. Skips `reconcileInferencePool()`, `reconcileEPP()`, and `labelModelPods()`. | Controller creates and owns the InferencePool and the EPP (default behavior). |
+| `endpointPicker.image` / `endpointPicker.configData` | Controller still creates the InferencePool and EPP Deployment/Service, but the EPP container uses the provider's image and the EPP ConfigMap carries `configData` as `default-plugins.yaml`. | Controller deploys the generic upstream GAIE EPP image with an empty plugin config. |
 
 The HTTPRoute is **always** managed by the controller regardless of provider capabilities.
 
@@ -344,6 +363,45 @@ The Dynamo provider registers full gateway capabilities. When a ModelDeployment 
 2. The Dynamo operator creates an InferencePool pointing at its managed EPP
 3. The AIRunway controller detects the provider's gateway capabilities, waits for the InferencePool, creates the ReferenceGrant and HTTPRoute
 4. Requests are routed through Dynamo's intelligent EPP instead of the generic EPP since that EPP creation has been skipped.
+
+### llm-d Provider Gateway Support
+
+The llm-d provider takes the EPP-customization path: the controller still owns the InferencePool and the EPP Deployment/Service, but uses llm-d's scheduler image and plugin chain. The provider declares only `endpointPicker` on the vLLM engine — `managesInferencePool` stays `false`:
+
+```yaml
+apiVersion: airunway.ai/v1alpha1
+kind: InferenceProviderConfig
+metadata:
+  name: llmd
+spec:
+  capabilities:
+    engines:
+      - name: vllm
+        gateway:
+          endpointPicker:
+            image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+            configData: |
+              apiVersion: inference.networking.x-k8s.io/v1alpha1
+              kind: EndpointPickerConfig
+              plugins:
+              - type: prefix-cache-scorer
+              - type: decode-filter
+              - type: max-score-picker
+              - type: single-profile-handler
+              schedulingProfiles:
+              - name: default
+                plugins:
+                - pluginRef: decode-filter
+                - pluginRef: max-score-picker
+                - pluginRef: prefix-cache-scorer
+                  weight: 2
+```
+
+When a ModelDeployment uses llm-d with gateway enabled:
+
+1. The llm-d provider creates the model server Deployment + Service in the ModelDeployment's namespace
+2. The AIRunway controller creates the InferencePool, the EPP Deployment + Service (using the llm-d image), the EPP ConfigMap (containing `configData` as `default-plugins.yaml`), and the HTTPRoute
+3. Requests are routed through the llm-d scheduler's plugin chain (prefix-cache-aware scoring, decode-filter, max-score-picker) instead of the generic EPP defaults
 
 ### Model Name Resolution
 

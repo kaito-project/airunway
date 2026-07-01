@@ -38,9 +38,6 @@ const (
 	// ProviderConfigName is the name of the InferenceProviderConfig for Dynamo
 	ProviderConfigName = "dynamo"
 
-	// ProviderVersion is the version of the AIRunway Dynamo provider controller.
-	ProviderVersion = "dynamo-provider:v0.2.0"
-
 	// ProviderDocumentation is the documentation URL for the Dynamo provider
 	ProviderDocumentation = "https://github.com/kaito-project/airunway/tree/main/docs/providers/dynamo.md"
 
@@ -50,6 +47,19 @@ const (
 	dynamoPlatformValuesJSON      = `{"global.grove.install":true}`
 	dynamoGraphDeploymentResource = "dynamographdeployments"
 )
+
+// shimVersion is this shim's reported version tag, injected at build time via:
+//
+//	-ldflags "-X $(go list -m).shimVersion=$(SHIM_VERSION)"
+//
+// The Makefile supplies a release tag (e.g. "v0.3.0") or a git stamp
+// ("dev-<sha>" / "dev-<sha>-dirty"). The "dev" literal below is the last-resort
+// fallback for bare `go build`/`go run`/`go test` that bypass the Makefile.
+var shimVersion = "dev"
+
+// ProviderVersion is the reported version of this shim (e.g.
+// "dynamo-provider:v0.3.0"), written to InferenceProviderConfig.status.version.
+var ProviderVersion = ProviderConfigName + "-provider:" + shimVersion
 
 // DynamoVersion is the upstream Dynamo platform chart and runtime image tag.
 //
@@ -318,12 +328,47 @@ func (m *ProviderConfigManager) Unregister(ctx context.Context) error {
 }
 
 func buildAnnotations() (map[string]string, error) {
-	installJSON, err := json.Marshal(GetInstallationInfo())
+	installation := GetInstallationInfo()
+	health := map[string]interface{}{
+		"crds": []map[string]string{
+			{"name": "dynamographdeployments.nvidia.com", "displayName": "DynamoGraphDeployment CRD"},
+		},
+		"operatorPods": []map[string]interface{}{
+			{
+				"namespace": "dynamo-system",
+				"selectors": []string{
+					"control-plane=controller-manager,app.kubernetes.io/name=dynamo-operator,app.kubernetes.io/instance=dynamo-platform",
+					"app.kubernetes.io/name=dynamo-operator",
+					"control-plane=controller-manager",
+				},
+			},
+			{
+				"selectors": []string{"app.kubernetes.io/name=dynamo-operator"},
+			},
+		},
+	}
+
+	installJSON, err := json.Marshal(installation)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal installation info: %w", err)
 	}
+	capabilitiesJSON, err := json.Marshal(GetProviderConfigSpec().Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal capabilities: %w", err)
+	}
+	healthJSON, err := json.Marshal(health)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal health info: %w", err)
+	}
+
 	return map[string]string{
-		airunwayv1alpha1.AnnotationInstallation:  string(installJSON),
-		airunwayv1alpha1.AnnotationDocumentation: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationDisplayName:      "Dynamo",
+		airunwayv1alpha1.AnnotationDescription:      installation.Description,
+		airunwayv1alpha1.AnnotationDefaultNamespace: installation.DefaultNamespace,
+		airunwayv1alpha1.AnnotationDocumentationURL: ProviderDocumentation,
+		airunwayv1alpha1.AnnotationCapabilities:     string(capabilitiesJSON),
+		airunwayv1alpha1.AnnotationHealth:           string(healthJSON),
+		airunwayv1alpha1.AnnotationInstallation:     string(installJSON),
+		airunwayv1alpha1.AnnotationDocumentation:    ProviderDocumentation,
 	}, nil
 }
